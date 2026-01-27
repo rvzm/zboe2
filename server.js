@@ -11,6 +11,27 @@ const __dirname = path.dirname(__filename);
 
 // ----- SQLite statements -----
 const stmtUserByName = db.prepare(`SELECT id, username, pass_salt, pass_hash FROM users WHERE username = ?`);
+const stmtUserIdByName = db.prepare(`SELECT id, username FROM users WHERE username = ?`);
+const stmtPlayerByUserId = db.prepare(`SELECT * FROM players WHERE user_id = ?`);
+const stmtLeaderboard = db.prepare(`
+  SELECT users.username AS user, players.xp
+  FROM players
+  JOIN users ON users.id = players.user_id
+  ORDER BY players.xp DESC, users.username ASC
+  LIMIT ?
+`);
+const stmtRecentEvents = db.prepare(`
+  SELECT ts, type, msg
+  FROM events
+  ORDER BY ts DESC
+  LIMIT ?
+`);
+const stmtEventCounts = db.prepare(`
+  SELECT type, COUNT(*) AS count
+  FROM events
+  GROUP BY type
+`);
+const stmtEventTotal = db.prepare(`SELECT COUNT(*) AS total FROM events`);
 const stmtInsertUser = db.prepare(`
   INSERT INTO users (username, pass_salt, pass_hash, created_at)
   VALUES (?, ?, ?, ?)
@@ -60,12 +81,22 @@ app.use(cookieParser());
 // Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
 
+function ensurePlayer(userId) {
+  let player = stmtPlayerByUserId.get(userId);
+  if (!player) {
+    stmtInsertPlayer.run(userId, Date.now());
+    player = stmtPlayerByUserId.get(userId);
+  }
+  return player;
+}
+
 function requireAuth(req, res, next) {
   const sess = getSession(req);
-  const stmtUserIdByName = db.prepare(`SELECT id, username FROM users WHERE username = ?`);
-  const stmtPlayerByUserId = db.prepare(`SELECT * FROM players WHERE user_id = ?`);
   if (!sess?.u) return res.redirect("/login.html?err=Please%20login");
-  req.user = sess.u;
+  const user = stmtUserIdByName.get(sess.u);
+  if (!user) return res.redirect("/login.html?err=Please%20login");
+  req.user = user.username;
+  req.userId = user.id;
   next();
 }
 
@@ -132,6 +163,46 @@ app.post("/logout", (req, res) => {
 
 app.get("/game", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "game.html"));
+});
+
+app.get("/api/game-state", requireAuth, (req, res) => {
+  const player = ensurePlayer(req.userId);
+  const leaderboard = stmtLeaderboard.all(10);
+  const recentEvents = stmtRecentEvents.all(80).reverse();
+  const countRows = stmtEventCounts.all();
+  const eventCounts = countRows.reduce((acc, row) => {
+    acc[row.type] = row.count;
+    return acc;
+  }, {});
+  const totalEvents = stmtEventTotal.get()?.total ?? 0;
+  const triggerOutOf = 15;
+  const triggerValue = totalEvents % triggerOutOf;
+  const zombies = Math.max(0, (eventCounts.spawn || 0) - (eventCounts.kill || 0));
+  const lastEvent = recentEvents.at(-1);
+  const tickMinutes = Number.parseInt(process.env.HUNT_TICK_MINUTES || "5", 10);
+
+  res.json({
+    huntActive: totalEvents > 0,
+    horde: lastEvent?.type === "horde",
+    zombies,
+    tickMinutes: Number.isNaN(tickMinutes) ? 5 : tickMinutes,
+    trigger: { value: triggerValue, outOf: triggerOutOf },
+    online: [req.user],
+    leaderboard,
+    me: {
+      user: req.user,
+      xp: player.xp,
+      kills: player.kills,
+      ammo: player.ammo,
+      maxAmmo: player.max_ammo,
+      clips: player.clips,
+      maxClips: player.max_clips,
+      acc: player.accuracy,
+      cond: player.condition,
+      jammed: Boolean(player.jammed),
+    },
+    events: recentEvents,
+  });
 });
 
 const PORT = process.env.PORT || 3000;

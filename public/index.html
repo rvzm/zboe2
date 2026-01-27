@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZBOE — Global Hunt</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    body {
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(13,110,253,.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(25,135,84,.12), transparent 60%),
+                  #0b0f14;
+      min-height: 100vh;
+    }
+    .muted-mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      color: rgba(255,255,255,.65);
+      font-size: .9rem;
+    }
+    .soft-card {
+      background: rgba(255,255,255,.03);
+      border-color: rgba(255,255,255,.12);
+    }
+    .soft-card .card-header {
+      background: rgba(255,255,255,.04);
+      border-color: rgba(255,255,255,.12);
+    }
+    .leaderboard {
+      max-height: 520px;
+      overflow: auto;
+    }
+  </style>
+</head>
+
+<body class="text-light">
+  <nav class="navbar navbar-expand-lg navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
+    <div class="container py-2">
+      <a class="navbar-brand fw-semibold" href="/">
+        🧟 ZBOE <span class="opacity-75">Global Hunt</span>
+      </a>
+
+      <div class="d-flex gap-2 align-items-center">
+        <span class="badge rounded-pill text-bg-success">Public</span>
+        <a class="btn btn-sm btn-success" href="/login">Login</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="row g-3">
+      <!-- Left: Hero / Info -->
+      <div class="col-lg-5">
+        <div class="card soft-card shadow">
+          <div class="card-header">
+            <div class="fw-semibold">Welcome to the Hunt</div>
+            <div class="muted-mono">One global channel • Live events • Shoot / reload / jam / shop</div>
+          </div>
+          <div class="card-body">
+            <p class="mb-2">
+              ZBOE is a lightweight web re-imagining of a classic IRC zombie hunt game.
+            </p>
+            <p class="muted-mono mb-3">
+              Want in? Log in and you’ll be dropped directly into the live global feed.
+            </p>
+
+            <div class="d-grid gap-2">
+              <a class="btn btn-success" href="/login">Login to Play</a>
+              <a class="btn btn-outline-info" href="/register">Create Account</a>
+            </div>
+
+            <hr style="border-color: rgba(255,255,255,.12)">
+
+            <div class="muted-mono">
+              Tip: You can browse the leaderboard without logging in.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Leaderboard -->
+      <div class="col-lg-7">
+        <div class="card soft-card shadow">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div>
+              <div class="fw-semibold">XP Leaderboard</div>
+              <div class="muted-mono">Top survivors across the global hunt</div>
+            </div>
+            <span class="badge text-bg-primary" id="lbCount">—</span>
+          </div>
+
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush leaderboard" id="leaderboard">
+              <!-- Filled by JS -->
+            </div>
+          </div>
+
+          <div class="card-footer d-flex justify-content-between align-items-center">
+            <span class="muted-mono" id="lbUpdated">Updated: —</span>
+            <button class="btn btn-sm btn-outline-primary" id="btnRefresh">Refresh</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // MVP: mock leaderboard.
+    // Later: replace fetchMockLeaderboard() with fetch("/api/leaderboard")
+    async function fetchMockLeaderboard() {
+      return [
+        { user: "alex", xp: 450 },
+        { user: "rvzm", xp: 120 },
+        { user: "charlie", xp: 80 },
+        { user: "bot42", xp: 20 }
+      ];
+    }
+
+    function escapeHtml(s){
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function renderLeaderboard(rows){
+      const el = document.getElementById("leaderboard");
+      el.innerHTML = "";
+
+      const sorted = [...rows].sort((a,b) => b.xp - a.xp);
+      document.getElementById("lbCount").textContent = `${sorted.length} players`;
+
+      sorted.forEach((row, idx) => {
+        const item = document.createElement("div");
+        item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+        item.innerHTML = `
+          <div class="d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge text-bg-secondary">#${idx + 1}</span>
+              <span class="fw-semibold">${escapeHtml(row.user)}</span>
+            </div>
+            <span class="muted-mono">${row.xp} XP</span>
+          </div>
+        `;
+        el.appendChild(item);
+      });
+
+      const now = new Date();
+      document.getElementById("lbUpdated").textContent =
+        "Updated: " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    async function refresh() {
+      const rows = await fetchMockLeaderboard();
+      renderLeaderboard(rows);
+    }
+
+    document.getElementById("btnRefresh").addEventListener("click", refresh);
+    refresh();
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZBOE — Global Hunt</title>
+
+  <!-- Bootstrap 5.3.1 (CDN) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    body {
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(13,110,253,.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(25,135,84,.12), transparent 60%),
+                  #0b0f14;
+    }
+    .muted-mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      color: rgba(255,255,255,.65);
+      font-size: .85rem;
+    }
+    .event-feed {
+      max-height: 360px;
+      overflow: auto;
+    }
+    .online-list {
+      max-height: 240px;
+      overflow: auto;
+    }
+    .leaderboard {
+      max-height: 240px;
+      overflow: auto;
+    }
+    .soft-card {
+      background: rgba(255,255,255,.03);
+      border-color: rgba(255,255,255,.12);
+    }
+    .soft-card .card-header {
+      background: rgba(255,255,255,.04);
+      border-color: rgba(255,255,255,.12);
+    }
+    .badge-soft {
+      background: rgba(13,110,253,.15);
+      border: 1px solid rgba(13,110,253,.35);
+      color: #cfe2ff;
+    }
+  </style>
+</head>
+
+<body class="text-light">
+  <nav class="navbar navbar-expand-lg navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
+    <div class="container py-2">
+      <a class="navbar-brand fw-semibold" href="#">
+        🧟 ZBOE <span class="opacity-75">Global Hunt</span>
+      </a>
+
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge rounded-pill text-bg-success" id="huntBadge">HUNT ACTIVE</span>
+        <span class="badge rounded-pill text-bg-warning text-dark" id="hordeBadge">HORDE: NO</span>
+        <span class="badge rounded-pill badge-soft" id="zombieBadge">ZOMBIES: 1</span>
+        <span class="muted-mono">Logged in as <span class="text-white" id="meName">rvzm</span></span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="row g-3">
+      <!-- Left: Recent events + status -->
+      <div class="col-lg-8">
+        <!-- Quick global status card -->
+        <div class="card soft-card mb-3">
+          <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div>
+              <div class="fw-semibold">World Status</div>
+              <div class="muted-mono">Single global channel — everyone sees the same hunt</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <span class="badge text-bg-primary" id="timeBadge">Tick: every 5 min</span>
+              <span class="badge text-bg-secondary" id="triggerBadge">Trigger: 8 / 15</span>
+              <span class="badge text-bg-info text-dark" id="onlineCountBadge">Online: 4</span>
+            </div>
+          </div>
+
+          <div class="card-body">
+            <div class="row g-2">
+              <div class="col-md-3 col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Zombies</div>
+                  <div class="fs-4 fw-semibold" id="zombieCount">1</div>
+                </div>
+              </div>
+              <div class="col-md-3 col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Horde</div>
+                  <div class="fs-4 fw-semibold" id="hordeState">No</div>
+                </div>
+              </div>
+              <div class="col-md-3 col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Hunt</div>
+                  <div class="fs-4 fw-semibold" id="huntState">Active</div>
+                </div>
+              </div>
+              <div class="col-md-3 col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Last Event</div>
+                  <div class="fw-semibold" id="lastEventTime">Just now</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Events card -->
+        <div class="card soft-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="fw-semibold">Recent Events</div>
+            <div class="muted-mono">live feed</div>
+          </div>
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush event-feed" id="eventFeed">
+              <!-- events inserted here -->
+            </div>
+          </div>
+          <div class="card-footer d-flex justify-content-end gap-2">
+            <button class="btn btn-sm btn-outline-light" id="btnClear">Clear feed (local)</button>
+            <button class="btn btn-sm btn-outline-primary" id="btnMockEvent">Add mock event</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Player panel + leaderboard + online -->
+      <div class="col-lg-4">
+        <!-- Player card -->
+        <div class="card soft-card mb-3">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="fw-semibold">Your Loadout</div>
+            <span class="badge rounded-pill text-bg-secondary" id="jamBadge">JAM: NO</span>
+          </div>
+          <div class="card-body">
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">XP</div>
+                  <div class="fs-5 fw-semibold" id="meXp">120</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Kills</div>
+                  <div class="fs-5 fw-semibold" id="meKills">8</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Ammo</div>
+                  <div class="fs-5 fw-semibold"><span id="meAmmo">4</span> / <span id="meMaxAmmo">6</span></div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Clips</div>
+                  <div class="fs-5 fw-semibold"><span id="meClips">2</span> / <span id="meMaxClips">3</span></div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Accuracy</div>
+                  <div class="fs-5 fw-semibold" id="meAcc">35</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono">Condition</div>
+                  <div class="fs-5 fw-semibold" id="meCond">86</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-grid gap-2">
+              <button class="btn btn-success" id="btnShoot">Shoot</button>
+              <div class="d-flex gap-2">
+                <button class="btn btn-outline-light w-50" id="btnReload">Reload</button>
+                <button class="btn btn-outline-warning w-50" id="btnUnjam">Unjam</button>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary w-50" id="btnShop">Shop</button>
+                <button class="btn btn-outline-info w-50" id="btnStats">Stats</button>
+              </div>
+            </div>
+
+            <div class="mt-3 muted-mono">
+              Tip: wire buttons to your API later (e.g., <code class="text-white">POST /api/action/shoot</code>)
+            </div>
+          </div>
+        </div>
+
+        <!-- Leaderboard card -->
+        <div class="card soft-card mb-3">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="fw-semibold">XP Leaderboard</div>
+            <div class="muted-mono">top players</div>
+          </div>
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush leaderboard" id="leaderboard">
+              <!-- rows inserted -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Online now card -->
+        <div class="card soft-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="fw-semibold">Online Now</div>
+            <div class="muted-mono" id="onlineCount">4</div>
+          </div>
+          <div class="card-body p-0">
+            <div class="list-group list-group-flush online-list" id="onlineList">
+              <!-- users inserted -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // -------------------------
+    // Mock state (replace later)
+    // -------------------------
+    const state = {
+      huntActive: true,
+      horde: false,
+      zombies: 1,
+      tickMinutes: 5,
+      trigger: { value: 8, outOf: 15 },
+      online: ["rvzm"],
+      leaderboard: [
+        { user: "rvzm", xp: 120 },
+      ],
+      me: {
+        user: "rvzm",
+        xp: 120,
+        kills: 8,
+        ammo: 4,
+        maxAmmo: 6,
+        clips: 2,
+        maxClips: 3,
+        acc: 35,
+        cond: 86,
+        jammed: false
+      },
+      events: [
+        { ts: new Date(), type: "spawn", msg: "Zombie spotted! Shoot that fucker!" },
+        { ts: new Date(), type: "shoot", msg: "rvzm hit the zombie (+5xp) |4/6|" },
+        { ts: new Date(), type: "miss", msg: "alex missed like a goober |3/6|" },
+      ]
+    };
+
+    // -------------------------
+    // Rendering helpers
+    // -------------------------
+    const $ = (id) => document.getElementById(id);
+
+    function fmtTime(d){
+      try {
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch {
+        return "??:??";
+      }
+    }
+
+    function badgeForEvent(type){
+      // light semantic coloring
+      if (type === "spawn") return "text-bg-warning text-dark";
+      if (type === "kill")  return "text-bg-success";
+      if (type === "horde") return "text-bg-danger";
+      if (type === "shoot") return "text-bg-primary";
+      return "text-bg-secondary";
+    }
+
+    function renderTop(){
+      $("huntState").textContent = state.huntActive ? "Active" : "Inactive";
+      $("hordeState").textContent = state.horde ? "Yes" : "No";
+      $("zombieCount").textContent = state.zombies;
+
+      $("timeBadge").textContent = `Tick: every ${state.tickMinutes} min`;
+      $("triggerBadge").textContent = `Trigger: ${state.trigger.value} / ${state.trigger.outOf}`;
+      $("onlineCountBadge").textContent = `Online: ${state.online.length}`;
+
+      $("huntBadge").className = "badge rounded-pill " + (state.huntActive ? "text-bg-success" : "text-bg-secondary");
+      $("huntBadge").textContent = state.huntActive ? "HUNT ACTIVE" : "HUNT OFF";
+
+      $("hordeBadge").className = "badge rounded-pill " + (state.horde ? "text-bg-danger" : "text-bg-warning text-dark");
+      $("hordeBadge").textContent = "HORDE: " + (state.horde ? "YES" : "NO");
+
+      $("zombieBadge").textContent = `ZOMBIES: ${state.zombies}`;
+
+      const last = state.events[state.events.length - 1];
+      $("lastEventTime").textContent = last ? fmtTime(last.ts) : "—";
+    }
+
+    function renderMe(){
+      $("meName").textContent = state.me.user;
+      $("meXp").textContent = state.me.xp;
+      $("meKills").textContent = state.me.kills;
+      $("meAmmo").textContent = state.me.ammo;
+      $("meMaxAmmo").textContent = state.me.maxAmmo;
+      $("meClips").textContent = state.me.clips;
+      $("meMaxClips").textContent = state.me.maxClips;
+      $("meAcc").textContent = state.me.acc;
+      $("meCond").textContent = state.me.cond;
+
+      $("jamBadge").className = "badge rounded-pill " + (state.me.jammed ? "text-bg-danger" : "text-bg-secondary");
+      $("jamBadge").textContent = "JAM: " + (state.me.jammed ? "YES" : "NO");
+
+      // disable buttons based on state (client-side only; server should enforce too)
+      $("btnShoot").disabled = !state.huntActive || state.zombies <= 0 || state.me.jammed || state.me.cond <= 0 || state.me.ammo <= 0;
+      $("btnReload").disabled = state.me.clips <= 0 || state.me.ammo === state.me.maxAmmo;
+      $("btnUnjam").disabled = !state.me.jammed || state.me.clips <= 0;
+    }
+
+    function renderEvents(){
+      const feed = $("eventFeed");
+      feed.innerHTML = "";
+      state.events.slice(-80).forEach(e => {
+        const item = document.createElement("div");
+        item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+        item.innerHTML = `
+          <div class="d-flex align-items-start justify-content-between gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge ${badgeForEvent(e.type)}">${e.type}</span>
+              <span>${escapeHtml(e.msg)}</span>
+            </div>
+            <span class="muted-mono">${fmtTime(e.ts)}</span>
+          </div>
+        `;
+        feed.appendChild(item);
+      });
+      // auto-scroll to bottom
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function renderLeaderboard(){
+      const lb = $("leaderboard");
+      lb.innerHTML = "";
+      const sorted = [...state.leaderboard].sort((a,b) => b.xp - a.xp);
+      sorted.forEach((row, idx) => {
+        const item = document.createElement("div");
+        item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+        item.innerHTML = `
+          <div class="d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge text-bg-secondary">#${idx + 1}</span>
+              <span class="fw-semibold">${escapeHtml(row.user)}</span>
+            </div>
+            <span class="muted-mono">${row.xp} XP</span>
+          </div>
+        `;
+        lb.appendChild(item);
+      });
+    }
+
+    function renderOnline(){
+      const list = $("onlineList");
+      list.innerHTML = "";
+      $("onlineCount").textContent = state.online.length;
+
+      state.online.forEach(u => {
+        const item = document.createElement("div");
+        item.className = "list-group-item bg-transparent text-light border-secondary-subtle d-flex align-items-center justify-content-between";
+        item.innerHTML = `
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge text-bg-success">●</span>
+            <span>${escapeHtml(u)}</span>
+          </div>
+          ${u === state.me.user ? `<span class="badge text-bg-primary">you</span>` : ``}
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function escapeHtml(s){
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function renderAll(){
+      renderTop();
+      renderMe();
+      renderEvents();
+      renderLeaderboard();
+      renderOnline();
+    }
+
+    // -------------------------
+    // Mock actions (replace with API calls later)
+    // -------------------------
+    function addEvent(type, msg){
+      state.events.push({ ts: new Date(), type, msg });
+      renderTop();
+      renderEvents();
+    }
+
+    $("btnMockEvent").addEventListener("click", () => {
+      const samples = [
+        ["spawn", "Zombie spotted! Shoot that fucker!"],
+        ["shoot", `${state.me.user} hit the zombie (+5xp) |${state.me.ammo-1}/${state.me.maxAmmo}|`],
+        ["miss", `alex missed like a goober |2/6|`],
+        ["horde", "!!! ZOMBIE HORDE !!! Horde now at MAX STRENGTH!!"],
+      ];
+      const [t, m] = samples[Math.floor(Math.random()*samples.length)];
+      addEvent(t, m);
+    });
+
+    $("btnClear").addEventListener("click", () => {
+      state.events = [];
+      renderAll();
+    });
+
+    $("btnShoot").addEventListener("click", () => {
+      if (!state.huntActive || state.zombies <= 0) return;
+
+      if (state.me.ammo <= 0) {
+        addEvent("system", "errr! you need to reload dipshit!");
+        return;
+      }
+
+      // mock: spend ammo, 35% acc chance to hit
+      state.me.ammo -= 1;
+
+      const hit = Math.random() < 0.35;
+      if (hit) {
+        state.me.xp += 5;
+        state.me.kills += 1;
+        state.zombies = Math.max(0, state.zombies - 1);
+        addEvent("kill", `${state.me.user} hit the zombie!! +5xp |${state.me.ammo}/${state.me.maxAmmo}|`);
+      } else {
+        addEvent("miss", `oops, you missed |${state.me.ammo}/${state.me.maxAmmo}|`);
+      }
+
+      // mock jam chance based on condition
+      if (Math.random() < 0.08) {
+        state.me.jammed = true;
+        addEvent("system", "FUCK!!! You got a jam, use Unjam.");
+      }
+
+      renderAll();
+    });
+
+    $("btnReload").addEventListener("click", () => {
+      if (state.me.clips <= 0) return;
+      if (state.me.ammo === state.me.maxAmmo) return;
+      state.me.clips -= 1;
+      state.me.ammo = state.me.maxAmmo;
+      addEvent("system", `${state.me.user} reloaded. |${state.me.ammo}/${state.me.maxAmmo}|`);
+      renderAll();
+    });
+
+    $("btnUnjam").addEventListener("click", () => {
+      if (!state.me.jammed) return;
+      if (state.me.clips <= 0) return;
+      // mimic: unjam costs 1 ammo
+      state.me.jammed = false;
+      state.me.ammo = Math.max(0, state.me.ammo - 1);
+      addEvent("system", `${state.me.user} unjammed their gun.`);
+      renderAll();
+    });
+
+    $("btnShop").addEventListener("click", () => {
+      addEvent("system", "Shop: (wire this to /api/shop later)");
+    });
+
+    $("btnStats").addEventListener("click", () => {
+      addEvent("system", `Stats: XP ${state.me.xp} | Kills ${state.me.kills} | Ammo ${state.me.ammo}/${state.me.maxAmmo}`);
+    });
+
+    // Initial render
+    renderAll();
+  </script>
+</body>
+</html>

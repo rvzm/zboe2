@@ -123,8 +123,7 @@
             </div>
           </div>
           <div class="card-footer d-flex justify-content-end gap-2">
-            <button class="btn btn-sm btn-outline-light" id="btnClear">Clear feed (local)</button>
-            <button class="btn btn-sm btn-outline-primary" id="btnMockEvent">Add mock event</button>
+            <button class="btn btn-sm btn-outline-primary" id="btnRefresh">Refresh feed</button>
           </div>
         </div>
       </div>
@@ -229,35 +228,29 @@
 
   <script>
     // -------------------------
-    // Mock state (replace later)
+    // State (hydrated from DB)
     // -------------------------
-    const state = {
-      huntActive: true,
+    let state = {
+      huntActive: false,
       horde: false,
-      zombies: 1,
+      zombies: 0,
       tickMinutes: 5,
-      trigger: { value: 8, outOf: 15 },
-      online: ["rvzm"],
-      leaderboard: [
-        { user: "rvzm", xp: 120 },
-      ],
+      trigger: { value: 0, outOf: 15 },
+      online: [],
+      leaderboard: [],
       me: {
-        user: "rvzm",
-        xp: 120,
-        kills: 8,
-        ammo: 4,
-        maxAmmo: 6,
-        clips: 2,
-        maxClips: 3,
-        acc: 35,
-        cond: 86,
+        user: "",
+        xp: 0,
+        kills: 0,
+        ammo: 0,
+        maxAmmo: 0,
+        clips: 0,
+        maxClips: 0,
+        acc: 0,
+        cond: 0,
         jammed: false
       },
-      events: [
-        { ts: new Date(), type: "spawn", msg: "Zombie spotted! Shoot that fucker!" },
-        { ts: new Date(), type: "shoot", msg: "rvzm hit the zombie (+5xp) |4/6|" },
-        { ts: new Date(), type: "miss", msg: "alex missed like a goober |3/6|" },
-      ]
+      events: []
     };
 
     // -------------------------
@@ -326,6 +319,13 @@
     function renderEvents(){
       const feed = $("eventFeed");
       feed.innerHTML = "";
+      if (state.events.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+        empty.textContent = "No events yet.";
+        feed.appendChild(empty);
+        return;
+      }
       state.events.slice(-80).forEach(e => {
         const item = document.createElement("div");
         item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
@@ -400,90 +400,64 @@
       renderOnline();
     }
 
-    // -------------------------
-    // Mock actions (replace with API calls later)
-    // -------------------------
-    function addEvent(type, msg){
-      state.events.push({ ts: new Date(), type, msg });
-      renderTop();
-      renderEvents();
+    async function loadState(){
+      try {
+        const res = await fetch("/api/game-state", { credentials: "same-origin" });
+        if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+        const data = await res.json();
+        state = normalizeState(data);
+        renderAll();
+      } catch (err) {
+        console.error(err);
+      }
     }
 
-    $("btnMockEvent").addEventListener("click", () => {
-      const samples = [
-        ["spawn", "Zombie spotted! Shoot that fucker!"],
-        ["shoot", `${state.me.user} hit the zombie (+5xp) |${state.me.ammo-1}/${state.me.maxAmmo}|`],
-        ["miss", `alex missed like a goober |2/6|`],
-        ["horde", "!!! ZOMBIE HORDE !!! Horde now at MAX STRENGTH!!"],
-      ];
-      const [t, m] = samples[Math.floor(Math.random()*samples.length)];
-      addEvent(t, m);
+    function normalizeState(data){
+      const events = Array.isArray(data?.events) ? data.events.map((event) => ({
+        ts: new Date(event.ts),
+        type: event.type,
+        msg: event.msg
+      })) : [];
+
+      return {
+        huntActive: Boolean(data?.huntActive),
+        horde: Boolean(data?.horde),
+        zombies: Number(data?.zombies ?? 0),
+        tickMinutes: Number(data?.tickMinutes ?? 5),
+        trigger: {
+          value: Number(data?.trigger?.value ?? 0),
+          outOf: Number(data?.trigger?.outOf ?? 15)
+        },
+        online: Array.isArray(data?.online) ? data.online : [],
+        leaderboard: Array.isArray(data?.leaderboard) ? data.leaderboard : [],
+        me: {
+          user: data?.me?.user ?? "",
+          xp: Number(data?.me?.xp ?? 0),
+          kills: Number(data?.me?.kills ?? 0),
+          ammo: Number(data?.me?.ammo ?? 0),
+          maxAmmo: Number(data?.me?.maxAmmo ?? 0),
+          clips: Number(data?.me?.clips ?? 0),
+          maxClips: Number(data?.me?.maxClips ?? 0),
+          acc: Number(data?.me?.acc ?? 0),
+          cond: Number(data?.me?.cond ?? 0),
+          jammed: Boolean(data?.me?.jammed)
+        },
+        events
+      };
+    }
+
+    $("btnRefresh").addEventListener("click", () => {
+      loadState();
     });
 
-    $("btnClear").addEventListener("click", () => {
-      state.events = [];
-      renderAll();
-    });
-
-    $("btnShoot").addEventListener("click", () => {
-      if (!state.huntActive || state.zombies <= 0) return;
-
-      if (state.me.ammo <= 0) {
-        addEvent("system", "errr! you need to reload dipshit!");
-        return;
-      }
-
-      // mock: spend ammo, 35% acc chance to hit
-      state.me.ammo -= 1;
-
-      const hit = Math.random() < 0.35;
-      if (hit) {
-        state.me.xp += 5;
-        state.me.kills += 1;
-        state.zombies = Math.max(0, state.zombies - 1);
-        addEvent("kill", `${state.me.user} hit the zombie!! +5xp |${state.me.ammo}/${state.me.maxAmmo}|`);
-      } else {
-        addEvent("miss", `oops, you missed |${state.me.ammo}/${state.me.maxAmmo}|`);
-      }
-
-      // mock jam chance based on condition
-      if (Math.random() < 0.08) {
-        state.me.jammed = true;
-        addEvent("system", "FUCK!!! You got a jam, use Unjam.");
-      }
-
-      renderAll();
-    });
-
-    $("btnReload").addEventListener("click", () => {
-      if (state.me.clips <= 0) return;
-      if (state.me.ammo === state.me.maxAmmo) return;
-      state.me.clips -= 1;
-      state.me.ammo = state.me.maxAmmo;
-      addEvent("system", `${state.me.user} reloaded. |${state.me.ammo}/${state.me.maxAmmo}|`);
-      renderAll();
-    });
-
-    $("btnUnjam").addEventListener("click", () => {
-      if (!state.me.jammed) return;
-      if (state.me.clips <= 0) return;
-      // mimic: unjam costs 1 ammo
-      state.me.jammed = false;
-      state.me.ammo = Math.max(0, state.me.ammo - 1);
-      addEvent("system", `${state.me.user} unjammed their gun.`);
-      renderAll();
-    });
-
-    $("btnShop").addEventListener("click", () => {
-      addEvent("system", "Shop: (wire this to /api/shop later)");
-    });
-
-    $("btnStats").addEventListener("click", () => {
-      addEvent("system", `Stats: XP ${state.me.xp} | Kills ${state.me.kills} | Ammo ${state.me.ammo}/${state.me.maxAmmo}`);
+    ["btnShoot", "btnReload", "btnUnjam", "btnShop", "btnStats"].forEach((id) => {
+      $(id).addEventListener("click", () => {
+        window.alert("Actions are read-only until server endpoints are wired.");
+      });
     });
 
     // Initial render
-    renderAll();
+    loadState();
   </script>
 </body>
 </html>

@@ -3,11 +3,28 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "node server.js"
+    "dev": "node server.js --dev --debug=FULL",
+    "stable": "node server.js",
+    "verbose": "node server.js --verbose"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "cookie-parser": "^1.4.6",
-    "express": "^4.19.2"
-  }
+    "express": "^4.22.2",
+    "sqlite3": "^6.0.1"
+  },
+  "version": "1.0.0",
+  "description": "zboe2 is a web-based NodeJS game, adapted from my original IRC-based game.",
+  "main": "db.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rvzm/zboe2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rvzm/zboe2/issues"
+  },
+  "homepage": "https://github.com/rvzm/zboe2#readme"
 }

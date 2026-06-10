@@ -2,9 +2,86 @@ import { db } from "./db.js";
 import express from "express";
 import cookieParser from "cookie-parser";
 import crypto from "crypto";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { config, LOG_LEVELS} from "./config.js";
 
+const LOG_DIR = "./logs";
+const LOG_FILE = path.join(LOG_DIR, "server.log");
+
+fs.mkdirSync(LOG_DIR, { recursive: true });
+for (const arg of process.argv.slice(2)) {
+
+  if (arg === '--dev')
+    config.dev = true;
+
+  else if (arg === '--production')
+    config.production = true;
+
+  else if (arg === '-v' || arg === '--verbose')
+    config.verbose = true;
+
+  else if (arg.startsWith('--debug-level=')) {
+    config.debugLevel = arg.split('=')[1];
+  }
+}
+
+const production = process.argv.includes('--production');
+if (config.dev && production) {
+  console.error(
+    'ERROR: --dev and --production cannot be used together.'
+  );
+
+  process.exit(1);
+}
+
+function log(level, message, config) {
+
+    const timestamp = new Date().toISOString();
+
+    const line =
+        `${timestamp} [${level}] - ${message}\n`;
+
+    if (config.debug) {
+        fs.appendFileSync(LOG_FILE, line);
+    }
+
+    if (
+        config.verbose &&
+        LOG_LEVELS[level] >= LOG_LEVELS[config.debugLevel]
+    ) {
+        console.log(line.trim());
+    }
+
+    if (level === "FATAL") {
+        process.exit(1);
+    }
+}
+function startVerboseHeartbeat(config) {
+
+    if (!config.verbose)
+        return;
+
+    setInterval(() => {
+
+        const mem =
+            Math.round(process.memoryUsage().rss / 1024 / 1024);
+
+        console.log(
+            `[HEARTBEAT] ${new Date().toISOString()} Server running - Memory=${mem}MB Uptime=${Math.floor(process.uptime())}s`
+        );
+
+    }, 30000);
+
+}
+process.on("uncaughtException", (err) => {
+    log("FATAL", err.stack || err.message, config);
+});
+
+process.on("unhandledRejection", (reason) => {
+    log("ERROR", String(reason), config);
+});
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -1,10 +1,10 @@
-const LOG_LEVELS = {
+export const LOG_LEVELS = {
     FULL: 0,
     WARN: 1,
     ERROR: 2,
     FATAL: 3
 };
-const config = {
+export const config = {
   dev: false,
   production: true,
   verbose: false,

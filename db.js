@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS players (
   accuracy INTEGER NOT NULL DEFAULT 35,      -- % hit chance
   condition INTEGER NOT NULL DEFAULT 100,    -- durability/health
   jammed INTEGER NOT NULL DEFAULT 0,         -- 0/1
+  equipped_gun TEXT, -- or INTEGER if you make a weapons table
   updated_at INTEGER NOT NULL,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );

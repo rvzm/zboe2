@@ -55,8 +55,6 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
-`);
-
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 `);

@@ -23,6 +23,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
+  is_admin BOOLEAN NOT NULL DEFAULT 0,
   pass_salt TEXT NOT NULL,
   pass_hash TEXT NOT NULL,
   created_at INTEGER NOT NULL

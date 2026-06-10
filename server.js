@@ -125,9 +125,9 @@ function hashPassword(password, salt) {
 }
 
 // ----- Very simple signed session cookie -----
-const SESSION_SECRET = process.env.SESSION_SECRET || "changeme";
 function sign(value) {
-  return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("hex");
+  log("FULL", `Signing value: ${value}`, config);
+  return crypto.createHmac("sha256", config.sessionSecret).update(value).digest("hex");
 }
 function setSession(res, username) {
   const payload = JSON.stringify({ u: username, t: Date.now() });

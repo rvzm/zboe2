@@ -8,5 +8,6 @@ export const config = {
   dev: false,
   production: true,
   verbose: false,
-  debugLevel: 'NONE'
+  debugLevel: 'NONE',
+  sessionSecret: 'changeme'
 };

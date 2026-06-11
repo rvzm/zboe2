@@ -238,6 +238,14 @@ function updatePlayerInventory(userId, itemName, quantityChange, conditionChange
   }
 }
 
+function updatePlayerLocation(userId, location) {
+  db.prepare(`
+    UPDATE players
+    SET location = ?, updated_at = ?
+    WHERE id = ?
+  `).run(location, Date.now(), userId);
+}
+
 function hashPassword(password, salt) {
   log("FULL", `Hashing password with salt=${salt}`, config);
   return crypto.pbkdf2Sync(password, salt, 150000, 32, "sha256").toString("hex");

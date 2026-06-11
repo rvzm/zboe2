@@ -106,8 +106,8 @@ const stmtEventCounts = db.prepare(`
 `);
 const stmtEventTotal = db.prepare(`SELECT COUNT(*) AS total FROM events`);
 const stmtInsertUser = db.prepare(`
-  INSERT INTO users (username, pass_salt, pass_hash, created_at)
-  VALUES (?, ?, ?, ?)
+  INSERT INTO users (username, is_admin, pass_salt, pass_hash, created_at)
+  VALUES (?, 0, ?, ?, ?)
 `);
 
 const stmtInsertPlayer = db.prepare(`

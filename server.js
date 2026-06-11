@@ -115,6 +115,128 @@ const stmtInsertPlayer = db.prepare(`
   VALUES (?, 0, 0, 6, 6, 3, 3, 35, 100, 0, ?)
 `);
 
+function updatePlayerAmmo(userId, ammoChange, clipChange) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  const newAmmo = Math.max(0, player.ammo + ammoChange);
+  const newClips = Math.max(0, player.clips + clipChange);
+
+  db.prepare(`
+    UPDATE players
+    SET ammo = ?, clips = ?, updated_at = ?
+    WHERE id = ?
+  `).run(newAmmo, newClips, Date.now(), player.id);
+}
+
+function updatePlayerStats(userId, xpChange, killChange) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  const newXP = Math.max(0, player.xp + xpChange);
+  const newKills = Math.max(0, player.kills + killChange);
+
+  db.prepare(`
+    UPDATE players
+    SET xp = ?, kills = ?, updated_at = ?
+    WHERE id = ?
+  `).run(newXP, newKills, Date.now(), player.id);
+}
+
+function updatePlayerCondition(userId, conditionChange) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  const newCondition = Math.max(0, Math.min(100, player.condition + conditionChange));
+
+  db.prepare(`
+    UPDATE players
+    SET condition = ?, updated_at = ?
+    WHERE id = ?
+  `).run(newCondition, Date.now(), player.id);
+}
+
+function updatePlayerJamStatus(userId, jammed) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  db.prepare(`
+    UPDATE players
+    SET jammed = ?, updated_at = ?
+    WHERE id = ?
+  `).run(jammed ? 1 : 0, Date.now(), player.id);
+}
+
+function updatePlayerGun(userId, gun) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  db.prepare(`
+    UPDATE players
+    SET gun = ?, updated_at = ?
+    WHERE id = ?
+  `).run(gun, Date.now(), player.id);
+}
+
+function updatePlayerAccuracy(userId, accuracyChange) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+  const newAccuracy = Math.max(0, Math.min(100, player.accuracy + accuracyChange));
+  db.prepare(`
+    UPDATE players
+    SET accuracy = ?, updated_at = ?
+    WHERE id = ?
+  `).run(newAccuracy, Date.now(), player.id);
+}
+
+function updatePlayerMaxAmmo(userId, maxAmmoChange) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  const newMaxAmmo = Math.max(0, player.max_ammo + maxAmmoChange);
+
+  db.prepare(`
+    UPDATE players
+    SET max_ammo = ?, updated_at = ?
+    WHERE id = ?
+  `).run(newMaxAmmo, Date.now(), player.id);
+}
+
+function updatePlayerMaxClips(userId, maxClipsChange) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+
+  const newMaxClips = Math.max(0, player.max_clips + maxClipsChange);
+
+  db.prepare(`
+    UPDATE players
+    SET max_clips = ?, updated_at = ?
+    WHERE id = ?
+  `).run(newMaxClips, Date.now(), player.id);
+}
+
+function updatePlayerInventory(userId, itemName, quantityChange, conditionChange, ammoChange, clipsChange) {
+  const item = db.prepare(`
+    SELECT id, quantity, condition, ammo, clips
+    FROM player_inventory
+    WHERE user_id = ? AND item_name = ?
+  `).get(userId, itemName);
+  if (item) {
+    const newQuantity = Math.max(0, item.quantity + quantityChange);
+    const newCondition = Math.max(0, Math.min(100, item.condition + conditionChange));
+    const newAmmo = Math.max(0, item.ammo + ammoChange);
+    const newClips = Math.max(0, item.clips + clipsChange);
+    if (newQuantity === 0) {
+      db.prepare(`DELETE FROM player_inventory WHERE id = ?`).run(item.id);
+    } else {
+      db.prepare(`
+        UPDATE player_inventory
+        SET quantity = ?, condition = ?, ammo = ?, clips = ?, updated_at = ?
+        WHERE id = ?
+      `).run(newQuantity, newCondition, newAmmo, newClips, Date.now(), item.id);
+    }
+  }
+}
 
 function hashPassword(password, salt) {
   log("FULL", `Hashing password with salt=${salt}`, config);
@@ -305,6 +427,8 @@ app.get("/api/game-state", requireAuth, (req, res) => {
     events: recentEvents,
   });
 });
+
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

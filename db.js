@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS player_inventory (
   condition INTEGER NOT NULL DEFAULT 100,
   ammo INTEGER NOT NULL DEFAULT 1,
   clips INTEGER NOT NULL DEFAULT 1,
-
+  updated_at INTEGER NOT NULL,
   FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
 );
 
@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS game_state (
   hunt_enabled TEXT NOT NULL DEFAULT 'false',
   horde_size INTEGER NOT NULL DEFAULT 0,
   horde_status TEXT NOT NULL DEFAULT 'idle', -- idle, partial, full, raid
-  raid_enabled TEXT NOT NULL DEFAULT 'false'
+  raid_enabled TEXT NOT NULL DEFAULT 'false',
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
 );
 
 -- Location Table
@@ -83,6 +85,7 @@ CREATE TABLE IF NOT EXISTS locations (
   user_id INTEGER NOT NULL,
   location_name TEXT NOT NULL,
   hidden BOOLEAN NOT NULL DEFAULT 0, -- if true, user is hiding here and can't be found by others or zombies
+  updated_at INTEGER NOT NULL,
   FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
 );
 

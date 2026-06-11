@@ -68,6 +68,35 @@ CREATE TABLE IF NOT EXISTS events (
   msg TEXT NOT NULL
 );
 
+-- Game State Table (Hunt enabled, horde size/status, raid enabled, etc)
+CREATE TABLE IF NOT EXISTS game_state (
+  key TEXT PRIMARY KEY,
+  hunt_enabled TEXT NOT NULL DEFAULT 'false',
+  horde_size INTEGER NOT NULL DEFAULT 0,
+  horde_status TEXT NOT NULL DEFAULT 'idle', -- idle, partial, full, raid
+  raid_enabled TEXT NOT NULL DEFAULT 'false'
+);
+
+-- Location Table
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  location_name TEXT NOT NULL,
+  hidden BOOLEAN NOT NULL DEFAULT 0, -- if true, user is hiding here and can't be found by others or zombies
+  FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
+);
+
+-- Shop Item and Costs table - Updated via console commands, not player-facing
+CREATE TABLE IF NOT EXISTS shop_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_name TEXT NOT NULL UNIQUE,
+  item_cost INTEGER NOT NULL,
+  item_type TEXT NOT NULL, -- gun, ammo, clip, medkit, etc
+  item_quantity INTEGER NOT NULL DEFAULT 1, -- for stackable items like ammo/medkits
+  item_pack_cost INTEGER NOT NULL DEFAULT 0 -- if this item can be sold in a pack/bundle, the cost of the whole pack
+  item_pack_quantity INTEGER NOT NULL DEFAULT 0 -- if this item can be sold in a pack/bundle, the quantity of this item in the pack
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);

@@ -44,8 +44,7 @@ CREATE TABLE IF NOT EXISTS players (
   condition INTEGER NOT NULL DEFAULT 100,    -- durability/health
   jammed INTEGER NOT NULL DEFAULT 0,         -- 0/1
   equipped_gun TEXT, -- or INTEGER if you make a weapons table
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS player_inventory (
@@ -56,8 +55,7 @@ CREATE TABLE IF NOT EXISTS player_inventory (
   condition INTEGER NOT NULL DEFAULT 100,
   ammo INTEGER NOT NULL DEFAULT 1,
   clips INTEGER NOT NULL DEFAULT 1,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
+  updated_at INTEGER NOT NULL
 );
 
 -- global event feed
@@ -75,8 +73,7 @@ CREATE TABLE IF NOT EXISTS game_state (
   horde_size INTEGER NOT NULL DEFAULT 0,
   horde_status TEXT NOT NULL DEFAULT 'idle', -- idle, partial, full, raid
   raid_enabled TEXT NOT NULL DEFAULT 'false',
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
+  updated_at INTEGER NOT NULL
 );
 
 -- Location Table
@@ -85,8 +82,7 @@ CREATE TABLE IF NOT EXISTS locations (
   user_id INTEGER NOT NULL,
   location_name TEXT NOT NULL,
   hidden BOOLEAN NOT NULL DEFAULT 0, -- if true, user is hiding here and can't be found by others or zombies
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY(user_id) REFERENCES players(user_id) ON DELETE CASCADE
+  updated_at INTEGER NOT NULL
 );
 
 -- Shop Item and Costs table - Updated via console commands, not player-facing
@@ -96,7 +92,7 @@ CREATE TABLE IF NOT EXISTS shop_items (
   item_cost INTEGER NOT NULL,
   item_type TEXT NOT NULL, -- gun, ammo, clip, medkit, etc
   item_quantity INTEGER NOT NULL DEFAULT 1, -- for stackable items like ammo/medkits
-  item_pack_cost INTEGER NOT NULL DEFAULT 0 -- if this item can be sold in a pack/bundle, the cost of the whole pack
+  item_pack_cost INTEGER NOT NULL DEFAULT 0, -- if this item can be sold in a pack/bundle, the cost of the whole pack
   item_pack_quantity INTEGER NOT NULL DEFAULT 0 -- if this item can be sold in a pack/bundle, the quantity of this item in the pack
 );
 

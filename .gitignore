@@ -16,7 +16,8 @@ menus/
 *.log
 .DS_Store
 Thumbs.db
-scratchbook
+scratchbook.note
+scratchbook.js
 zboe.sh
 install-arch.sh
 install-ubuntu.sh

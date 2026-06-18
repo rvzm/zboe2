@@ -1,29 +1,42 @@
-import { db } from "./db.js";
+import {
+  getUserByName, getUserIdByName,
+  getLeaderboard, getRecentEvents, getEventCounts, getEventTotal,
+  insertUser, insertPlayer, ensurePlayer,
+  updatePlayerAmmo, updatePlayerStats, updatePlayerCondition,
+  updatePlayerJamStatus, updatePlayerGun, updatePlayerAccuracy,
+  updatePlayerMaxAmmo, updatePlayerMaxClips, updatePlayerInventory,
+  updatePlayerLocation, updatePlayerHidden,
+} from "./db.js";
 import express from "express";
 import cookieParser from "cookie-parser";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { config, LOG_LEVELS} from "./config.js";
+import { game_config, file_config} from "./config.js";
 
-const LOG_DIR = "./logs";
-const LOG_FILE = path.join(LOG_DIR, "server.log");
+const LOG_LEVELS = {
+    FULL: 0,
+    WARN: 1,
+    ERROR: 2,
+    FATAL: 3
+};
 
+const LOG_FILE = path.join(LOG_DIR, file_config.logFile || "server.log");
 fs.mkdirSync(LOG_DIR, { recursive: true });
 for (const arg of process.argv.slice(2)) {
 
   if (arg === '--dev')
-    config.dev = true;
+    game_config.dev = true;
 
   else if (arg === '--production')
-    config.production = true;
+    game_config.production = true;
 
   else if (arg === '-v' || arg === '--verbose')
-    config.verbose = true;
+    game_config.verbose = true;
 
   else if (arg.startsWith('--debug-level=')) {
-    config.debugLevel = arg.split('=')[1];
+    game_config.debugLevel = arg.split('=')[1];
   }
 }
 
@@ -43,13 +56,13 @@ function log(level, message, config) {
     const line =
         `${timestamp} [${level}] - ${message}\n`;
 
-    if (config.debug) {
+    if (game_config.dev || level === "ERROR" || level === "FATAL") {
         fs.appendFileSync(LOG_FILE, line);
     }
 
     if (
-        config.verbose &&
-        LOG_LEVELS[level] >= LOG_LEVELS[config.debugLevel]
+        game_config.verbose &&
+        LOG_LEVELS[level] >= LOG_LEVELS[game_config.debugLevel]
     ) {
         console.log(line.trim());
     }
@@ -59,7 +72,7 @@ function log(level, message, config) {
     }
 }
 function startVerboseHeartbeat(config) {
-    if (!config.verbose)
+    if (!game_config.verbose)
         return;
 
     setInterval(() => {
@@ -82,170 +95,6 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ----- SQLite statements -----
-const stmtUserByName = db.prepare(`SELECT id, username, pass_salt, pass_hash FROM users WHERE username = ?`);
-const stmtUserIdByName = db.prepare(`SELECT id, username FROM users WHERE username = ?`);
-const stmtPlayerByUserId = db.prepare(`SELECT * FROM players WHERE user_id = ?`);
-const stmtLeaderboard = db.prepare(`
-  SELECT users.username AS user, players.xp
-  FROM players
-  JOIN users ON users.id = players.user_id
-  ORDER BY players.xp DESC, users.username ASC
-  LIMIT ?
-`);
-const stmtRecentEvents = db.prepare(`
-  SELECT ts, type, msg
-  FROM events
-  ORDER BY ts DESC
-  LIMIT ?
-`);
-const stmtEventCounts = db.prepare(`
-  SELECT type, COUNT(*) AS count
-  FROM events
-  GROUP BY type
-`);
-const stmtEventTotal = db.prepare(`SELECT COUNT(*) AS total FROM events`);
-const stmtInsertUser = db.prepare(`
-  INSERT INTO users (username, is_admin, pass_salt, pass_hash, created_at)
-  VALUES (?, 0, ?, ?, ?)
-`);
-
-const stmtInsertPlayer = db.prepare(`
-  INSERT INTO players (user_id, xp, kills, ammo, max_ammo, clips, max_clips, accuracy, condition, jammed, updated_at)
-  VALUES (?, 0, 0, 6, 6, 3, 3, 35, 100, 0, ?)
-`);
-
-function updatePlayerAmmo(userId, ammoChange, clipChange) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  const newAmmo = Math.max(0, player.ammo + ammoChange);
-  const newClips = Math.max(0, player.clips + clipChange);
-
-  db.prepare(`
-    UPDATE players
-    SET ammo = ?, clips = ?, updated_at = ?
-    WHERE id = ?
-  `).run(newAmmo, newClips, Date.now(), player.id);
-}
-
-function updatePlayerStats(userId, xpChange, killChange) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  const newXP = Math.max(0, player.xp + xpChange);
-  const newKills = Math.max(0, player.kills + killChange);
-
-  db.prepare(`
-    UPDATE players
-    SET xp = ?, kills = ?, updated_at = ?
-    WHERE id = ?
-  `).run(newXP, newKills, Date.now(), player.id);
-}
-
-function updatePlayerCondition(userId, conditionChange) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  const newCondition = Math.max(0, Math.min(100, player.condition + conditionChange));
-
-  db.prepare(`
-    UPDATE players
-    SET condition = ?, updated_at = ?
-    WHERE id = ?
-  `).run(newCondition, Date.now(), player.id);
-}
-
-function updatePlayerJamStatus(userId, jammed) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  db.prepare(`
-    UPDATE players
-    SET jammed = ?, updated_at = ?
-    WHERE id = ?
-  `).run(jammed ? 1 : 0, Date.now(), player.id);
-}
-
-function updatePlayerGun(userId, gun) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  db.prepare(`
-    UPDATE players
-    SET gun = ?, updated_at = ?
-    WHERE id = ?
-  `).run(gun, Date.now(), player.id);
-}
-
-function updatePlayerAccuracy(userId, accuracyChange) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-  const newAccuracy = Math.max(0, Math.min(100, player.accuracy + accuracyChange));
-  db.prepare(`
-    UPDATE players
-    SET accuracy = ?, updated_at = ?
-    WHERE id = ?
-  `).run(newAccuracy, Date.now(), player.id);
-}
-
-function updatePlayerMaxAmmo(userId, maxAmmoChange) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  const newMaxAmmo = Math.max(0, player.max_ammo + maxAmmoChange);
-
-  db.prepare(`
-    UPDATE players
-    SET max_ammo = ?, updated_at = ?
-    WHERE id = ?
-  `).run(newMaxAmmo, Date.now(), player.id);
-}
-
-function updatePlayerMaxClips(userId, maxClipsChange) {
-  const player = stmtPlayerByUserId.get(userId);
-  if (!player) return;
-
-  const newMaxClips = Math.max(0, player.max_clips + maxClipsChange);
-
-  db.prepare(`
-    UPDATE players
-    SET max_clips = ?, updated_at = ?
-    WHERE id = ?
-  `).run(newMaxClips, Date.now(), player.id);
-}
-
-function updatePlayerInventory(userId, itemName, quantityChange, conditionChange, ammoChange, clipsChange) {
-  const item = db.prepare(`
-    SELECT id, quantity, condition, ammo, clips
-    FROM player_inventory
-    WHERE user_id = ? AND item_name = ?
-  `).get(userId, itemName);
-  if (item) {
-    const newQuantity = Math.max(0, item.quantity + quantityChange);
-    const newCondition = Math.max(0, Math.min(100, item.condition + conditionChange));
-    const newAmmo = Math.max(0, item.ammo + ammoChange);
-    const newClips = Math.max(0, item.clips + clipsChange);
-    if (newQuantity === 0) {
-      db.prepare(`DELETE FROM player_inventory WHERE id = ?`).run(item.id);
-    } else {
-      db.prepare(`
-        UPDATE player_inventory
-        SET quantity = ?, condition = ?, ammo = ?, clips = ?, updated_at = ?
-        WHERE id = ?
-      `).run(newQuantity, newCondition, newAmmo, newClips, Date.now(), item.id);
-    }
-  }
-}
-
-function updatePlayerLocation(userId, location) {
-  db.prepare(`
-    UPDATE players
-    SET location = ?, updated_at = ?
-    WHERE id = ?
-  `).run(location, Date.now(), userId);
-}
-
 function hashPassword(password, salt) {
   log("FULL", `Hashing password with salt=${salt}`, config);
   return crypto.pbkdf2Sync(password, salt, 150000, 32, "sha256").toString("hex");
@@ -254,7 +103,7 @@ function hashPassword(password, salt) {
 // ----- Very simple signed session cookie -----
 function sign(value) {
   log("FULL", `Signing value: ${value}`, config);
-  return crypto.createHmac("sha256", config.sessionSecret).update(value).digest("hex");
+  return crypto.createHmac("sha256", game_config.sessionSecret).update(value).digest("hex");
 }
 function setSession(res, username) {
   const payload = JSON.stringify({ u: username, t: Date.now() });
@@ -289,23 +138,12 @@ app.use(cookieParser());
 // Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
 
-function ensurePlayer(userId) {
-  let player = stmtPlayerByUserId.get(userId);
-  log("FULL", `Ensuring player record for userId=${userId}, found=${!!player}`, config);
-  if (!player) {
-    log("WARN", `No player record found for userId=${userId}, creating one.`, config);
-    stmtInsertPlayer.run(userId, Date.now());
-    player = stmtPlayerByUserId.get(userId);
-  }
-  return player;
-}
-
 function requireAuth(req, res, next) {
   const sess = getSession(req);
   log("FULL", `Authenticating request, session=${JSON.stringify(sess)}`, config);
   if (!sess?.u) return res.redirect("/login.html?err=Please%20login");
   log("FULL", `Looking up user for session username=${sess.u}`, config);
-  const user = stmtUserIdByName.get(sess.u);
+  const user = getUserIdByName(sess.u);
   log("FULL", `User lookup result for username=${sess.u}: ${JSON.stringify(user)}`, config);
   if (!user) return res.redirect("/login.html?err=Please%20login");
   log("FULL", `Authenticated user ${user.username} (id=${user.id})`, config);
@@ -338,15 +176,15 @@ app.post("/register", (req, res) => {
   if (password.length < 4) return res.redirect("/register.html?err=Password%20too%20short");
   log("FULL", `Registration input valid for username=${username}, checking availability`, config);
   // check if user exists
-  const existing = stmtUserByName.get(username);
+  const existing = getUserByName(username);
   if (existing) return res.redirect("/register.html?err=Username%20taken"); log("FULL", `Username ${username} already taken`, config);
 
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = hashPassword(password, salt);
   log("FULL", `Registering new user with username=${username}`, config);
   try {
-    const info = stmtInsertUser.run(username, salt, hash, Date.now());
-	stmtInsertPlayer.run(info.lastInsertRowid, Date.now());
+    const info = insertUser(username, salt, hash, Date.now());
+	insertPlayer(info.lastInsertRowid, Date.now());
     log("FULL", `User ${username} registered successfully with id=${info.lastInsertRowid}`, config);
 
   } catch (e) {
@@ -366,7 +204,7 @@ app.post("/login", (req, res) => {
   const password = String(req.body.password || "");
   log("FULL", `Login attempt for username=${username}`, config);
   if (!username || !password) return res.redirect("/login.html?err=Missing%20fields");
-  const rec = stmtUserByName.get(username);
+  const rec = getUserByName(username);
   if (!rec) {
     return res.redirect("/login.html?err=Bad%20login");
     log("WARN", `No user record found for username=${username}`, config);
@@ -380,6 +218,7 @@ app.post("/login", (req, res) => {
 
   setSession(res, username);
   log("FULL", `User ${username} logged in successfully, redirecting to game`, config);
+  increasePlayerCount(rec.id);
   return res.redirect("/game");
 });
 
@@ -388,6 +227,7 @@ app.post("/logout", (req, res) => {
   res.clearCookie("zboe_session");
   res.redirect("/login.html");
   log("FULL", "User logged out, session cleared", config);
+  decreasePlayerCount(req.userId);
 });
 
 app.get("/game", requireAuth, (req, res) => {
@@ -398,14 +238,14 @@ app.get("/game", requireAuth, (req, res) => {
 app.get("/api/game-state", requireAuth, (req, res) => {
   log("FULL", `API request for game state by user ${req.user}`, config);
   const player = ensurePlayer(req.userId);
-  const leaderboard = stmtLeaderboard.all(10);
-  const recentEvents = stmtRecentEvents.all(80).reverse();
-  const countRows = stmtEventCounts.all();
+  const leaderboard = getLeaderboard(10);
+  const recentEvents = getRecentEvents(80).reverse();
+  const countRows = getEventCounts();
   const eventCounts = countRows.reduce((acc, row) => {
     acc[row.type] = row.count;
     return acc;
   }, {});
-  const totalEvents = stmtEventTotal.get()?.total ?? 0;
+  const totalEvents = getEventTotal();
   const triggerOutOf = 15;
   const triggerValue = totalEvents % triggerOutOf;
   const zombies = Math.max(0, (eventCounts.spawn || 0) - (eventCounts.kill || 0));
@@ -442,4 +282,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`ZBOE web MVP running on http://localhost:${PORT}`);
 });
-

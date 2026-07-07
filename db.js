@@ -140,6 +140,10 @@ const stmtInsertPlayer = db.prepare(`
   INSERT INTO players (user_id, xp, kills, ammo, max_ammo, clips, max_clips, accuracy, condition, jammed, updated_at)
   VALUES (?, 0, 0, 6, 6, 3, 3, 35, 100, 0, ?)
 `);
+const stmtInsertEvent = db.prepare(`
+  INSERT INTO events (ts, type, visibility, msg)
+  VALUES (?, ?, ?, ?)
+`);
 
 // ----- Query functions -----
 export function getUserByName(username) { return stmtUserByName.get(username); }
@@ -151,6 +155,7 @@ export function getEventCounts() { return stmtEventCounts.all(); }
 export function getEventTotal() { return stmtEventTotal.get()?.total ?? 0; }
 export function insertUser(username, salt, hash, createdAt) { return stmtInsertUser.run(username, salt, hash, createdAt); }
 export function insertPlayer(userId, createdAt) { return stmtInsertPlayer.run(userId, createdAt); }
+export function insertEvent(type, msg, visibility = "public") { return stmtInsertEvent.run(Date.now(), type, visibility, msg); }
 
 export function increasePlayerCount(userId) {
   db.prepare(`

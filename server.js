@@ -22,8 +22,8 @@ const LOG_LEVELS = {
     FATAL: 3
 };
 
-const LOG_FILE = path.join(LOG_DIR, file_config.logFile || "server.log");
-fs.mkdirSync(LOG_DIR, { recursive: true });
+const LOG_FILE = path.join("logs/", file_config.logFile || "server.log");
+fs.mkdirSync("logs/", { recursive: true });
 for (const arg of process.argv.slice(2)) {
 
   if (arg === '--dev')

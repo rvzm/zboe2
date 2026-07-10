@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS users (
   is_admin BOOLEAN NOT NULL DEFAULT 0,
   pass_salt TEXT NOT NULL,
   pass_hash TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  last_login INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS players (
   equipped_gun TEXT, -- or INTEGER if you make a weapons table
   location TEXT,                             -- current location_name, or NULL if unset
   hidden INTEGER NOT NULL DEFAULT 0,         -- 0/1, hiding at current location
+  last_seen INTEGER NOT NULL DEFAULT 0,             -- timestamp of last activity 
   updated_at INTEGER NOT NULL
 );
 
@@ -117,6 +119,12 @@ if (!playerColumns.includes("hidden")) {
   db.exec("ALTER TABLE players ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
 }
 
+// Seed the single global game_state row that the online-player counters target.
+db.prepare(`
+  INSERT OR IGNORE INTO game_state (key, updated_at)
+  VALUES ('main', ?)
+`).run(Date.now());
+
 // ----- Prepared statements -----
 const stmtUserByName = db.prepare(`SELECT id, username, pass_salt, pass_hash FROM users WHERE username = ?`);
 const stmtUserIdByName = db.prepare(`SELECT id, username FROM users WHERE username = ?`);
@@ -142,8 +150,8 @@ const stmtEventCounts = db.prepare(`
 `);
 const stmtEventTotal = db.prepare(`SELECT COUNT(*) AS total FROM events`);
 const stmtInsertUser = db.prepare(`
-  INSERT INTO users (username, is_admin, pass_salt, pass_hash, created_at)
-  VALUES (?, 0, ?, ?, ?)
+  INSERT INTO users (username, is_admin, pass_salt, pass_hash, created_at, last_login)
+  VALUES (?, 0, ?, ?, ?, ?)
 `);
 const stmtInsertPlayer = db.prepare(`
   INSERT INTO players (user_id, xp, kills, ammo, max_ammo, clips, max_clips, accuracy, condition, jammed, updated_at)
@@ -162,9 +170,20 @@ export function getLeaderboard(limit) { return stmtLeaderboard.all(limit); }
 export function getRecentEvents(limit) { return stmtRecentEvents.all(limit); }
 export function getEventCounts() { return stmtEventCounts.all(); }
 export function getEventTotal() { return stmtEventTotal.get()?.total ?? 0; }
-export function insertUser(username, salt, hash, createdAt) { return stmtInsertUser.run(username, salt, hash, createdAt); }
+export function insertUser(username, salt, hash, createdAt) { return stmtInsertUser.run(username, salt, hash, createdAt, createdAt); }
 export function insertPlayer(userId, createdAt) { return stmtInsertPlayer.run(userId, createdAt); }
 export function insertEvent(type, msg, visibility = "public") { return stmtInsertEvent.run(Date.now(), type, visibility, msg); }
+
+// Records the moment a user authenticated (account-level metadata on `users`).
+export function updateLastLogin(userId) {
+  db.prepare(`UPDATE users SET last_login = ? WHERE id = ?`).run(Date.now(), userId);
+}
+
+// Marks a player as active "now" — called on each game-state poll so presence
+// can be derived from players.last_seen instead of a drifting counter.
+export function touchPlayerSeen(userId) {
+  db.prepare(`UPDATE players SET last_seen = ? WHERE user_id = ?`).run(Date.now(), userId);
+}
 
 export function increasePlayerCount(userId) {
   db.prepare(`
@@ -319,35 +338,20 @@ export function updatePlayerLocation(userId, location) {
   const player = stmtPlayerByUserId.get(userId);
   if (!player) return;
 
-  const oldLocation = player.location;
-  if (oldLocation === location) return;
-
-  const now = Date.now();
-
-  if (oldLocation) {
-    db.prepare(`
-      UPDATE locations
-      SET user_count = MAX(0, user_count - 1), updated_at = ?
-      WHERE location_name = ?
-    `).run(now, oldLocation);
-  }
-
-  if (location) {
-    db.prepare(`
-      INSERT INTO locations (location_name, user_count, updated_at)
-      VALUES (?, 1, ?)
-      ON CONFLICT(location_name) DO UPDATE SET
-        user_count = user_count + 1,
-        updated_at = excluded.updated_at
-    `).run(location, now);
-  }
+  if (player.location === location) return;
 
   db.prepare(`
     UPDATE players
     SET location = ?, updated_at = ?
     WHERE user_id = ?
-  `).run(location, now, userId);
+  `).run(location, Date.now(), userId);
 }
+
+// Location occupancy is derived from the players table, not a separate table.
+const stmtLocationCount = db.prepare(`
+  SELECT COUNT(*) AS count FROM players WHERE location = ?
+`);
+export function getLocationCount(location) { return stmtLocationCount.get(location)?.count ?? 0; }
 
 export function updatePlayerHidden(userId, hidden) {
   db.prepare(`

@@ -446,6 +446,13 @@
       };
     }
 
+    function setupAutoRefresh(){
+      setInterval(() => {
+        loadState();
+      }, 30000); // every 30 seconds
+    }
+
+
     $("btnRefresh").addEventListener("click", () => {
       loadState();
     });

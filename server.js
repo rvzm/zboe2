@@ -280,5 +280,5 @@ app.get("/api/game-state", requireAuth, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`ZBOE web MVP running on http://localhost:${PORT}`);
+  console.log(`ZBOE web running on http://localhost:${PORT}`);
 });

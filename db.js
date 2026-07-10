@@ -11,6 +11,15 @@ const __dirname = path.dirname(__filename);
 // This makes a ./data folder beside your app.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "data", file_config.databaseFile || "zboe.sqlite");
 
+export const valid_locations = [
+  "base_outside",
+  "base_inside",
+  "bunker",
+  "forest",
+  "lake",
+  "mountains"
+];
+
 import fs from "fs";
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 

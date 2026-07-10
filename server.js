@@ -5,7 +5,7 @@ import {
   updatePlayerAmmo, updatePlayerStats, updatePlayerCondition,
   updatePlayerJamStatus, updatePlayerGun, updatePlayerAccuracy,
   updatePlayerMaxAmmo, updatePlayerMaxClips, updatePlayerInventory,
-  updatePlayerLocation, updatePlayerHidden,
+  updatePlayerLocation, updatePlayerHidden, valid_locations
 } from "./db.js";
 import express from "express";
 import cookieParser from "cookie-parser";

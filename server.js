@@ -41,7 +41,7 @@ for (const arg of process.argv.slice(2)) {
 }
 
 const production = process.argv.includes('--production');
-if (config.dev && production) {
+if (game_config.dev && production) {
   console.error(
     'ERROR: --dev and --production cannot be used together.'
   );

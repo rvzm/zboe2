@@ -11,5 +11,6 @@ export const game_config = {
   verbose: false, // Set to true for detailed logging
   dev: false, // Set to true for development mode, false for development mode
   debugLevel: 'NONE', // Set to 'FULL', 'WARN', 'ERROR', or 'FATAL' for logging levels
-  sessionSecret: 'changeme' // Change this to a secure random string in production
+  sessionSecret: 'changeme', // Change this to a secure random string in production
+  timeout: 60 // Session timeout in seconds
 };

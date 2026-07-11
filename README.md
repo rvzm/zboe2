@@ -2,13 +2,20 @@
 
 ### Zombie Biohazard Occult Experiment 2
 
-[ Version 2.0.2 ]
+[ Version 2.0.22-RC1 ]
 
 zboe2 is a web-based NodeJS game, adapted from my original IRC-based game.
 
 This file will be updated as this project develops.
 
 Currently it's still in early development
+
+## ⚠️ Session Secret
+
+Change `sessionSecret` in `config.js` (or pass `--set game_config.sessionSecret=...`) before any real deployment — it keys the session-cookie signing. While it's left at the default `'changeme'`:
+
+- **Production/stable runs refuse to start** (a FATAL sanity halt).
+- **Dev runs (`--dev`) print a warning and continue**, so local development isn't blocked.
 
 ## The Game
 

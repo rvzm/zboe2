@@ -1,7 +1,14 @@
 # Changelog
 #- All changes will be recorded here.
 
-Any entries marked with [*DB] are potentially database-file breaking, and may require starting a new database.
+### Any entries marked as "## (version) [(branch)]"
+### updates with [*DB] are potentially database-file breaking, and may require starting a new database.
+
+## 2.0.22 RC1 [dev release] [*DB]
+ - Release Version
+
+## 2.0.21.1 [dev] [*DB]
+ - Claude did a lot of the heavy lifting. Sorry y'all, I want it back up and running all pretty again. Call me lazy but I had it working before my server had a drive failure of epic proportions.
 
 ## 2.0.2 [dev] [*DB]
 - started changelog

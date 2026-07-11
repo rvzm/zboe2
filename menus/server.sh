@@ -1,16 +1,23 @@
 #!/bin/bash
 
-SERVICE="zboe.service"
+BASE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PID_FILE="$BASE_DIR/logs/zboe.pid"
+
+server_status() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+        echo "running (pid $(cat "$PID_FILE"))"
+    else
+        echo "stopped"
+    fi
+}
 
 while true; do
 
-    STATUS=$(systemctl is-active "$SERVICE" 2>/dev/null)
-
     CHOICE=$(dialog \
         --title "Server Management" \
-        --menu "Status: $STATUS" \
+        --menu "Status: $(server_status)" \
         20 70 10 \
-        1 "Start" \
+        1 "Start (background)" \
         2 "Stop" \
         3 "Restart" \
         4 "Status" \
@@ -23,24 +30,27 @@ while true; do
     case "$CHOICE" in
 
         1)
-            sudo systemctl start "$SERVICE"
+            ( cd "$BASE_DIR" && node server.js )
+            read -p "Press enter..."
             ;;
 
         2)
-            sudo systemctl stop "$SERVICE"
+            ( cd "$BASE_DIR" && node server.js --stop )
+            read -p "Press enter..."
             ;;
 
         3)
-            sudo systemctl restart "$SERVICE"
+            ( cd "$BASE_DIR" && node server.js --stop; node server.js )
+            read -p "Press enter..."
             ;;
 
         4)
-            systemctl status "$SERVICE"
+            echo "Server is $(server_status)."
             read -p "Press enter..."
             ;;
 
         5)
-            "$PWD/menus/server_launch.sh"
+            "$BASE_DIR/menus/server_launch.sh"
             ;;
 
         *)

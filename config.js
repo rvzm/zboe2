@@ -11,10 +11,12 @@ export const file_config = {
 export const game_config = {
   verbose: false, // Set to true for detailed logging
   dev: false, // Set to true for development mode, false for development mode
-  debugLevel: 'NONE', // Set to 'FULL', 'WARN', 'ERROR', or 'FATAL' for logging levels
+  debugLevel: 'NONE', // Set to 'FULL', 'INFO', 'WARN', 'ERROR', or 'FATAL' for logging levels
   sessionSecret: 'changeme', // Change this to a secure random string in production
-  timeout: 60, // Session timeout in seconds
-  heartbeatSeconds: 30 // How often the --verbose heartbeat prints
+  timeout: 10, // Session timeout in seconds
+  heartbeatSeconds: 10, // How often the --verbose heartbeat prints
+  baseMaxHealth: 10000, // Base (inside) health pool
+  experimentResetHours: 24 // Hours a destroyed base persists before auto-resetting the experiment
 };
 
 export const zombie_config = {

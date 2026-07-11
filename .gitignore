@@ -8,7 +8,6 @@ build/
 data/
 logs/
 util/
-menus/
 .env
 .env.local
 *.sqlite

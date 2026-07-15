@@ -23,21 +23,37 @@
       max-height: 360px;
       overflow: auto;
     }
-    .online-list {
-      max-height: 240px;
+    .leaderboard {
+      max-height: 340px;
       overflow: auto;
     }
-    .leaderboard {
-      max-height: 240px;
-      overflow: auto;
+    /* Backpack sub-tab tables (Bootstrap tables default to dark-on-light) */
+    .pack-table th, .pack-table td {
+      color: #e9ecef;
+      background: transparent;
+      border-color: rgba(255,255,255,.12);
+      vertical-align: middle;
+    }
+    .pack-table th {
+      color: rgba(255,255,255,.65);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: .8rem;
+      font-weight: 500;
     }
     .soft-card {
       background: rgba(255,255,255,.03);
       border-color: rgba(255,255,255,.12);
     }
+    /* Bootstrap cards reset to the (dark) body color — without this the header
+       titles are near-invisible on the dark background. */
     .soft-card .card-header {
-      background: rgba(255,255,255,.04);
+      background: rgba(255,255,255,.06);
       border-color: rgba(255,255,255,.12);
+      color: #ffffff;
+    }
+    .soft-card .card-header .fw-semibold {
+      text-shadow: 0 0 8px rgba(255,255,255,.25);
+      letter-spacing: .02em;
     }
     .badge-soft {
       background: rgba(13,110,253,.15);
@@ -49,8 +65,9 @@
     .soft-card .fs-5,
     .soft-card .fs-6 { color: #ffffff; }
 
-    /* Shiny player name — color tier set by JS from the player's level */
-    #meHudName {
+    /* Shiny player name — color tier set by JS from the player's level.
+       Used by the HUD name and the Players-list usernames. */
+    .shiny-name {
       /* longhands only — the `background` shorthand would reset background-clip */
       background-image: linear-gradient(90deg, #9aa0a6 0%, #cfd3d8 20%, #ffffff 50%, #cfd3d8 80%, #9aa0a6 100%);
       background-size: 200% auto;
@@ -61,15 +78,15 @@
       text-shadow: 0 0 6px rgba(255,255,255,.18);
       animation: gold-shimmer 3.5s linear infinite;
     }
-    #meHudName.name-green { background-image: linear-gradient(90deg, #1a5c1a 0%, #4caf50 20%, #c9ffcf 50%, #4caf50 80%, #1a5c1a 100%); }
-    #meHudName.name-blue  { background-image: linear-gradient(90deg, #123a6b 0%, #3b82f6 20%, #cfe6ff 50%, #3b82f6 80%, #123a6b 100%); }
-    #meHudName.name-red   { background-image: linear-gradient(90deg, #6b1414 0%, #e04747 20%, #ffcccc 50%, #e04747 80%, #6b1414 100%); }
-    #meHudName.name-gold  { background-image: linear-gradient(90deg, #8a6d1d 0%, #d4af37 20%, #fff4c2 50%, #d4af37 80%, #8a6d1d 100%); }
+    .shiny-name.name-green { background-image: linear-gradient(90deg, #1a5c1a 0%, #4caf50 20%, #c9ffcf 50%, #4caf50 80%, #1a5c1a 100%); }
+    .shiny-name.name-blue  { background-image: linear-gradient(90deg, #123a6b 0%, #3b82f6 20%, #cfe6ff 50%, #3b82f6 80%, #123a6b 100%); }
+    .shiny-name.name-red   { background-image: linear-gradient(90deg, #6b1414 0%, #e04747 20%, #ffcccc 50%, #e04747 80%, #6b1414 100%); }
+    .shiny-name.name-gold  { background-image: linear-gradient(90deg, #8a6d1d 0%, #d4af37 20%, #fff4c2 50%, #d4af37 80%, #8a6d1d 100%); }
     @keyframes gold-shimmer {
       to { background-position: -200% center; }
     }
     @media (prefers-reduced-motion: reduce) {
-      #meHudName { animation: none; }
+      .shiny-name { animation: none; }
     }
   </style>
 </head>
@@ -78,7 +95,7 @@
   <nav class="navbar navbar-expand-lg navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
     <div class="container py-2">
       <a class="navbar-brand fw-semibold" href="#">
-        🧟 ZBOE <span class="opacity-75">Global Hunt</span> <small>[DEV] 2.0.21.1</small>
+        🧟 ZBOE <span class="opacity-75">Global Hunt</span> <small id="verBadge"></small>
       </a>
 
       <div class="d-flex align-items-center gap-2">
@@ -86,6 +103,10 @@
         <span class="badge rounded-pill text-bg-warning text-dark" id="hordeBadge">HORDE: NO</span>
         <span class="badge rounded-pill badge-soft" id="zombieBadge">ZOMBIES: 1</span>
         <span class="muted-mono">Logged in as <span class="text-white" id="meName">rvzm</span></span>
+        <a class="btn btn-sm btn-outline-danger d-none" id="adminLink" href="/admin">Admin</a>
+        <form method="POST" action="/logout" class="m-0">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Logout</button>
+        </form>
       </div>
     </div>
   </nav>
@@ -97,9 +118,10 @@
         <!-- Player card -->
         <div class="card soft-card mb-3">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="fw-semibold">Your Loadout</div>
+            <div class="fw-semibold" id="loadoutTitle">Your Loadout</div>
             <div class="d-flex align-items-center gap-2">
               <span class="badge rounded-pill text-bg-dark border" id="gunBadge">Handgun</span>
+              <span class="badge rounded-pill text-bg-success" id="condPill">100%</span>
               <button class="btn btn-sm btn-outline-light py-0 px-2" id="btnPlayerInfo" style="font-size: .72rem;">Player Info</button>
               <span class="badge rounded-pill text-bg-secondary" id="jamBadge">JAM: NO</span>
             </div>
@@ -112,7 +134,7 @@
                 <span class="fs-4 fw-semibold" id="meLevel">1</span>
               </div>
               <div class="flex-grow-1" style="min-width:0;">
-                <div class="fw-semibold text-truncate mb-1" id="meHudName">player</div>
+                <div class="fw-semibold text-truncate mb-1 shiny-name" id="meHudName">player</div>
                 <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
                   <span>Health</span><span id="meHealthText">100 / 100</span>
                 </div>
@@ -122,13 +144,20 @@
                 <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
                   <span>Shield</span><span id="meShieldText">0 / 100</span>
                 </div>
-                <div class="progress" style="height:12px; background: rgba(255,255,255,.08);">
+                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
                   <div class="progress-bar bg-primary" id="meShieldBar" role="progressbar" style="width:0%;"></div>
+                </div>
+                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                  <span>XP</span><span id="meXpText">0 / 100</span>
+                </div>
+                <div class="progress" style="height:12px; background: rgba(255,255,255,.08);">
+                  <div class="progress-bar bg-warning" id="meXpBar" role="progressbar" style="width:0%;"></div>
                 </div>
               </div>
             </div>
 
-            <div class="row g-2 mb-3">
+            <!-- Combat loadout (zombie zones only) -->
+            <div class="row g-2 mb-3" id="gunStats">
               <div class="col-6">
                 <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
                   <div class="muted-mono">Ammo</div>
@@ -141,31 +170,48 @@
                   <div class="fs-5 fw-semibold"><span id="meClips">2</span> / <span id="meMaxClips">3</span></div>
                 </div>
               </div>
-              <div class="col-6">
-                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                  <div class="muted-mono">Gun Cond</div>
-                  <div class="fs-5 fw-semibold" id="meCond">86</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Leveling: spend XP -->
-            <div class="d-flex gap-2 mb-2">
-              <button class="btn btn-sm btn-outline-warning flex-grow-1" id="btnLevelUp">Level Up</button>
-              <button class="btn btn-sm btn-outline-warning" id="btnLevelMax">Max</button>
             </div>
 
             <div class="d-grid gap-2">
-              <button class="btn btn-success" id="btnShoot">Shoot</button>
-              <div class="d-flex gap-2">
-                <button class="btn btn-outline-light w-50" id="btnReload">Reload</button>
-                <button class="btn btn-outline-warning w-50" id="btnUnjam">Unjam</button>
+              <div class="d-grid gap-2" id="combatButtons">
+                <button class="btn btn-success" id="btnShoot">Shoot</button>
+                <!-- Gun switcher: solid = equipped, outline = owned, locked = unowned -->
+                <div class="d-flex gap-2" id="gunSwitch">
+                  <button class="btn btn-sm btn-primary w-100" data-gun="Handgun" type="button">Handgun</button>
+                  <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Rifle" type="button">Rifle</button>
+                  <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Shotgun" type="button">Shotgun</button>
+                </div>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-light w-50" id="btnReload">Reload</button>
+                  <button class="btn btn-outline-warning w-50" id="btnUnjam">Unjam</button>
+                </div>
               </div>
               <div class="d-flex gap-2">
                 <button class="btn btn-outline-primary w-50" id="btnShop">Shop</button>
                 <button class="btn btn-outline-info w-50" id="btnInventory">Inventory</button>
               </div>
+              <!-- Adventure Panel (safe zones): campfire, cooking, meditation -->
+              <div class="d-grid gap-2 d-none" id="adventurePanel">
+                <div class="p-2 border rounded muted-mono d-none" id="campfireStatus" style="border-color: rgba(255,140,0,.4) !important;">🔥 Campfire burning</div>
+                <button class="btn btn-outline-warning" id="btnCampfire">Build Campfire (2 firewood)</button>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-success w-50" id="btnCook">Cook Food</button>
+                  <button class="btn btn-outline-secondary w-50" id="btnDouse">Put Out Fire</button>
+                </div>
+                <button class="btn btn-outline-info" id="btnMeditate">Meditate on Magical Theory</button>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Personal activity feed (your own reload/fire/shop/etc.) -->
+        <div class="card soft-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="fw-semibold">Your Activity</div>
+            <div class="muted-mono">personal</div>
+          </div>
+          <div class="list-group list-group-flush" id="personalFeed" style="max-height: 260px; overflow-y: auto;">
+            <!-- personal events inserted here -->
           </div>
         </div>
       </div>
@@ -177,7 +223,6 @@
             <button class="btn btn-sm btn-outline-success" id="btnHuntToggle">Enable Hunt</button>
             <button class="btn btn-sm btn-outline-warning" id="btnCallZombie">Call Zombie</button>
             <span class="badge text-bg-primary" id="timeBadge">Tick: every 5 min</span>
-            <span class="badge text-bg-secondary" id="triggerBadge">Trigger: 8 / 15</span>
             <span class="badge text-bg-info text-dark" id="onlineCountBadge">Online: 4</span>
           </div>
         </div>
@@ -203,11 +248,12 @@
 
       <!-- Right: hunt info + leaderboard + online -->
       <div class="col-lg-3" style="overflow-y: auto; max-height: 100%;">
-        <!-- Hunt Info card -->
+        <!-- Hunt Info card. In safe (no-zombie) locations it becomes "Actions":
+             the hunt stats hide and the location box stays. -->
         <div class="card soft-card mb-3">
-          <div class="card-header fw-semibold">Hunt Info</div>
+          <div class="card-header fw-semibold" id="huntInfoTitle">Hunt Info</div>
           <div class="card-body">
-            <div class="row g-2">
+            <div class="row g-2" id="huntStats">
               <div class="col-6">
                 <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
                   <div class="muted-mono">Zombies</div>
@@ -232,18 +278,29 @@
                   <div class="fs-5 fw-semibold" id="huntState">Inactive</div>
                 </div>
               </div>
+            </div>
+            <!-- Safe zone: quiet note (actions render below in any zone). -->
+            <div class="p-2 border rounded d-none" id="safeActions" style="border-color: rgba(255,255,255,.12) !important;">
+              <div class="muted-mono">It's quiet here — no zombies in this area.</div>
+            </div>
+            <!-- This location's actions (from LOCATION_ACTIONS in db.js). -->
+            <div class="mt-2" id="actionsList"></div>
+            <div class="row g-2 mt-0">
               <div class="col-12">
-                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                  <div class="muted-mono">Location</div>
-                  <div class="fs-6 fw-semibold" id="meLocation">—</div>
+                <div class="p-2 border rounded d-flex align-items-center justify-content-between" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div>
+                    <div class="muted-mono">Location</div>
+                    <div class="fs-6 fw-semibold" id="meLocation">—</div>
+                  </div>
+                  <button class="btn btn-sm btn-outline-info" id="btnMap">Map</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Base card -->
-        <div class="card soft-card mb-3">
+        <!-- Base card (only shown while at Basecamp) -->
+        <div class="card soft-card mb-3" id="baseCard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="fw-semibold">The Base</div>
             <button class="btn btn-sm btn-outline-info" id="btnInsideOutside">Go Inside</button>
@@ -266,28 +323,16 @@
           </div>
         </div>
 
-        <!-- Leaderboard card -->
-        <div class="card soft-card mb-3">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="fw-semibold">XP Leaderboard</div>
-            <div class="muted-mono">top players</div>
-          </div>
-          <div class="card-body p-0">
-            <div class="list-group list-group-flush leaderboard" id="leaderboard">
-              <!-- rows inserted -->
-            </div>
-          </div>
-        </div>
-
-        <!-- Online now card -->
+        <!-- Players card: XP leaderboard + online status, combined. Rank badge
+             background = online (green) / offline (grey). -->
         <div class="card soft-card">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="fw-semibold">Online Now</div>
-            <div class="muted-mono" id="onlineCount">4</div>
+            <div class="fw-semibold">Players</div>
+            <div class="muted-mono"><span class="text-success">●</span> online: <span id="onlineCount">0</span></div>
           </div>
           <div class="card-body p-0">
-            <div class="list-group list-group-flush online-list" id="onlineList">
-              <!-- users inserted -->
+            <div class="list-group list-group-flush leaderboard" id="playerList">
+              <!-- rows inserted -->
             </div>
           </div>
         </div>
@@ -333,7 +378,45 @@
                 <div class="fs-4 fw-semibold" id="meGold">0</div>
               </div>
             </div>
+            <div class="col-6">
+              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+                <div class="muted-mono">Tokens</div>
+                <div class="fs-4 fw-semibold" id="meTokens">0</div>
+              </div>
+            </div>
           </div>
+
+          <!-- Leveling: spend XP -->
+          <div class="mt-3">
+            <div class="muted-mono mb-1">Leveling <span id="meLevelInfo"></span></div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-warning flex-grow-1" id="btnLevelUp">Level Up</button>
+              <button class="btn btn-sm btn-outline-warning" id="btnLevelMax">Max</button>
+            </div>
+          </div>
+
+          <!-- Skills: level + XP progress toward the next level (spend to level) -->
+          <div class="mt-3">
+            <div class="muted-mono mb-1">Skills</div>
+            <div id="skillList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- World Map modal (hidden from players inside the base) -->
+  <div class="modal fade" id="mapModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">World Map</h5>
+          <span class="badge text-bg-info text-dark ms-2" id="mapCurrent">—</span>
+          <span class="badge ms-2 d-none" id="mapBaseHp"></span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="mapList"></div>
         </div>
       </div>
     </div>
@@ -351,20 +434,89 @@
         <div class="btn-group btn-group-sm w-100 p-2" role="group" id="shopTabs">
           <button class="btn btn-outline-light active" data-tab="items" type="button">Items</button>
           <button class="btn btn-outline-light" data-tab="upgrades" type="button">Upgrades</button>
-          <button class="btn btn-outline-light" data-tab="inventory" type="button">Inventory</button>
         </div>
         <div class="modal-body p-0">
           <div class="shop-tab" id="tab-items">
+            <!-- Category sub-tabs (mirrors the Backpack's layout) -->
+            <div class="btn-group btn-group-sm w-100 px-2 pt-2 pb-2" role="group" id="shopCatTabs">
+              <button class="btn btn-outline-info active" data-shopcat="consumables" type="button">Consumables</button>
+              <button class="btn btn-outline-info" data-shopcat="guns" type="button">Guns</button>
+              <button class="btn btn-outline-info" data-shopcat="tools" type="button">Tools</button>
+              <button class="btn btn-outline-info" data-shopcat="tokens" type="button">Tokens</button>
+            </div>
             <div class="list-group list-group-flush" id="shopList"></div>
           </div>
           <div class="shop-tab d-none" id="tab-upgrades">
             <div class="list-group list-group-flush" id="upgradeList"></div>
           </div>
-          <div class="shop-tab d-none" id="tab-inventory">
-            <div class="list-group list-group-flush" id="usableList"></div>
-            <div class="px-3 py-2 muted-mono border-top" style="border-color: rgba(255,255,255,.12) !important;">All items</div>
-            <div class="list-group list-group-flush" id="inventoryList" style="max-height: 220px; overflow: auto;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inventory modal: Toolbag (quick-use combat consumables) + Backpack
+       (everything else, sub-tabbed by item type with type-specific columns) -->
+  <div class="modal fade" id="invModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Inventory</h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="btn-group btn-group-sm w-100 p-2" role="group" id="invTabs">
+          <button class="btn btn-outline-light active" data-invtab="toolbag" type="button">Toolbag</button>
+          <button class="btn btn-outline-light" data-invtab="backpack" type="button">Backpack</button>
+        </div>
+        <div class="modal-body p-0">
+          <div id="invToolbag">
+            <div class="list-group list-group-flush" id="toolbagList"></div>
           </div>
+          <div id="invBackpack" class="d-none">
+            <div class="btn-group btn-group-sm w-100 px-2 pb-2" role="group" id="packTabs">
+              <button class="btn btn-outline-info active" data-packtab="guns" type="button">Guns</button>
+              <button class="btn btn-outline-info" data-packtab="tools" type="button">Tools</button>
+              <button class="btn btn-outline-info" data-packtab="consumables" type="button">Consumables</button>
+              <button class="btn btn-outline-info" data-packtab="materials" type="button">Materials</button>
+            </div>
+            <div id="packBody" class="px-2 pb-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sell modal: quantity-or-all treasure selling -->
+  <div class="modal fade" id="sellModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Sell — <span id="sellName"></span></h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="muted-mono mb-2" id="sellInfo"></div>
+          <div class="d-flex gap-2 mb-2">
+            <input type="number" class="form-control form-control-sm" id="sellQty" value="1" min="1">
+            <button class="btn btn-sm btn-outline-light" id="sellAll" type="button">All</button>
+          </div>
+          <div class="fw-semibold mb-2" id="sellTotal">Total: 0 gold</div>
+          <button class="btn btn-success w-100" id="sellConfirm" type="button">Sell</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Campfire cooking modal: campfire-station recipes with readiness flags -->
+  <div class="modal fade" id="cookModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">🔥 Campfire Cooking</h5>
+          <span class="badge text-bg-warning text-dark ms-2" id="cookFireLeft"></span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="cookList"></div>
         </div>
       </div>
     </div>
@@ -384,7 +536,6 @@
       raid: false,
       zombies: 0,
       tickSeconds: 15,
-      trigger: { value: 0, outOf: 15 },
       base: { health: 10000, max: 10000, destroyed: false },
       nuke: null,
       online: [],
@@ -397,10 +548,13 @@
         nextLevelCost: 0,
         canLevel: false,
         gold: 0,
+        tokens: 0,
+        goldenShots: 0,
         kills: 0,
         health: 100,
         maxHealth: 100,
         shield: 0,
+        maxShield: 100,
         ammo: 0,
         maxAmmo: 0,
         clips: 0,
@@ -408,11 +562,20 @@
         acc: 0,
         cond: 0,
         equippedGun: "Handgun",
+        guns: [],
         location: null,
+        locationName: "—",
         inside: false,
+        atBase: true,
+        zombieZone: true,
+        busyUntil: 0,
+        campfireUntil: 0,
+        skills: [],
+        map: [],
         isAdmin: false,
         jammed: false
       },
+      actions: [],
       events: []
     };
 
@@ -458,13 +621,13 @@
     }
 
     function renderTop(){
+      if (state.version) $("verBadge").textContent = `[DEV] ${state.version}`;
       $("huntState").textContent = state.huntActive ? "Active" : "Inactive";
       $("hordeState").textContent = state.hordeStatus;
       $("raidState").textContent = state.raid ? "Yes" : "No";
       $("zombieCount").textContent = state.zombies;
 
       $("timeBadge").textContent = `Tick: every ${state.tickSeconds} seconds`;
-      $("triggerBadge").textContent = `Trigger: ${state.trigger.value} / ${state.trigger.outOf}`;
       $("onlineCountBadge").textContent = `Online: ${state.online.length}`;
 
       $("huntBadge").className = "badge rounded-pill " + (state.huntActive ? "text-bg-success" : "text-bg-secondary");
@@ -487,6 +650,7 @@
 
     function renderMe(){
       $("meName").textContent = state.me.user;
+      $("adminLink").classList.toggle("d-none", !state.me.isAdmin);
       const hud = $("meHudName");
       hud.textContent = state.me.user;
       hud.classList.remove("name-green", "name-blue", "name-red", "name-gold");
@@ -500,24 +664,92 @@
       const hpPct = state.me.maxHealth > 0 ? (state.me.health / state.me.maxHealth) * 100 : 0;
       $("meHealthText").textContent = `${state.me.health} / ${state.me.maxHealth}`;
       $("meHealthBar").style.width = Math.max(0, Math.min(100, hpPct)) + "%";
-      $("meShieldText").textContent = `${state.me.shield} / 100`;
-      $("meShieldBar").style.width = Math.max(0, Math.min(100, state.me.shield)) + "%";
+      const shieldPct = state.me.maxShield > 0 ? (state.me.shield / state.me.maxShield) * 100 : 0;
+      $("meShieldText").textContent = `${state.me.shield} / ${state.me.maxShield}`;
+      $("meShieldBar").style.width = Math.max(0, Math.min(100, shieldPct)) + "%";
+
+      // XP bar: progress toward the next level's cost (caps at full).
+      const xpPct = state.me.nextLevelCost > 0 ? Math.min(100, (state.me.xp / state.me.nextLevelCost) * 100) : 0;
+      $("meXpText").textContent = `${state.me.xp} / ${state.me.nextLevelCost}`;
+      $("meXpBar").style.width = xpPct + "%";
 
       $("meAmmo").textContent = state.me.ammo;
       $("meMaxAmmo").textContent = state.me.maxAmmo;
       $("meClips").textContent = state.me.clips;
       $("meMaxClips").textContent = state.me.maxClips;
       $("meAcc").textContent = state.me.acc;
-      $("meCond").textContent = state.me.cond;
       $("meGold").textContent = state.me.gold;
-      $("meLocation").textContent = state.me.location || "—";
+      $("meTokens").textContent = state.me.tokens;
+      $("meLocation").textContent = state.me.locationName;
+      // No map inside the base; the Base card only exists at Basecamp.
+      $("btnMap").classList.toggle("d-none", state.me.inside);
+      $("baseCard").classList.toggle("d-none", !state.me.atBase);
 
-      $("gunBadge").textContent = `${state.me.equippedGun} · ${state.me.cond}%`;
+      // Safe (no-zombie) location: Hunt Info becomes Actions — hunt stats out,
+      // placeholder in, hunt buttons dead until you travel back to the action.
+      $("huntInfoTitle").textContent = state.me.zombieZone ? "Hunt Info" : "Actions";
+      $("huntStats").classList.toggle("d-none", !state.me.zombieZone);
+      $("safeActions").classList.toggle("d-none", state.me.zombieZone);
+      if (!state.me.zombieZone) $("btnCallZombie").disabled = true; // renderTop set it from huntActive
+
+      // Safe zone: the Loadout card becomes the Adventure Panel — same HUD +
+      // Player Info, but gun stats/combat buttons swap for campfire/cook/meditate.
+      const safe = !state.me.zombieZone;
+      $("loadoutTitle").textContent = safe ? "Adventure Panel" : "Your Loadout";
+      $("gunBadge").classList.toggle("d-none", safe);
+      $("jamBadge").classList.toggle("d-none", safe);
+      // (condPill's visibility is folded into its tier className below)
+      $("gunStats").classList.toggle("d-none", safe);
+      $("combatButtons").classList.toggle("d-none", safe);
+      $("adventurePanel").classList.toggle("d-none", !safe);
+      if (safe) {
+        const fireLeft = Math.max(0, state.me.campfireUntil - Date.now());
+        const burning = fireLeft > 0;
+        const busy = state.me.busyUntil > Date.now();
+        const fmt = (ms) => { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 60)}m ${s % 60}s`; };
+        $("campfireStatus").classList.toggle("d-none", !burning);
+        if (burning) $("campfireStatus").textContent = `🔥 Campfire burning — ${fmt(fireLeft)} left`;
+        $("btnCampfire").classList.toggle("d-none", burning);
+        $("btnCampfire").disabled = busy;
+        $("btnCook").disabled = !burning;
+        $("btnDouse").classList.toggle("d-none", !burning);
+        $("btnMeditate").disabled = busy;
+        $("btnMeditate").textContent = busy ? `Busy… ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : "Meditate on Magical Theory";
+      }
+
+      // While the Golden Gun overlay is active, show its remaining shots.
+      const golden = state.me.goldenShots > 0;
+      $("gunBadge").textContent = golden
+        ? `Golden Gun · ${state.me.goldenShots} shots`
+        : state.me.equippedGun;
+      $("gunBadge").className = "badge rounded-pill border " + (golden ? "text-bg-warning text-dark" : "text-bg-dark");
+
+      // Condition pill: green 100-85, blue 84-61, yellow 60-41, red 40-21,
+      // white ≤20 — and a flat "BROKEN" at 0.
+      const cond = state.me.cond;
+      const condTier =
+        cond >= 85 ? "text-bg-success" :
+        cond >= 61 ? "text-bg-primary" :
+        cond >= 41 ? "text-bg-warning text-dark" :
+        cond >= 21 ? "text-bg-danger" : "text-bg-light text-dark";
+      const pill = $("condPill");
+      pill.className = "badge rounded-pill " + condTier + (safe ? " d-none" : "");
+      pill.textContent = cond <= 0 ? "BROKEN" : `${cond}%`;
 
       $("jamBadge").className = "badge rounded-pill " + (state.me.jammed ? "text-bg-danger" : "text-bg-secondary");
       $("jamBadge").textContent = "JAM: " + (state.me.jammed ? "YES" : "NO");
 
-      // Leveling controls.
+      // Gun switcher: solid = equipped, outline = owned & switchable, locked = unowned.
+      const gunsByName = Object.fromEntries(state.me.guns.map(g => [g.name, g]));
+      $("gunSwitch").querySelectorAll("[data-gun]").forEach(btn => {
+        const g = gunsByName[btn.dataset.gun] || { owned: false, equipped: false };
+        btn.disabled = !g.owned || g.equipped;
+        btn.className = "btn btn-sm w-100 " + (g.equipped ? "btn-primary" : g.owned ? "btn-outline-light" : "btn-outline-secondary");
+        btn.textContent = g.owned ? btn.dataset.gun : `${btn.dataset.gun} 🔒`;
+      });
+
+      // Leveling controls (in the Player Info modal).
+      $("meLevelInfo").textContent = `— level ${state.me.level}, next: ${state.me.nextLevelCost} XP`;
       $("btnLevelUp").textContent = `Level Up (${state.me.nextLevelCost} XP)`;
       $("btnLevelUp").disabled = !state.me.canLevel;
       $("btnLevelMax").disabled = !state.me.canLevel;
@@ -528,9 +760,11 @@
       io.disabled = !state.me.inside && state.base.destroyed;
 
       // disable buttons based on state (client-side only; server should enforce too)
-      $("btnShoot").disabled = !state.huntActive || state.zombies <= 0 || state.me.jammed || state.me.cond <= 0 || state.me.ammo <= 0;
+      // Golden Gun ignores ammo/jam/condition while active.
+      $("btnShoot").disabled = !state.huntActive || state.zombies <= 0 || !state.me.zombieZone ||
+        (!golden && (state.me.jammed || state.me.cond <= 0 || state.me.ammo <= 0));
       $("btnReload").disabled = state.me.clips <= 0 || state.me.ammo === state.me.maxAmmo;
-      $("btnUnjam").disabled = !state.me.jammed || state.me.clips <= 0;
+      $("btnUnjam").disabled = !state.me.jammed || state.me.ammo <= 0 && state.me.clips <= 0;
     }
 
     function renderBase(){
@@ -548,77 +782,148 @@
       $("btnBaseReset").classList.toggle("d-none", !(b.destroyed && state.me.isAdmin));
     }
 
+    // Event types that belong in the personal (left) feed; everything else is
+    // world/global and goes to the middle World Feed.
+    const PERSONAL_TYPES = new Set(["shoot", "reload", "shop", "item", "level", "travel", "action"]);
+
+    function eventRow(e){
+      const item = document.createElement("div");
+      item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+      item.innerHTML = `
+        <div class="d-flex align-items-start justify-content-between gap-2">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge ${badgeForEvent(e.type)}">${labelForEvent(e.type)}</span>
+            <span>${escapeHtml(e.msg)}</span>
+          </div>
+          <span class="muted-mono">${fmtTime(e.ts)}</span>
+        </div>`;
+      return item;
+    }
+
     function renderEvents(){
-      const feed = $("eventFeed");
-      feed.innerHTML = "";
+      const world = $("eventFeed");
+      const personal = $("personalFeed");
+      world.innerHTML = "";
+      personal.innerHTML = "";
 
-      // Only show global events and events targeted at us. The server already
-      // filters this way, so this is a client-side safety net.
+      // Only show global events and events targeted at us (server already filters
+      // this way; client-side safety net). Split by type into the two feeds.
       const myId = String(state.me.id);
-      const visible = state.events.filter(e => e.target === "global" || e.target === myId);
+      const visible = state.events
+        .filter(e => e.target === "global" || e.target === myId)
+        .slice(-120);
 
-      if (visible.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "list-group-item bg-transparent text-light border-secondary-subtle";
-        empty.textContent = "No events yet.";
-        feed.appendChild(empty);
-        return;
+      const worldEvents = visible.filter(e => !PERSONAL_TYPES.has(e.type)).slice(-80);
+      const personalEvents = visible.filter(e => PERSONAL_TYPES.has(e.type)).slice(-60);
+
+      if (!worldEvents.length) {
+        world.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle">No world events yet.</div>`;
+      } else {
+        worldEvents.forEach(e => world.appendChild(eventRow(e)));
+        world.scrollTop = world.scrollHeight;
       }
-      visible.slice(-80).forEach(e => {
-        const item = document.createElement("div");
-        item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
-        item.innerHTML = `
-          <div class="d-flex align-items-start justify-content-between gap-2">
-            <div class="d-flex align-items-center gap-2">
-              <span class="badge ${badgeForEvent(e.type)}">${labelForEvent(e.type)}</span>
-              <span>${escapeHtml(e.msg)}</span>
-            </div>
-            <span class="muted-mono">${fmtTime(e.ts)}</span>
-          </div>
-        `;
-        feed.appendChild(item);
-      });
-      // auto-scroll to bottom
-      feed.scrollTop = feed.scrollHeight;
+
+      if (!personalEvents.length) {
+        personal.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle muted-mono">No activity yet.</div>`;
+      } else {
+        personalEvents.forEach(e => personal.appendChild(eventRow(e)));
+        personal.scrollTop = personal.scrollHeight;
+      }
     }
 
-    function renderLeaderboard(){
-      const lb = $("leaderboard");
-      lb.innerHTML = "";
-      const sorted = [...state.leaderboard].sort((a,b) => b.xp - a.xp);
-      sorted.forEach((row, idx) => {
-        const item = document.createElement("div");
-        item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
-        item.innerHTML = `
-          <div class="d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <span class="badge text-bg-secondary">#${idx + 1}</span>
-              <span class="fw-semibold">${escapeHtml(row.user)}</span>
-            </div>
-            <span class="muted-mono">Lv ${row.level ?? 1} · ${row.xp} XP</span>
+    // Skills list in the Player Info modal. The bar is auto-level progress
+    // (training XP rolls the skill over by itself); the Buy button spends
+    // MAIN player XP to jump the next skill level immediately.
+    function renderSkills(){
+      const wrap = $("skillList");
+      wrap.innerHTML = "";
+      state.me.skills.forEach(s => {
+        const pct = Math.max(0, Math.min(100, (s.xp / s.nextCost) * 100));
+        const canBuy = state.me.xp >= s.nextCost;
+        const row = document.createElement("div");
+        row.className = "mb-2";
+        row.innerHTML = `
+          <div class="d-flex justify-content-between align-items-center muted-mono mb-1">
+            <span>${escapeHtml(s.name)} <span class="badge text-bg-dark border">Lv ${s.level}</span></span>
+            <span>${s.xp} / ${s.nextCost} XP
+              <button class="btn btn-sm btn-outline-warning py-0 px-2 ms-1" data-skillup="${s.key}"
+                style="font-size:.7rem;" ${canBuy ? "" : "disabled"} title="Spend player XP on the next level">
+                Buy (${s.nextCost} XP)
+              </button>
+            </span>
+          </div>
+          <div class="progress" style="height: 8px; background: rgba(255,255,255,.08);">
+            <div class="progress-bar bg-info" style="width: ${pct}%"></div>
           </div>
         `;
-        lb.appendChild(item);
+        wrap.appendChild(row);
       });
+      wrap.querySelectorAll("[data-skillup]").forEach(btn =>
+        btn.addEventListener("click", (e) => postAndRefresh("/api/skill/up", { skill: e.currentTarget.dataset.skillup })));
     }
 
-    function renderOnline(){
-      const list = $("onlineList");
+    // This location's actions (Hunt Info / Actions card). Each row shows the
+    // requirements line; the Do button turns into a countdown while busy.
+    function renderActions(){
+      const list = $("actionsList");
+      list.innerHTML = "";
+      if (!state.actions.length) return;
+      const busyLeft = Math.max(0, Math.ceil((state.me.busyUntil - Date.now()) / 1000));
+
+      state.actions.forEach(a => {
+        const blocked = !a.lvlOk ? `${a.skillName} ${a.skillLevel} required`
+          : !a.toolOk ? `needs ${a.requires}` : null;
+        const row = document.createElement("div");
+        row.className = "p-2 border rounded mb-2 d-flex align-items-center justify-content-between gap-2";
+        row.style.cssText = "border-color: rgba(255,255,255,.12) !important;";
+        row.innerHTML = `
+          <div>
+            <div class="fw-semibold">${escapeHtml(a.label)}</div>
+            <div class="muted-mono">${escapeHtml(a.skillName)} ${a.skillLevel} · ${a.timer}s · ${a.successRate}% · +1 ${escapeHtml(a.grants)}${a.requires ? ` · needs ${escapeHtml(a.requires)}` : ""}</div>
+          </div>
+          ${blocked ? `<span class="muted-mono text-nowrap">${escapeHtml(blocked)}</span>`
+            : `<button class="btn btn-sm btn-outline-success" data-action="${a.key}" ${busyLeft ? "disabled" : ""}>${busyLeft ? `${busyLeft}s…` : "Do"}</button>`}
+        `;
+        list.appendChild(row);
+      });
+
+      list.querySelectorAll("[data-action]").forEach(btn =>
+        btn.addEventListener("click", (e) => postAndRefresh("/api/action/do", { key: e.currentTarget.dataset.action })));
+    }
+
+    // One row of the combined Players list. The rank badge doubles as the
+    // online indicator: green background = online, grey = offline.
+    function playerRow(row, rank, isOnline){
+      const item = document.createElement("div");
+      item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+      const tier = nameClassForLevel(row.level ?? 1);
+      const youBadge = row.user === state.me.user ? ` <span class="badge text-bg-primary">you</span>` : "";
+      const right = row.xp !== undefined ? `<span class="muted-mono">Lv ${row.level ?? 1} · ${row.xp} XP</span>` : "";
+      item.innerHTML = `
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge ${isOnline ? "text-bg-success" : "text-bg-secondary"}" title="${isOnline ? "online" : "offline"}">${rank ? `#${rank}` : "●"}</span>
+            <span class="fw-semibold shiny-name ${tier}">${escapeHtml(row.user)}</span>${youBadge}
+          </div>
+          ${right}
+        </div>
+      `;
+      return item;
+    }
+
+    function renderPlayers(){
+      const list = $("playerList");
       list.innerHTML = "";
       $("onlineCount").textContent = state.online.length;
+      const online = new Set(state.online);
 
-      state.online.forEach(u => {
-        const item = document.createElement("div");
-        item.className = "list-group-item bg-transparent text-light border-secondary-subtle d-flex align-items-center justify-content-between";
-        item.innerHTML = `
-          <div class="d-flex align-items-center gap-2">
-            <span class="badge text-bg-success">●</span>
-            <span>${escapeHtml(u)}</span>
-          </div>
-          ${u === state.me.user ? `<span class="badge text-bg-primary">you</span>` : ``}
-        `;
-        list.appendChild(item);
-      });
+      const sorted = [...state.leaderboard].sort((a,b) => b.xp - a.xp);
+      sorted.forEach((row, idx) => list.appendChild(playerRow(row, idx + 1, online.has(row.user))));
+
+      // Online players who didn't make the top list still show, unranked, below it.
+      const listed = new Set(sorted.map(r => r.user));
+      state.online.filter(u => !listed.has(u))
+        .forEach(u => list.appendChild(playerRow({ user: u }, null, true)));
     }
 
     function escapeHtml(s){
@@ -635,8 +940,9 @@
       renderMe();
       renderBase();
       renderEvents();
-      renderLeaderboard();
-      renderOnline();
+      renderPlayers();
+      renderSkills();
+      renderActions();
     }
 
     async function loadState(){
@@ -660,16 +966,13 @@
       })) : [];
 
       return {
+        version: data?.version ?? "",
         huntActive: Boolean(data?.huntActive),
         horde: Boolean(data?.horde),
         hordeStatus: data?.hordeStatus ?? "idle",
         raid: Boolean(data?.raid),
         zombies: Number(data?.zombies ?? 0),
         tickSeconds: Number(data?.tickSeconds ?? 15),
-        trigger: {
-          value: Number(data?.trigger?.value ?? 0),
-          outOf: Number(data?.trigger?.outOf ?? 15)
-        },
         base: {
           health: Number(data?.base?.health ?? 0),
           max: Number(data?.base?.max ?? 10000),
@@ -689,6 +992,7 @@
           health: Number(data?.me?.health ?? 0),
           maxHealth: Number(data?.me?.maxHealth ?? 100),
           shield: Number(data?.me?.shield ?? 0),
+          maxShield: Number(data?.me?.maxShield ?? 100),
           ammo: Number(data?.me?.ammo ?? 0),
           maxAmmo: Number(data?.me?.maxAmmo ?? 0),
           clips: Number(data?.me?.clips ?? 0),
@@ -696,12 +1000,23 @@
           acc: Number(data?.me?.acc ?? 0),
           cond: Number(data?.me?.cond ?? 0),
           gold: Number(data?.me?.gold ?? 0),
+          tokens: Number(data?.me?.tokens ?? 0),
+          goldenShots: Number(data?.me?.goldenShots ?? 0),
           equippedGun: data?.me?.equippedGun ?? "Handgun",
+          guns: Array.isArray(data?.me?.guns) ? data.me.guns : [],
           location: data?.me?.location ?? null,
+          locationName: data?.me?.locationName ?? "—",
           inside: Boolean(data?.me?.inside),
+          atBase: Boolean(data?.me?.atBase),
+          zombieZone: Boolean(data?.me?.zombieZone),
+          busyUntil: Number(data?.me?.busyUntil ?? 0),
+          campfireUntil: Number(data?.me?.campfireUntil ?? 0),
+          skills: Array.isArray(data?.me?.skills) ? data.me.skills : [],
+          map: Array.isArray(data?.me?.map) ? data.me.map : [],
           isAdmin: Boolean(data?.me?.isAdmin),
           jammed: Boolean(data?.me?.jammed)
         },
+        actions: Array.isArray(data?.actions) ? data.actions : [],
         events
       };
     }
@@ -709,7 +1024,7 @@
     let refreshTimer = null;
     function setupAutoRefresh(){
       if (refreshTimer) clearInterval(refreshTimer);
-      refreshTimer = setInterval(loadState, 3000); // live-ish: poll every 3s
+      refreshTimer = setInterval(loadState, 500);
     }
 
 
@@ -749,7 +1064,99 @@
     $("btnHuntToggle").addEventListener("click", (e) => postAction("/api/hunt/toggle", e.currentTarget));
     $("btnCallZombie").addEventListener("click", (e) => postAction("/api/hunt/call-zombie", e.currentTarget));
     $("btnShop").addEventListener("click", () => openShop("items"));
-    $("btnInventory").addEventListener("click", () => openShop("inventory"));
+    $("btnInventory").addEventListener("click", () => openInventory());
+
+    // ----- World Map modal -----
+    // Only locations reachable from here are listed, each with a color-coded
+    // safe/zombie pill. Away from Basecamp, the header shows the base's HP.
+    function renderMap(){
+      const list = $("mapList");
+      list.innerHTML = "";
+      $("mapCurrent").textContent = state.me.locationName;
+
+      // Base health pill — only interesting when the Base card isn't on screen.
+      const hp = $("mapBaseHp");
+      hp.classList.toggle("d-none", state.me.atBase);
+      if (!state.me.atBase) {
+        const pct = state.base.max > 0 ? (state.base.health / state.base.max) * 100 : 0;
+        hp.className = `badge ms-2 ${pct > 50 ? "text-bg-success" : pct > 20 ? "text-bg-warning text-dark" : "text-bg-danger"}`;
+        hp.textContent = state.base.destroyed ? "BASE DESTROYED" : `Base: ${state.base.health}/${state.base.max}`;
+      }
+
+      if (!state.me.map.length) {
+        list.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle muted-mono">Nowhere to go from here.</div>`;
+        return;
+      }
+      state.me.map.forEach(w => {
+        const row = document.createElement("div");
+        row.className = "list-group-item bg-transparent text-light border-secondary-subtle d-flex align-items-center justify-content-between";
+        row.innerHTML = `
+          <span class="d-flex align-items-center gap-2">
+            <span class="fw-semibold">${escapeHtml(w.name)}</span>
+            ${w.zombie ? `<span class="badge text-bg-danger">zombies</span>` : `<span class="badge text-bg-success">safe</span>`}
+          </span>
+          <button class="btn btn-sm btn-outline-success" data-travel="${w.key}">Travel</button>
+        `;
+        list.appendChild(row);
+      });
+
+      list.querySelectorAll("[data-travel]").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.currentTarget.disabled = true;
+          await postAndRefresh("/api/travel", { to: e.currentTarget.dataset.travel });
+          renderMap(); // redraw with the new location's links
+        });
+      });
+    }
+
+    // ----- Adventure Panel: campfire / cooking / meditation -----
+    $("btnCampfire").addEventListener("click", (e) => postAction("/api/campfire", e.currentTarget));
+    $("btnDouse").addEventListener("click", (e) => postAction("/api/campfire/out", e.currentTarget));
+    $("btnMeditate").addEventListener("click", (e) => postAction("/api/meditate", e.currentTarget));
+
+    let cookModal = null;
+    $("btnCook").addEventListener("click", () => {
+      if (!cookModal) cookModal = new bootstrap.Modal($("cookModal"));
+      renderCook();
+      cookModal.show();
+    });
+
+    async function renderCook(){
+      const list = $("cookList");
+      list.innerHTML = loadingRow();
+      const recipes = (await fetchJson("/api/craft", [])).filter(r => r.station === "campfire");
+
+      const fireLeft = Math.max(0, state.me.campfireUntil - Date.now());
+      $("cookFireLeft").textContent = fireLeft > 0 ? `${Math.ceil(fireLeft / 1000)}s of fire left` : "fire is out";
+
+      list.innerHTML = "";
+      if (!recipes.length) { list.innerHTML = emptyRow("Nothing cookable exists yet."); return; }
+      const busy = state.me.busyUntil > Date.now();
+
+      recipes.forEach(r => {
+        const inputsTxt = Object.entries(r.inputs).map(([k, v]) => `${v}× ${k}`).join(", ");
+        const blocked = !r.stationOk ? "fire is out"
+          : !r.lvlOk ? `${r.skillName} ${r.level} required`
+          : !r.inputsOk ? `needs ${inputsTxt}`
+          : busy ? `busy ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : null;
+        list.appendChild(actionRow({
+          title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border">${escapeHtml(r.skillName)} ${r.level}</span>`,
+          sub: `${inputsTxt} → ${escapeHtml(r.output)} · ${r.timer}s · +${r.xp} ${escapeHtml(r.skillName)} XP`,
+          btnLabel: blocked ? blocked : "Cook",
+          btnClass: "btn-success",
+          disabled: Boolean(blocked),
+          onClick: async () => { await postAndRefresh("/api/craft", { key: r.key }); renderCook(); }
+        }));
+      });
+    }
+
+    let mapModal = null;
+    $("btnMap").addEventListener("click", () => {
+      if (state.me.inside) return; // belt & braces — the button is hidden inside
+      if (!mapModal) mapModal = new bootstrap.Modal($("mapModal"));
+      renderMap();
+      mapModal.show();
+    });
 
     let statsModal = null;
     $("btnPlayerInfo").addEventListener("click", () => {
@@ -762,10 +1169,9 @@
     $("btnNuke").addEventListener("click", (e) => postAction("/api/nuke/vote", e.currentTarget));
     $("btnBaseReset").addEventListener("click", (e) => postAction("/api/base/reset", e.currentTarget));
 
-    // Not yet implemented server-side.
-    $("btnUnjam").addEventListener("click", () => {
-      window.alert("Actions are read-only until server endpoints are wired.");
-    });
+    $("btnUnjam").addEventListener("click", (e) => postAction("/api/action/unjam", e.currentTarget));
+    $("gunSwitch").querySelectorAll("[data-gun]").forEach(btn =>
+      btn.addEventListener("click", (e) => postAndRefresh("/api/inventory/equip", { item: e.currentTarget.dataset.gun })));
 
     // -------------------------
     // Global chat
@@ -818,17 +1224,32 @@
       $("shopTabs").querySelectorAll("button[data-tab]").forEach(b => {
         b.classList.toggle("active", b.dataset.tab === tab);
       });
-      ["items", "upgrades", "inventory"].forEach(t => {
+      ["items", "upgrades"].forEach(t => {
         $("tab-" + t).classList.toggle("d-none", t !== tab);
       });
       renderActiveTab();
     }
 
     function renderActiveTab(){
-      $("shopGold").textContent = `Gold: ${state.me.gold}`;
+      $("shopGold").textContent = `Gold: ${state.me.gold} · Tokens: ${state.me.tokens}`;
       if (activeTab === "items") renderShopItems();
-      else if (activeTab === "upgrades") renderUpgrades();
-      else renderInventory();
+      else renderUpgrades();
+    }
+
+    // Currency-aware helpers (gold vs horde tokens).
+    const costLabel = (currency, cost) => `${cost} ${currency === "token" ? "tokens" : "gold"}`;
+    const canAfford = (currency, cost) => currency === "token" ? state.me.tokens >= cost : state.me.gold >= cost;
+
+    // Render one static upgrade/item row (shared by the Items and Upgrades tabs).
+    function staticRow(u){
+      return actionRow({
+        title: escapeHtml(u.label),
+        sub: `${costLabel(u.currency, u.cost)} · ${escapeHtml(u.desc)}`,
+        btnLabel: u.owned ? "Owned" : "Buy",
+        btnClass: u.type === "gun" ? "btn-primary" : "btn-success",
+        disabled: u.owned || !canAfford(u.currency, u.cost),
+        onClick: () => postAndRefresh("/api/shop/upgrades/buy", { key: u.key })
+      });
     }
 
     // ----- small render helpers -----
@@ -875,86 +1296,209 @@
       return fallback;
     }
 
-    // ----- Items tab (dynamic shop_items) -----
+    // ----- Items tab: static 'item' upgrades (potions, Golden Gun, gun unlocks, …) + DB shop_items -----
+    // Which sub-tab a shop entry belongs on (works for both static upgrades
+    // and registry items — both carry type + currency).
+    function shopCatOf(entry){
+      if ((entry.currency || "gold") === "token") return "tokens";
+      if (entry.type === "gun") return "guns";
+      if (entry.type === "tool") return "tools";
+      return "consumables";
+    }
+
+    let shopCat = "consumables";
+    let shopStock = null; // cached fetch; sub-tab clicks re-render without refetching
+    $("shopCatTabs").querySelectorAll("[data-shopcat]").forEach(b =>
+      b.addEventListener("click", () => { shopCat = b.dataset.shopcat; renderShopCat(); }));
+
     async function renderShopItems(){
+      $("shopList").innerHTML = loadingRow();
+      const [dbItems, upgrades] = await Promise.all([fetchJson("/api/shop", []), fetchJson("/api/shop/upgrades", [])]);
+      shopStock = { dbItems, staticItems: upgrades.filter(u => u.category === "item") };
+      renderShopCat();
+    }
+
+    function renderShopCat(){
+      $("shopCatTabs").querySelectorAll("[data-shopcat]").forEach(b =>
+        b.classList.toggle("active", b.dataset.shopcat === shopCat));
       const list = $("shopList");
-      list.innerHTML = loadingRow();
-      const items = await fetchJson("/api/shop", []);
       list.innerHTML = "";
-      if (!items.length) { list.innerHTML = emptyRow("The shop is empty."); return; }
-      items.forEach(it => {
+      if (!shopStock) return;
+
+      const statics = shopStock.staticItems.filter(u => shopCatOf(u) === shopCat);
+      const registry = shopStock.dbItems.filter(it => shopCatOf(it) === shopCat);
+      if (!statics.length && !registry.length) { list.innerHTML = emptyRow("Nothing in this section."); return; }
+
+      statics.forEach(u => list.appendChild(staticRow(u)));
+
+      // Registry items with a `shop` block (item_backbone.js). Tools are
+      // one-time buys — owned ones show "Owned", like the gun unlocks.
+      registry.forEach(it => {
+        const tokenPriced = it.currency === "token";
         list.appendChild(actionRow({
-          title: `${escapeHtml(it.item_name)} <span class="badge text-bg-secondary">${escapeHtml(it.item_type)}</span>`,
-          sub: `${it.item_cost} gold${it.item_quantity > 1 ? ` · grants x${it.item_quantity}` : ""}`,
-          btnLabel: "Buy",
-          disabled: state.me.gold < it.item_cost,
-          onClick: () => postAndRefresh("/api/shop/buy", { item_name: it.item_name })
+          title: `${escapeHtml(it.name)} <span class="badge text-bg-secondary">${escapeHtml(it.type)}</span>`,
+          sub: `${it.cost} ${tokenPriced ? "tokens" : "gold"}${it.desc ? ` · ${escapeHtml(it.desc)}` : ""}`,
+          btnLabel: it.owned ? "Owned" : "Buy",
+          disabled: it.owned || (tokenPriced ? state.me.tokens < it.cost : state.me.gold < it.cost),
+          onClick: () => postAndRefresh("/api/shop/buy", { item_name: it.key })
         }));
       });
     }
 
-    // ----- Upgrades tab (static, hardcoded) -----
+    // ----- Upgrades tab: static 'upgrade' category only (permanent boosts) -----
     async function renderUpgrades(){
       const list = $("upgradeList");
       list.innerHTML = loadingRow();
-      const items = await fetchJson("/api/shop/upgrades", []);
+      const upgrades = (await fetchJson("/api/shop/upgrades", [])).filter(u => u.category === "upgrade");
       list.innerHTML = "";
-      if (!items.length) { list.innerHTML = emptyRow("No upgrades available."); return; }
-      items.forEach(u => {
-        list.appendChild(actionRow({
-          title: escapeHtml(u.label),
-          sub: `${u.cost} gold · ${escapeHtml(u.desc)}`,
-          btnLabel: u.owned ? "Owned" : "Buy",
-          btnClass: u.type === "gun" ? "btn-primary" : "btn-success",
-          disabled: u.owned || state.me.gold < u.cost,
-          onClick: () => postAndRefresh("/api/shop/upgrades/buy", { key: u.key })
-        }));
-      });
+      if (!upgrades.length) { list.innerHTML = emptyRow("No upgrades available."); return; }
+      upgrades.forEach(u => list.appendChild(staticRow(u)));
     }
 
-    // ----- Inventory tab (usable items + full list) -----
-    async function renderInventory(){
-      const usableList = $("usableList");
-      const invList = $("inventoryList");
-      usableList.innerHTML = loadingRow();
-      invList.innerHTML = "";
-      const data = await fetchJson("/api/inventory", { items: [], usable: [] });
+    // -------------------------
+    // Inventory modal: Toolbag (quick-use) + Backpack (typed sub-tabs)
+    // -------------------------
+    let invModal = null, invData = null, invTab = "toolbag", packTab = "guns";
 
-      usableList.innerHTML = "";
-      data.usable.forEach(u => {
-        usableList.appendChild(actionRow({
-          title: `${escapeHtml(u.label)} <span class="badge text-bg-secondary">x${u.quantity}</span>`,
-          sub: "usable item",
-          btnLabel: "Use",
-          btnClass: "btn-warning text-dark",
-          disabled: u.quantity <= 0,
-          onClick: () => postAndRefresh("/api/inventory/use", { item: u.name })
-        }));
-      });
+    function openInventory(){
+      if (!invModal) invModal = new bootstrap.Modal($("invModal"));
+      loadInventory();
+      invModal.show();
+    }
 
-      if (!data.items.length) { invList.innerHTML = emptyRow("(empty)"); return; }
-      data.items.forEach(it => {
-        if (it.isGun) {
-          const isEquipped = it.item_name === data.equipped;
-          invList.appendChild(actionRow({
-            title: `${escapeHtml(it.item_name)} <span class="badge text-bg-secondary">gun</span>`,
-            sub: isEquipped ? "equipped" : `x${it.quantity}`,
-            btnLabel: isEquipped ? "Equipped" : "Equip",
-            btnClass: "btn-primary",
-            disabled: isEquipped,
-            onClick: () => postAndRefresh("/api/inventory/equip", { item: it.item_name })
+    async function loadInventory(){
+      invData = await fetchJson("/api/inventory", { items: [], usable: [], guns: [] });
+      renderInventoryModal();
+    }
+
+    $("invTabs").querySelectorAll("[data-invtab]").forEach(b =>
+      b.addEventListener("click", () => { invTab = b.dataset.invtab; renderInventoryModal(); }));
+    $("packTabs").querySelectorAll("[data-packtab]").forEach(b =>
+      b.addEventListener("click", () => { packTab = b.dataset.packtab; renderInventoryModal(); }));
+
+    function renderInventoryModal(){
+      $("invTabs").querySelectorAll("[data-invtab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.invtab === invTab));
+      $("invToolbag").classList.toggle("d-none", invTab !== "toolbag");
+      $("invBackpack").classList.toggle("d-none", invTab !== "backpack");
+      if (!invData) return;
+      if (invTab === "toolbag") renderToolbag();
+      else renderBackpack();
+    }
+
+    // Toolbag: the quick-access combat consumables (registry `toolbag` flag).
+    function renderToolbag(){
+      const list = $("toolbagList");
+      list.innerHTML = "";
+      const rows = invData.usable.filter(u => u.toolbag);
+      if (!rows.length) { list.innerHTML = emptyRow("Toolbag is empty."); return; }
+      rows.forEach(u => list.appendChild(actionRow({
+        title: `${escapeHtml(u.label)} <span class="badge text-bg-secondary">x${u.quantity}</span>`,
+        sub: u.desc ? escapeHtml(u.desc) : "",
+        btnLabel: "Use",
+        btnClass: "btn-warning text-dark",
+        disabled: u.quantity <= 0,
+        onClick: async () => { await postAndRefresh("/api/inventory/use", { item: u.name }); loadInventory(); }
+      })));
+    }
+
+    function packTable(headers, rowsHtml){
+      return `<table class="table table-sm mb-0 pack-table">
+        <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+        <tbody>${rowsHtml}</tbody></table>`;
+    }
+    const packEmpty = (t) => `<div class="p-3 muted-mono">${t}</div>`;
+
+    // Backpack: everything owned, sub-tabbed by type. Each tab gets the
+    // columns that make sense for it (guns: live stats; tools: tier; …).
+    function renderBackpack(){
+      $("packTabs").querySelectorAll("[data-packtab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.packtab === packTab));
+      const body = $("packBody");
+      const owned = invData.items.filter(i => i.quantity > 0);
+
+      if (packTab === "guns") {
+        if (!invData.guns.length) { body.innerHTML = packEmpty("No guns owned."); return; }
+        body.innerHTML = packTable(["Gun", "Cond", "Ammo", "Clips", "", ""], invData.guns.map(g => `
+          <tr>
+            <td class="fw-semibold">${escapeHtml(g.name)}</td>
+            <td>${g.condition}</td>
+            <td>${g.ammo} / ${g.maxAmmo}</td>
+            <td>${g.clips} / ${g.maxClips}</td>
+            <td>${g.jammed ? '<span class="badge text-bg-danger">JAMMED</span>' : ""}</td>
+            <td class="text-end">${g.equipped
+              ? '<span class="badge text-bg-primary">equipped</span>'
+              : `<button class="btn btn-sm btn-outline-primary py-0" data-equip="${escapeHtml(g.name)}">Equip</button>`}</td>
+          </tr>`).join(""));
+        body.querySelectorAll("[data-equip]").forEach(btn =>
+          btn.addEventListener("click", async (e) => {
+            await postAndRefresh("/api/inventory/equip", { item: e.currentTarget.dataset.equip });
+            loadInventory();
           }));
-          return;
-        }
-        const row = document.createElement("div");
-        row.className = "list-group-item bg-transparent text-light border-secondary-subtle d-flex align-items-center justify-content-between";
-        row.innerHTML = `
-          <span>${escapeHtml(it.item_name)}</span>
-          <span class="muted-mono">x${it.quantity}${it.condition != null ? ` · cond ${it.condition}` : ""}</span>
-        `;
-        invList.appendChild(row);
-      });
+
+      } else if (packTab === "tools") {
+        const rows = owned.filter(i => i.type === "tool");
+        if (!rows.length) { body.innerHTML = packEmpty("No tools yet — the shop sells the basics."); return; }
+        body.innerHTML = packTable(["Tool", "Tier", "Qty"], rows.map(i => `
+          <tr><td class="fw-semibold">${escapeHtml(i.item_name)}${i.desc ? `<div class="muted-mono fw-normal">${escapeHtml(i.desc)}</div>` : ""}</td>
+          <td><span class="badge text-bg-dark border">${escapeHtml(i.tier || "General")}</span></td>
+          <td>x${i.quantity}</td></tr>`).join(""));
+
+      } else if (packTab === "consumables") {
+        // Food & misc consumables — the combat ones live in the Toolbag.
+        const rows = owned.filter(i => i.type === "consumable" && !i.toolbag);
+        if (!rows.length) { body.innerHTML = packEmpty("No consumables — forage some food."); return; }
+        body.innerHTML = packTable(["Item", "Qty", ""], rows.map(i => `
+          <tr><td class="fw-semibold">${escapeHtml(i.item_name)}${i.desc ? `<div class="muted-mono fw-normal">${escapeHtml(i.desc)}</div>` : ""}</td>
+          <td>x${i.quantity}</td>
+          <td class="text-end">${i.usable ? `<button class="btn btn-sm btn-outline-warning py-0" data-use="${escapeHtml(i.item_name)}">Use</button>` : ""}</td></tr>`).join(""));
+        body.querySelectorAll("[data-use]").forEach(btn =>
+          btn.addEventListener("click", async (e) => {
+            await postAndRefresh("/api/inventory/use", { item: e.currentTarget.dataset.use });
+            loadInventory();
+          }));
+
+      } else { // materials: crafting inputs, trade goods, treasure (sellable)
+        const rows = owned.filter(i => ["crafting", "trade", "treasure"].includes(i.type) || !i.type);
+        if (!rows.length) { body.innerHTML = packEmpty("Nothing gathered yet — try the location actions."); return; }
+        body.innerHTML = packTable(["Item", "Type", "Qty", ""], rows.map((i, idx) => `
+          <tr><td class="fw-semibold">${escapeHtml(i.item_name)}${i.desc ? `<div class="muted-mono fw-normal">${escapeHtml(i.desc)}</div>` : ""}</td>
+          <td><span class="badge text-bg-dark border">${escapeHtml(i.type || "?")}</span></td>
+          <td>x${i.quantity}</td>
+          <td class="text-end">${i.type === "treasure" ? `<button class="btn btn-sm btn-outline-success py-0" data-sell="${idx}">Sell</button>` : ""}</td></tr>`).join(""));
+        body.querySelectorAll("[data-sell]").forEach(btn =>
+          btn.addEventListener("click", (e) => openSell(rows[Number(e.currentTarget.dataset.sell)])));
+      }
     }
+
+    // ----- Sell modal (treasure → gold at registry value) -----
+    let sellModal = null, sellCtx = null;
+    function openSell(item){
+      sellCtx = item;
+      $("sellName").textContent = item.item_name;
+      $("sellInfo").textContent = `You have ${item.quantity} · worth ${item.value ?? 0} gold each`;
+      const q = $("sellQty");
+      q.value = 1; q.min = 1; q.max = item.quantity;
+      updateSellTotal();
+      if (!sellModal) sellModal = new bootstrap.Modal($("sellModal"));
+      sellModal.show();
+    }
+    function sellQtyClamped(){
+      return Math.max(1, Math.min(sellCtx?.quantity ?? 1, Math.round(Number($("sellQty").value)) || 1));
+    }
+    function updateSellTotal(){
+      if (!sellCtx) return;
+      $("sellTotal").textContent = `Total: ${sellQtyClamped() * (sellCtx.value ?? 0)} gold`;
+    }
+    $("sellQty").addEventListener("input", updateSellTotal);
+    $("sellAll").addEventListener("click", () => { $("sellQty").value = sellCtx?.quantity ?? 1; updateSellTotal(); });
+    $("sellConfirm").addEventListener("click", async () => {
+      if (!sellCtx) return;
+      const qty = sellQtyClamped();
+      sellModal.hide();
+      await postAndRefresh("/api/inventory/sell", { item: sellCtx.item_name, qty: qty >= sellCtx.quantity ? "all" : qty });
+      loadInventory();
+    });
 
     // Initial render + live polling
     loadState();

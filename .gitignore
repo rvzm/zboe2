@@ -2,11 +2,10 @@ nbproject/
 node_modules/
 .vscode/
 logs/
-docker-data/
+certs/
 dist/
 build/
 data/
-logs/
 util/
 .env
 .env.local
@@ -18,6 +17,4 @@ Thumbs.db
 scratchbook.note
 scratchbook.js
 zboe.sh
-install-arch.sh
-install-ubuntu.sh
 package-lock.json

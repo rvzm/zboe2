@@ -17,13 +17,19 @@ Change `sessionSecret` in `config.js` (or pass `--set game_config.sessionSecret=
 - **Production/stable runs refuse to start** (a FATAL sanity halt).
 - **Dev runs (`--dev`) print a warning and continue**, so local development isn't blocked.
 
+## Running
+
+zboe can be ran by using ``npm run stable`` for a stable run. You can run with either ``dev`` or ``verbose`` to run in either "dev" or "verbose dev" where ``verbose`` stops the server from forking into the background, so you can track the console in dev mode.
+
+You can also run via ``node server.js`` with several flags, including ``--set [type]_config.[setting]=[your_value]`` to run with specific config variables set via the command line.
+
 ## The Game
 
  Hunt zombies — and survive the world around them. While "The Experiment" (the hunt) is enabled, zombies spawn on a configurable rate and escalate through tiers: **wandering → hunting → raiding** (a raid latches on and doesn't stop until the horde is cleared to zero). Zombies besiege the base too — hide inside and the base soaks the damage until it falls.
 
  What's in the game right now:
 
- - **Three guns** (Handgun / Rifle / Shotgun) with per-gun ammo, clips, condition, and **jamming** — worn guns misfeed, and clearing a jam costs a fresh clip. The Rifle can pierce through a thick horde; the Shotgun drops up to five per blast. The **Golden Gun** power-up grants 25 perfect shots.
+ - **Three guns** (Handgun / Rifle / Shotgun) with per-gun ammo, clips, condition, and **jamming** — worn guns misfeed, and clearing a jam costs a fresh clip or a single bullet, depending on if you still have ammo in your clip. The Rifle can pierce through a thick horde; the Shotgun drops up to five per blast. The **Golden Gun** power-up grants 25 perfect shots.
  - **Gold + Horde Tokens**: kills pay gold; breaking a horde or ending a raid pays tokens, spendable on Shield Boosters, the Golden Gun, or exchanged back into gold.
  - **Leveling** (spend XP on levels; stat bonuses every level through 15, then every 5th) and a **lifetime-XP leaderboard**, visible on the public landing page.
  - **A world to travel**: Basecamp, the Bunker, and the Forest hub leading to the Lake, Mountains, River, Swamp, Cave, and Town. Zombies only roam some areas — the rest are safe zones with **location actions** (chop wood, fish, mine, gather, smith) that train six skills: Magic, Woodcutting, Fishing, Mining, Smithing, Crafting.

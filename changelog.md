@@ -4,8 +4,12 @@
 ### Any entries marked as "## (version) [(branch)]"
 ### updates with [*DB] are potentially database-file breaking, and may require starting a new database.
 
+## 2.0.24 RC1 [dev release] [*DB]
+ - Release Version [039cb786c9a07f330b2d14bc8dee61127351ee7b]
+ - Fixed 2.0.22 RC1 text [6c1b07d6edc24f805da60a46090512241836e3a3]
+
 ## 2.0.22 RC1 [dev pre-release] [*DB]
- - Pre-release Version
+ - Pre-release Version [9fe3d8da3a8379108742ea86d20e2d2ab639d894]
 
 ## 2.0.21.1 [dev] [*DB]
  - Claude did a lot of the heavy lifting. Sorry y'all, I want it back up and running all pretty again. Call me lazy but I had it working before my server had a drive failure of epic proportions.

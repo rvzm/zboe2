@@ -582,23 +582,35 @@ export function reloadGun(userId, type) {
 export function unjamGun(userId, type) {
   const player = stmtPlayerByUserId.get(userId);
   if (!player) return { ok: false, reason: "no_player" };
+
   const { ammo, maxAmmo, clips, jammed } = gunAmmoOf(player, type);
+
   if (!jammed) return { ok: false, reason: "not_jammed" };
-  if (ammo == 0) {
+
+  if (ammo === 0) {
     if (clips <= 0) return { ok: false, reason: "no_clips" };
+
     db.prepare(`
       UPDATE players
-      SET ${gunCol(type, "jammed")} = 0, ${gunCol(type, "ammo")} = ?, ${gunCol(type, "clips")} = ${gunCol(type, "clips")} - 1, updated_at = ?
+      SET ${gunCol(type, "jammed")} = 0,
+          ${gunCol(type, "ammo")} = ?,
+          ${gunCol(type, "clips")} = ${gunCol(type, "clips")} - 1,
+          updated_at = ?
       WHERE user_id = ?
     `).run(maxAmmo, Date.now(), userId);
-  } else {
-    db.prepare(`
-      UPDATE players
-      SET ${gunCol(type, "jammed")} = 0, ${gunCol(type, "ammo")} = ${gunCol(type, "ammo")} - 1, updated_at = ?
-      WHERE user_id = ?
-    `).run(Date.now(), userId);
+
+    return { ok: true, method: "clip" };
   }
-  return { ok: true };
+
+  db.prepare(`
+    UPDATE players
+    SET ${gunCol(type, "jammed")} = 0,
+        ${gunCol(type, "ammo")} = ${gunCol(type, "ammo")} - 1,
+        updated_at = ?
+    WHERE user_id = ?
+  `).run(Date.now(), userId);
+
+  return { ok: true, method: "ammo" };
 }
 
 export function updateGunMaxAmmo(userId, type, change) {

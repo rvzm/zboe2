@@ -991,7 +991,7 @@ app.post("/api/action/reload", requireAuth, (req, res) => {
       result.reason === "no_clips" ? "No clips left to reload." : "Already fully loaded.";
     return res.status(409).json({ ok: false, message });
   }
-
+  
   insertEvent("reload", `You reloaded the ${gunName}`, "private", req.userId);
   log("INFO", `${req.user} reloaded ${gunName}`, game_config);
   return res.json({ ok: true, message: "Reloaded." });
@@ -1008,13 +1008,16 @@ app.post("/api/action/unjam", requireAuth, (req, res) => {
   if (!result.ok) {
     const message = result.reason === "not_jammed"
       ? `The ${gunName} isn't jammed.`
-      : "No clips left — clearing the jam takes a fresh clip.";
+      : "No clips left — clearing the jam takes a fresh clip or a single bullet if not empty.";
     return res.status(409).json({ ok: false, message });
   }
-
+  const message =
+  result.method === "clip"
+    ? "Jam cleared — fresh clip loaded."
+    : "Jam cleared — 1 round was used to clear the jam.";
   insertEvent("reload", `You cleared the jam on the ${gunName}`, "private", req.userId);
   log("INFO", `${req.user} unjammed ${gunName}`, game_config);
-  return res.json({ ok: true, message: "Jam cleared — fresh clip loaded." });
+  return res.json({ ok: true, message });
 });
 
 // Flip the global hunt on/off. Admin only.

@@ -1,8 +1,8 @@
 # zboe2
 
-### Zombie Biohazard Occult Experiment 2
+### Zombie Biohazard Outbreak Experiment 2
 
-[ Version 2.0.22-RC1 ]
+[ Version 2.0.24-dev-rc ]
 
 zboe2 is a web-based NodeJS game, adapted from my original IRC-based game.
 
@@ -19,12 +19,22 @@ Change `sessionSecret` in `config.js` (or pass `--set game_config.sessionSecret=
 
 ## The Game
 
- Hunt Zombies, sort of. Currently the idea is when "The Experiment is enabled" zombies will randomly spawn based on a configurable spawn rate. Players use (currently only one) weapon to kill zombies and earn gold. When a certain number of zombies (maybe configurable?) are active, "Horde Mode" is enabled, which grants whoever killed EITHER the most zombies OR the last zombie (configurable, eventually) will get additional money and a Horde Token, which can be spent on player upgrades.
+ Hunt zombies — and survive the world around them. While "The Experiment" (the hunt) is enabled, zombies spawn on a configurable rate and escalate through tiers: **wandering → hunting → raiding** (a raid latches on and doesn't stop until the horde is cleared to zero). Zombies besiege the base too — hide inside and the base soaks the damage until it falls.
+
+ What's in the game right now:
+
+ - **Three guns** (Handgun / Rifle / Shotgun) with per-gun ammo, clips, condition, and **jamming** — worn guns misfeed, and clearing a jam costs a fresh clip. The Rifle can pierce through a thick horde; the Shotgun drops up to five per blast. The **Golden Gun** power-up grants 25 perfect shots.
+ - **Gold + Horde Tokens**: kills pay gold; breaking a horde or ending a raid pays tokens, spendable on Shield Boosters, the Golden Gun, or exchanged back into gold.
+ - **Leveling** (spend XP on levels; stat bonuses every level through 15, then every 5th) and a **lifetime-XP leaderboard**, visible on the public landing page.
+ - **A world to travel**: Basecamp, the Bunker, and the Forest hub leading to the Lake, Mountains, River, Swamp, Cave, and Town. Zombies only roam some areas — the rest are safe zones with **location actions** (chop wood, fish, mine, gather, smith) that train six skills: Magic, Woodcutting, Fishing, Mining, Smithing, Crafting.
+ - **An item registry** (`item_backbone.js`): every item and crafting recipe is a readable row of code — descriptions, tool requirements, shop prices, consumable effects — validated at boot so a typo'd item name can't ship.
+ - **Admin tooling three ways**: a web admin panel (`/admin`), a dialog TUI (`./zboe.sh`), and a scriptable CLI (`node util/index.mjs`, with `help`).
+
+ See `INSTALL.md` for setup, reverse-proxy (Apache/nginx), and HTTPS notes.
 
  ## The Catch
  This game is in **VERY EARLY DEV** Stages, and as such is prone to drastic changes. release-potential build "finals" will be branched into "dev-rc" versions, and when finally finished will be branched into "full-rc" and updated to the main branch.
-
- Currently there is no "dev-rc" as the project recently suffered a data loss and our working dev-rc was lost before it could be pushed to GitHub. 
+ We have started doing 2.0.* Dev RC versions.
 
  ## Database Warning
- This game is in development, and updates may cause your currently DB files to be out-of-date. Changes in the changelog marked with [*DB] indicate database-breaking updates. You can store your old/current db file, and eventually we will also include a "db updater" that will fix your file so it matches whatever the current schema requires.
+ This game is in development, and updates may cause your current DB file to be out-of-date. Changes in the changelog marked with [*DB] indicate database-breaking updates. In dev, the fix is: stop the server, delete `data/zboe.sqlite*`, and let it rebuild on the next boot. There is also a schema-aware backup/restore/migrate toolkit under `./zboe.sh` → Database Management — backups live in `util/backups/` (safe from `data/` wipes), and `migrate` can bring an older DB file up to the current schema in place.

@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZBOE — Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(220,53,69,.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(13,110,253,.12), transparent 60%),
+                  #0b0f14;
+    }
+    .muted-mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.6); font-size: .8rem; }
+    .soft-card { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.12); }
+    /* Bootstrap cards reset to the dark body color — force the titles bright. */
+    .soft-card .card-header {
+      background: rgba(255,255,255,.06);
+      border-color: rgba(255,255,255,.12);
+      color: #ffffff;
+    }
+    .soft-card .card-header .fw-semibold,
+    .soft-card .card-header.fw-semibold {
+      text-shadow: 0 0 8px rgba(255,255,255,.25);
+      letter-spacing: .02em;
+    }
+    .table { --bs-table-color: #e9ecef; --bs-table-bg: transparent; --bs-table-border-color: rgba(255,255,255,.12); }
+    .panel { max-height: 60vh; overflow-y: auto; }
+    .statval { color: #fff; font-weight: 600; }
+  </style>
+</head>
+<body class="text-light">
+  <nav class="navbar navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
+    <div class="container py-2 d-flex justify-content-between">
+      <span class="navbar-brand fw-semibold">🛠️ ZBOE <span class="opacity-75">Admin</span></span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="muted-mono">Admin: <span class="text-white" id="meName">—</span></span>
+        <a class="btn btn-sm btn-outline-light" href="/game">← Game</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <ul class="nav nav-pills mb-3" id="tabs">
+      <li class="nav-item"><button class="nav-link active" data-tab="world">World</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="users">Users</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="players">Players</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="shop">Items</button></li>
+    </ul>
+
+    <!-- WORLD: live game state + hunt/horde/base controls -->
+    <section id="tab-world">
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">The Hunt</div>
+            <div class="card-body text-center">
+              <div class="statval fs-3 mb-2" id="wHunt">—</div>
+              <button class="btn btn-sm btn-outline-warning" id="wHuntToggle">Toggle Hunt</button>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">Horde</div>
+            <div class="card-body text-center">
+              <div class="statval fs-3" id="wHorde">0</div>
+              <div class="muted-mono mb-2" id="wHordeStatus">—</div>
+              <div class="d-flex gap-1 justify-content-center">
+                <input class="form-control form-control-sm" id="wHordeSize" style="max-width:90px" placeholder="size">
+                <button class="btn btn-sm btn-outline-danger" id="wHordeSet">Set</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">The Base</div>
+            <div class="card-body text-center">
+              <div class="statval fs-3 mb-1" id="wBase">—</div>
+              <div class="progress mb-2" style="height:10px; background: rgba(255,255,255,.08);">
+                <div class="progress-bar bg-success" id="wBaseBar" style="width:100%"></div>
+              </div>
+              <button class="btn btn-sm btn-outline-danger" id="wBaseReset">Reset Experiment</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card soft-card">
+        <div class="card-header fw-semibold d-flex justify-content-between">
+          <span>Online Players <span class="muted-mono" id="wOnlineCount"></span></span>
+          <button class="btn btn-sm btn-outline-light" id="reloadWorld">Reload</button>
+        </div>
+        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Player</th><th>Location</th><th>Zone</th><th>Status</th></tr></thead><tbody id="wOnlineRows"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- USERS -->
+    <section id="tab-users" class="d-none">
+      <div class="card soft-card mb-3">
+        <div class="card-header fw-semibold">Add User</div>
+        <div class="card-body">
+          <form id="addUserForm" class="row g-2 align-items-end">
+            <div class="col-sm-4"><label class="muted-mono">Username</label><input class="form-control form-control-sm" name="username" autocomplete="off" required></div>
+            <div class="col-sm-4"><label class="muted-mono">Password (optional)</label><input class="form-control form-control-sm" name="password" type="password" autocomplete="new-password"></div>
+            <div class="col-sm-2 form-check ms-2"><input class="form-check-input" type="checkbox" name="admin" id="newAdmin"><label class="form-check-label muted-mono" for="newAdmin">admin</label></div>
+            <div class="col-sm-2"><button class="btn btn-sm btn-success w-100">Create</button></div>
+          </form>
+        </div>
+      </div>
+      <div class="card soft-card">
+        <div class="card-header fw-semibold d-flex justify-content-between"><span>Users</span><button class="btn btn-sm btn-outline-light" id="reloadUsers">Reload</button></div>
+        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Username</th><th>Admin</th><th class="text-end">Actions</th></tr></thead><tbody id="userRows"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- PLAYERS: list of everyone in the DB; picking one swaps to Edit Player -->
+    <section id="tab-players" class="d-none">
+      <div class="card soft-card" id="playerListCard">
+        <div class="card-header fw-semibold d-flex justify-content-between">
+          <span>All Players</span>
+          <button class="btn btn-sm btn-outline-light" id="reloadPlayerList">Reload</button>
+        </div>
+        <div class="card-body p-0 panel">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Player</th><th>Level</th><th>Location</th><th>Status</th><th class="text-end"></th></tr></thead>
+            <tbody id="playerListRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="playerPanel" class="d-none">
+        <button class="btn btn-sm btn-outline-light mb-3" id="backToList">← All Players</button>
+        <div class="row g-3">
+          <div class="col-lg-7">
+            <div class="card soft-card">
+              <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                <span>Stats — <span id="pName"></span></span>
+                <span id="pStatus"></span>
+              </div>
+              <div class="card-body p-0 panel"><table class="table table-sm mb-0"><tbody id="statRows"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="card soft-card mb-3">
+              <div class="card-header fw-semibold">Player Card</div>
+              <div class="card-body">
+                <!-- Statcard header: level circle + name -->
+                <div class="d-flex align-items-center gap-3 mb-2">
+                  <div class="d-flex align-items-center justify-content-center flex-shrink-0"
+                       style="width:56px; height:56px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05);">
+                    <span class="fs-4 fw-semibold statval" id="pLevel">1</span>
+                  </div>
+                  <div class="fw-semibold text-truncate statval fs-5" id="pCardName">player</div>
+                </div>
+
+                <!-- Health bar + its edit rows -->
+                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                  <span>Health</span><span id="pHealthText">— / —</span>
+                </div>
+                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                  <div class="progress-bar bg-danger" id="pHealthBar" style="width:0%;"></div>
+                </div>
+                <div id="pHealthRows" class="mb-2"></div>
+
+                <!-- Shield bar + its edit rows -->
+                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                  <span>Shield</span><span id="pShieldText">— / —</span>
+                </div>
+                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                  <div class="progress-bar bg-primary" id="pShieldBar" style="width:0%;"></div>
+                </div>
+                <div id="pShieldRows" class="mb-2"></div>
+
+                <!-- XP bar + the level control under it -->
+                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                  <span>XP</span><span id="pXpText">— / —</span>
+                </div>
+                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                  <div class="progress-bar bg-warning" id="pXpBar" style="width:0%;"></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="muted-mono">Level</span>
+                  <span>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-10">-10</button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-5">-5</button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-1">-1</button>
+                    <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="1">+1</button>
+                    <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="5">+5</button>
+                    <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="10">+10</button>
+                  </span>
+                </div>
+                <div class="muted-mono" style="font-size:.7rem;">Level is full-stack: stat + lifetime-XP gains, no XP cost.</div>
+
+                <hr style="border-color: rgba(255,255,255,.2);">
+
+                <!-- Currency -->
+                <div id="pCurrencyRows"></div>
+              </div>
+            </div>
+            <div class="card soft-card mb-3">
+              <div class="card-header fw-semibold">Location</div>
+              <div class="card-body d-flex gap-2 align-items-center">
+                <select class="form-select form-select-sm" id="locSelect"></select>
+                <button class="btn btn-sm btn-outline-info" id="locSet">Move</button>
+              </div>
+            </div>
+            <div class="card soft-card mb-3">
+              <div class="card-header fw-semibold">Equipped Gun</div>
+              <div class="card-body" id="gunButtons"></div>
+            </div>
+            <div class="card soft-card">
+              <div class="card-header fw-semibold">Inventory</div>
+              <div class="card-body">
+                <form id="invAddForm" class="row g-2 mb-2 align-items-end">
+                  <div class="col-7"><label class="muted-mono">Item (registry)</label><select class="form-select form-select-sm" name="item" id="invItemSel"></select></div>
+                  <div class="col-3"><label class="muted-mono">Qty</label><input class="form-control form-control-sm" name="qty" value="1"></div>
+                  <div class="col-2"><button class="btn btn-sm btn-success w-100">Add</button></div>
+                </form>
+                <div class="panel"><table class="table table-sm mb-0"><tbody id="invRows"></tbody></table></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SHOP / ITEM CATALOGUE (read-only — items live in item_backbone.js) -->
+    <section id="tab-shop" class="d-none">
+      <div class="card soft-card mb-3">
+        <div class="card-header fw-semibold d-flex justify-content-between">
+          <span>Item Registry <span class="muted-mono">(item_backbone.js · read-only)</span></span>
+          <button class="btn btn-sm btn-outline-light" id="reloadShop">Reload</button>
+        </div>
+        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Item</th><th>Type</th><th>Value</th><th>Shop</th><th>Use</th></tr></thead><tbody id="itemRows"></tbody></table></div>
+      </div>
+
+      <div class="card soft-card mb-3">
+        <div class="card-header fw-semibold">Recipes <span class="muted-mono">(item_backbone.js · read-only)</span></div>
+        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Recipe</th><th>Skill</th><th>Inputs</th><th>Tool</th><th>Output</th></tr></thead><tbody id="recipeRows"></tbody></table></div>
+      </div>
+
+      <div class="card soft-card">
+        <div class="card-header fw-semibold">Static Upgrades <span class="muted-mono">(code-defined · read-only)</span></div>
+        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Item</th><th>Type</th><th>Cost</th><th>Currency</th></tr></thead><tbody id="upgradeRows"></tbody></table></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="position-fixed bottom-0 end-0 m-3 px-3 py-2 rounded text-light"
+       style="background: rgba(0,0,0,.85); border: 1px solid rgba(255,255,255,.2); display:none; z-index:1080;"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
+    let toastTimer = null;
+    function flash(msg){ const t=$("toast"); t.textContent=msg; t.style.display="block"; clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.style.display="none",2600); }
+
+    async function api(path, body){
+      const opts = { credentials: "same-origin" };
+      if (body){ opts.method = "POST"; opts.body = new URLSearchParams(body); }
+      const res = await fetch(path, opts);
+      if (res.status === 403){ flash("Not authorized."); return { ok:false }; }
+      const data = await res.json().catch(() => ({}));
+      if (body && data.message) flash(data.message);
+      return data;
+    }
+
+    // ---- Tabs ----
+    $("tabs").querySelectorAll("button[data-tab]").forEach(b => b.addEventListener("click", () => {
+      $("tabs").querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      ["world","users","players","shop"].forEach(t => $("tab-"+t).classList.toggle("d-none", t !== b.dataset.tab));
+      if (b.dataset.tab === "world") loadWorld();
+      if (b.dataset.tab === "shop") loadShop();
+      if (b.dataset.tab === "users") loadUsers();
+      if (b.dataset.tab === "players") {
+        // Always land on the list view when entering the tab.
+        $("playerPanel").classList.add("d-none");
+        $("playerListCard").classList.remove("d-none");
+        loadPlayerList();
+      }
+    }));
+
+    // ---- World (game state + online players) ----
+    async function loadWorld(){
+      const w = await api("/api/admin/world");
+      if (!w?.ok) return;
+      $("wHunt").textContent = w.hunt ? "ACTIVE" : "OFF";
+      $("wHunt").style.color = w.hunt ? "#4caf50" : "#9aa0a6";
+      $("wHorde").textContent = w.hordeSize;
+      $("wHordeStatus").textContent = `${w.hordeStatus}${w.raid ? " · RAID LATCHED" : ""}`;
+      const pct = w.base.max > 0 ? Math.max(0, Math.min(100, (w.base.health / w.base.max) * 100)) : 0;
+      $("wBase").textContent = w.base.destroyed ? "DESTROYED" : `${w.base.health} / ${w.base.max}`;
+      const bar = $("wBaseBar");
+      bar.style.width = pct + "%";
+      bar.className = "progress-bar " + (pct > 50 ? "bg-success" : pct > 20 ? "bg-warning" : "bg-danger");
+
+      $("wOnlineCount").textContent = `(${w.online.length})`;
+      const rows = $("wOnlineRows"); rows.innerHTML = "";
+      if (!w.online.length) rows.innerHTML = `<tr><td class="muted-mono" colspan="4">(nobody online)</td></tr>`;
+      w.online.forEach(p => {
+        rows.insertAdjacentHTML("beforeend", `
+          <tr><td>${esc(p.username)}</td>
+          <td>${esc(p.locationName)}</td>
+          <td>${p.zombieZone ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
+          <td>${p.busy ? '<span class="badge text-bg-warning text-dark">busy</span> ' : ""}${p.campfire ? '<span class="badge text-bg-warning text-dark">🔥 campfire</span>' : ""}</td></tr>`);
+      });
+    }
+    $("reloadWorld").onclick = loadWorld;
+    $("wHuntToggle").onclick = async () => { await api("/api/hunt/toggle", {}); loadWorld(); };
+    $("wHordeSet").onclick = async () => {
+      const v = $("wHordeSize").value;
+      if (v === "") return;
+      const r = await api("/api/admin/world/horde", { size: v });
+      if (r.ok){ $("wHordeSize").value = ""; loadWorld(); }
+    };
+    $("wBaseReset").onclick = async () => {
+      if (!confirm("Reset the experiment? Rebuilds the base and wipes global state.")) return;
+      await api("/api/base/reset", {}); loadWorld();
+    };
+
+    // ---- Users ----
+    async function loadUsers(){
+      const users = await api("/api/admin/users") || [];
+      const rows = $("userRows"); rows.innerHTML = "";
+      users.forEach(u => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="muted-mono">${u.id}</td>
+          <td>${esc(u.username)}</td>
+          <td>${u.is_admin ? '<span class="badge text-bg-danger">admin</span>' : '<span class="badge text-bg-secondary">user</span>'}</td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-info" data-act="pw">Password</button>
+            <button class="btn btn-sm btn-outline-warning" data-act="admin">${u.is_admin ? "Revoke" : "Grant"}</button>
+            <button class="btn btn-sm btn-outline-danger" data-act="del">Delete</button>
+          </td>`;
+        tr.querySelector('[data-act="pw"]').onclick = async () => {
+          const pw = prompt(`New password for ${u.username}:`); if (!pw) return;
+          await api("/api/admin/users/password", { username: u.username, password: pw });
+        };
+        tr.querySelector('[data-act="admin"]').onclick = async () => {
+          await api("/api/admin/users/admin", { username: u.username, admin: u.is_admin ? "false" : "true" }); loadUsers();
+        };
+        tr.querySelector('[data-act="del"]').onclick = async () => {
+          if (!confirm(`Delete user "${u.username}" and ALL their data? This cannot be undone.`)) return;
+          await api("/api/admin/users/delete", { username: u.username }); loadUsers();
+        };
+        rows.appendChild(tr);
+      });
+    }
+    $("reloadUsers").onclick = loadUsers;
+    $("addUserForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const r = await api("/api/admin/users/add", { username: f.username.value, password: f.password.value, admin: f.admin.checked ? "true" : "false" });
+      if (r.ok){ f.reset(); loadUsers(); }
+    });
+
+    // ---- Players ----
+    // List view (everyone in the DB) <-> Edit Player view.
+    async function loadPlayerList(){
+      const users = await api("/api/admin/users") || [];
+      const rows = $("playerListRows"); rows.innerHTML = "";
+      if (!users.length) rows.innerHTML = `<tr><td class="muted-mono" colspan="5">(no players)</td></tr>`;
+      users.forEach(u => {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        tr.innerHTML = `
+          <td>${esc(u.username)}${u.is_admin ? ' <span class="badge text-bg-danger">admin</span>' : ""}</td>
+          <td class="statval">${u.level ?? "—"}</td>
+          <td class="muted-mono">${esc(u.locationName || "—")}</td>
+          <td>${u.online ? '<span class="badge text-bg-success">online</span>' : '<span class="badge text-bg-secondary">offline</span>'}</td>
+          <td class="text-end"><button class="btn btn-sm btn-outline-info py-0 px-2">Edit</button></td>`;
+        tr.addEventListener("click", () => loadPlayer(u.username));
+        rows.appendChild(tr);
+      });
+    }
+    $("reloadPlayerList").onclick = (e) => { e.stopPropagation(); loadPlayerList(); };
+    $("backToList").onclick = () => {
+      $("playerPanel").classList.add("d-none");
+      $("playerListCard").classList.remove("d-none");
+      loadPlayerList();
+    };
+
+    let currentPlayer = null;
+    async function loadPlayer(name){
+      loadItemSelect(); // populate the grant dropdown once
+      const data = await api("/api/admin/player?username=" + encodeURIComponent(name));
+      if (!data || !data.ok){ flash(data?.message || "Not found."); $("playerPanel").classList.add("d-none"); return; }
+      currentPlayer = data.username;
+      $("playerListCard").classList.add("d-none");
+      $("playerPanel").classList.remove("d-none");
+      $("pName").textContent = data.username;
+      $("pLevel").textContent = data.level;
+      $("pCardName").textContent = data.username;
+
+      // Statcard bars + the quick-edit rows beneath them.
+      const sv = Object.fromEntries(data.stats.map(s => [s.field, s.value]));
+      const barPct = (v, max) => max > 0 ? Math.max(0, Math.min(100, (v / max) * 100)) : 0;
+      $("pHealthText").textContent = `${sv.health} / ${sv.max_health}`;
+      $("pHealthBar").style.width = barPct(sv.health, sv.max_health) + "%";
+      $("pShieldText").textContent = `${sv.shield} / ${sv.max_shield}`;
+      $("pShieldBar").style.width = barPct(sv.shield, sv.max_shield) + "%";
+      $("pXpText").textContent = `${sv.xp} / ${data.nextLevelCost}`;
+      $("pXpBar").style.width = Math.min(100, barPct(sv.xp, data.nextLevelCost)) + "%";
+
+      // Quick-edit rows, rendered under their matching bar (currency below the
+      // separator). [field, label, refill-source, container]
+      const quick = [
+        ["health",       "Health",     "max_health", "pHealthRows"],
+        ["max_health",   "Health Max", null,         "pHealthRows"],
+        ["shield",       "Shield",     "max_shield", "pShieldRows"],
+        ["max_shield",   "Shield Max", null,         "pShieldRows"],
+        ["gold",         "Gold",       null,         "pCurrencyRows"],
+        ["horde_tokens", "Tokens",     null,         "pCurrencyRows"],
+      ];
+      ["pHealthRows", "pShieldRows", "pCurrencyRows"].forEach(id => $(id).innerHTML = "");
+      quick.forEach(([field, label, refillFrom, container]) => {
+        const row = document.createElement("div");
+        row.className = "d-flex justify-content-between align-items-center mb-1";
+        row.innerHTML = `
+          <span class="muted-mono">${label} <span class="statval">${sv[field]}</span></span>
+          <span>
+            ${[-10,-5,-1,1,5,10].map(d => `<button class="btn btn-sm btn-outline-secondary py-0 px-1" data-d="${d}">${d>0?"+":""}${d}</button>`).join("")}
+            <button class="btn btn-sm btn-outline-info py-0 px-1" data-set>set</button>
+            ${refillFrom ? `<button class="btn btn-sm btn-outline-success py-0 px-1" data-refill>Refill</button>` : ""}
+          </span>`;
+        row.querySelectorAll("[data-d]").forEach(btn => btn.onclick = () => setStat(field, sv[field] + Number(btn.dataset.d)));
+        row.querySelector("[data-set]").onclick = () => { const v = prompt(`Set ${label} to:`, sv[field]); if (v !== null && v !== "") setStat(field, v); };
+        const rf = row.querySelector("[data-refill]");
+        if (rf) rf.onclick = () => setStat(field, sv[refillFrom]);
+        $(container).appendChild(row);
+      });
+
+      // Live status: where they are + busy/campfire (from the server's
+      // in-memory action/campfire maps).
+      const busyLeft = Math.max(0, Math.ceil((data.busyUntil - Date.now()) / 1000));
+      const fireLeft = Math.max(0, Math.ceil((data.campfireUntil - Date.now()) / 1000));
+      $("pStatus").innerHTML = [
+        `<span class="badge ${data.zombieZone ? "text-bg-danger" : "text-bg-success"}">${esc(data.locationName)}</span>`,
+        busyLeft ? `<span class="badge text-bg-warning text-dark">busy ${busyLeft}s</span>` : "",
+        fireLeft ? `<span class="badge text-bg-warning text-dark">🔥 ${fireLeft}s</span>` : "",
+      ].join(" ");
+
+      // Location mover (teleport — ignores the travel graph).
+      const loc = $("locSelect"); loc.innerHTML = "";
+      data.locations.forEach(l => loc.insertAdjacentHTML("beforeend",
+        `<option value="${esc(l.key)}"${l.key === data.location ? " selected" : ""}>${esc(l.name)}</option>`));
+
+      // Stats, grouped: Core, then per-gun blocks, then Skills. The fields
+      // living in the Player Card's quick rows are left out of the table.
+      const QUICK_FIELDS = new Set(quick.map(([f]) => f));
+      const groupOf = (f) =>
+        f.startsWith("handgun_") ? "Handgun" :
+        f.startsWith("rifle_")   ? "Rifle" :
+        f.startsWith("shotgun_") ? "Shotgun" :
+        f.startsWith("s_")       ? "Skills" : "Core";
+      const groups = {};
+      data.stats.filter(s => !QUICK_FIELDS.has(s.field)).forEach(s => (groups[groupOf(s.field)] ||= []).push(s));
+
+      const st = $("statRows"); st.innerHTML = "";
+      ["Core", "Handgun", "Rifle", "Shotgun", "Skills"].forEach(g => {
+        if (!groups[g]) return;
+        st.insertAdjacentHTML("beforeend",
+          `<tr><td colspan="3" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
+        groups[g].forEach(s => {
+          // Strip the group prefix for readability (handgun_ammo → ammo, s_magic_lvl → magic lvl).
+          const label = g === "Skills" ? s.field.slice(2).replace(/_/g, " ")
+            : g === "Core" ? s.field : s.field.replace(/^(handgun|rifle|shotgun)_/, "");
+          const tr = document.createElement("tr");
+          if (s.max === 1) {
+            // Boolean (0/1) stat: one toggle instead of the ± spread.
+            const on = Number(s.value) === 1;
+            tr.innerHTML = `
+              <td class="muted-mono align-middle">${esc(label)}</td>
+              <td class="align-middle" style="width:70px">${on ? '<span class="badge text-bg-danger">ON</span>' : '<span class="badge text-bg-secondary">off</span>'}</td>
+              <td class="text-end">
+                <button class="btn btn-sm ${on ? "btn-outline-secondary" : "btn-outline-warning"} py-0 px-2" data-toggle>Toggle</button>
+              </td>`;
+            tr.querySelector("[data-toggle]").onclick = () => setStat(s.field, on ? 0 : 1);
+            st.appendChild(tr);
+            return;
+          }
+          tr.innerHTML = `
+            <td class="muted-mono align-middle">${esc(label)}</td>
+            <td class="statval align-middle" style="width:70px">${s.value}</td>
+            <td class="text-end">
+              ${[-10,-5,-1,1,5,10].map(d => `<button class="btn btn-sm btn-outline-secondary py-0 px-1" data-d="${d}">${d>0?"+":""}${d}</button>`).join(" ")}
+              <button class="btn btn-sm btn-outline-info py-0 px-2" data-set>set</button>
+            </td>`;
+          tr.querySelectorAll("[data-d]").forEach(btn => btn.onclick = () => setStat(s.field, s.value + Number(btn.dataset.d)));
+          tr.querySelector("[data-set]").onclick = () => { const v = prompt(`Set ${s.field} to:`, s.value); if (v !== null && v !== "") setStat(s.field, v); };
+          st.appendChild(tr);
+        });
+      });
+
+      const gb = $("gunButtons"); gb.innerHTML = "";
+      data.guns.forEach(g => {
+        const b = document.createElement("button");
+        b.className = "btn btn-sm me-2 mb-2 " + (g.equipped ? "btn-primary" : g.owned ? "btn-outline-primary" : "btn-outline-secondary");
+        b.textContent = g.equipped ? `${g.name} ✓` : g.owned ? g.name : `${g.name} [force]`;
+        b.disabled = g.equipped;
+        b.onclick = () => api("/api/admin/player/equip", { username: currentPlayer, gun: g.name, force: g.owned ? "false" : "true" }).then(r => r.ok && loadPlayer(currentPlayer));
+        gb.appendChild(b);
+      });
+
+      const iv = $("invRows"); iv.innerHTML = "";
+      if (!data.inventory.length) iv.innerHTML = `<tr><td class="muted-mono">(empty)</td></tr>`;
+      data.inventory.forEach(it => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${esc(it.item_name)}</td><td class="muted-mono">x${it.quantity}${it.condition!=null?` · c${it.condition}`:""}</td>
+          <td class="text-end"><button class="btn btn-sm btn-outline-danger py-0 px-2">remove</button></td>`;
+        tr.querySelector("button").onclick = async () => {
+          if (!confirm(`Remove all "${it.item_name}" from ${currentPlayer}?`)) return;
+          await api("/api/admin/player/inventory/remove", { username: currentPlayer, item: it.item_name }); loadPlayer(currentPlayer);
+        };
+        iv.appendChild(tr);
+      });
+    }
+    async function setStat(field, value){
+      const r = await api("/api/admin/player/stat", { username: currentPlayer, field, value });
+      if (r.ok) loadPlayer(currentPlayer);
+    }
+    // Full-stack force level: applies stat + lifetime-XP gains, no XP cost.
+    document.querySelectorAll("[data-lvl]").forEach(b => b.onclick = async () => {
+      if (!currentPlayer) return;
+      const r = await api("/api/admin/player/level", { username: currentPlayer, steps: b.dataset.lvl });
+      if (r.ok) loadPlayer(currentPlayer);
+    });
+    $("locSet").onclick = async () => {
+      if (!currentPlayer) return;
+      const r = await api("/api/admin/player/location", { username: currentPlayer, location: $("locSelect").value });
+      if (r.ok) loadPlayer(currentPlayer);
+    };
+    $("invAddForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const r = await api("/api/admin/player/inventory/add", { username: currentPlayer, item: e.target.item.value, qty: e.target.qty.value });
+      if (r.ok){ e.target.qty.value = "1"; loadPlayer(currentPlayer); }
+    });
+
+    // Grant dropdown: every registry item, grouped by type (loaded once).
+    let itemSelLoaded = false;
+    async function loadItemSelect(){
+      if (itemSelLoaded) return;
+      const data = await api("/api/admin/items");
+      if (!data?.items) return;
+      const sel = $("invItemSel"); sel.innerHTML = "";
+      const byType = {};
+      data.items.forEach(i => (byType[i.type] ||= []).push(i));
+      (data.types || Object.keys(byType)).forEach(t => {
+        if (!byType[t]) return;
+        const og = document.createElement("optgroup"); og.label = t;
+        byType[t].forEach(i => og.insertAdjacentHTML("beforeend", `<option value="${esc(i.key)}">${esc(i.name)}</option>`));
+        sel.appendChild(og);
+      });
+      itemSelLoaded = true;
+    }
+
+    // ---- Item catalogue (read-only; items are code in item_backbone.js) ----
+    async function loadShop(){
+      const data = await api("/api/admin/items") || { items: [], recipes: [] };
+
+      const rows = $("itemRows"); rows.innerHTML = "";
+      data.items.forEach(it => {
+        const shop = it.shop ? `${it.shop.cost} ${it.shop.currency === "token" ? "tokens" : "gold"}` : "—";
+        const use = it.use ? Object.entries(it.use).map(([k, v]) => `${k} ${v}`).join(", ") : "—";
+        rows.insertAdjacentHTML("beforeend", `
+          <tr><td>${esc(it.name)}<div class="muted-mono">${esc(it.desc || "")}</div></td>
+          <td><span class="badge text-bg-secondary">${esc(it.type)}</span></td>
+          <td class="statval">${it.value ?? "—"}</td><td class="muted-mono">${esc(shop)}</td><td class="muted-mono">${esc(use)}</td></tr>`);
+      });
+
+      const rr = $("recipeRows"); rr.innerHTML = "";
+      if (!data.recipes.length) rr.innerHTML = `<tr><td class="muted-mono" colspan="5">(no recipes yet)</td></tr>`;
+      data.recipes.forEach(r => {
+        const inputs = Object.entries(r.inputs || {}).map(([k, v]) => `${v}× ${k}`).join(", ");
+        rr.insertAdjacentHTML("beforeend", `
+          <tr><td>${esc(r.label)}<div class="muted-mono">${r.timer}s · ${r.xp} XP</div></td>
+          <td class="muted-mono">${esc(r.skill)} ${r.level}</td><td class="muted-mono">${esc(inputs)}</td>
+          <td class="muted-mono">${esc(r.requires || "—")}</td><td>${esc(r.output)}</td></tr>`);
+      });
+
+      // Read-only static upgrades (code-defined), grouped by kind.
+      const upgrades = await api("/api/admin/upgrades") || [];
+      const groupOf = (u) =>
+        u.currency === "token" ? "Token Purchases" :
+        u.type === "gun"       ? "Guns" :
+        u.category === "upgrade" ? "Upgrades" : "Items";
+      const order = ["Items", "Guns", "Upgrades", "Token Purchases"];
+      const groups = {};
+      upgrades.forEach(u => (groups[groupOf(u)] ||= []).push(u));
+
+      const ur = $("upgradeRows"); ur.innerHTML = "";
+      order.forEach(g => {
+        if (!groups[g]) return;
+        ur.insertAdjacentHTML("beforeend",
+          `<tr><td colspan="4" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
+        groups[g].forEach(u => {
+          const cur = u.currency === "token" ? '<span class="badge text-bg-warning text-dark">token</span>' : '<span class="badge text-bg-secondary">gold</span>';
+          ur.insertAdjacentHTML("beforeend",
+            `<tr><td>${esc(u.label)}<div class="muted-mono">${esc(u.desc)}</div></td><td class="muted-mono">${esc(u.type)}</td><td class="statval">${u.cost}</td><td>${cur}</td></tr>`);
+        });
+      });
+    }
+    $("reloadShop").onclick = loadShop;
+
+    // ---- init ----
+    fetch("/api/game-state", { credentials: "same-origin" }).then(r => r.json()).then(d => { $("meName").textContent = d?.me?.user || "—"; }).catch(()=>{});
+    loadWorld();  // default tab
+    loadUsers();  // also fills the Players dropdown
+  </script>
+</body>
+</html>

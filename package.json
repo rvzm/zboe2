@@ -12,8 +12,7 @@
     "cookie-parser": "^1.4.6",
     "express": "^4.22.2"
   },
-  "version": "2.0.1",
-  "description": "zboe2 is a web-based NodeJS game, adapted from my original IRC-based game.",
+  "description": "zboe2 is a web-based NodeJS game, adapted from my original IRC-based game. Version: see app_version in config.js.",
   "main": "server.js",
   "repository": {
     "type": "git",

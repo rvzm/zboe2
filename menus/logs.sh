@@ -11,7 +11,7 @@ while true; do
         --menu "Select action" \
         20 70 10 \
         1 "View server.log" \
-        2 "View error.log" \
+        2 "View rotated log (server.old.log)" \
         3 "Tail server.log" \
         4 "Delete Logs" \
         5 "Back" \
@@ -26,7 +26,7 @@ while true; do
             ;;
 
         2)
-            less "$LOGDIR/error.log"
+            less "$LOGDIR/server.old.log"
             ;;
 
         3)

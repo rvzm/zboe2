@@ -40,7 +40,27 @@ equip_gun() {
     read -p "Press enter..."
 }
 
+# Level control: +/-1/5/10 as full-stack forced level changes (stat + XP gains),
+# mirroring the web admin's level control. Distinct from a raw 'level' set.
+level_control() {
+    local user="$1"
+    while true; do
+        local cur
+        cur=$(cli players getstat "$user" level)
+        local step
+        step=$(dialog --title "Force Level: $user (level $cur)" \
+            --menu "Adjust level — full stack: applies stat + XP gains" 18 55 9 \
+            "+1" " " "+5" " " "+10" " " "-1" " " "-5" " " "-10" " " "back" "Return" \
+            2>&1 >/dev/tty)
+        { [ -z "$step" ] || [ "$step" = "back" ]; } && break
+        clear
+        cli players forcelevel "$user" "$step"
+        read -p "Press enter..."
+    done
+}
+
 # Interactive stats editor: pick a stat, then +/-1/5/10 or set an exact value.
+# 'level' is special-cased to the full-stack level control above.
 stats_menu() {
     local user="$1"
     while true; do
@@ -56,8 +76,13 @@ stats_menu() {
         done <<< "$raw"
 
         local field
-        field=$(dialog --title "Edit Stats: $user" --menu "Select a stat (Cancel to exit)" 24 50 16 "${args[@]}" 2>&1 >/dev/tty)
+        field=$(dialog --title "Player Stats: $user" --menu "Select a stat to edit (Cancel to exit)" 24 55 16 "${args[@]}" 2>&1 >/dev/tty)
         [ -z "$field" ] && break
+
+        if [ "$field" = "level" ]; then
+            level_control "$user"
+            continue
+        fi
 
         local cur
         cur=$(cli players getstat "$user" "$field")
@@ -88,13 +113,12 @@ while true; do
         --title "Player Management" \
         --menu "Select action" \
         22 75 15 \
-        1  "View Player Stats" \
-        2  "Edit Stats" \
-        3  "Show Inventory" \
-        4  "Add Inventory Item" \
-        5  "Remove Inventory Item" \
-        6  "Set Equipped Gun" \
-        7  "Back" \
+        1  "View / Edit Player Stats" \
+        2  "Show Inventory" \
+        3  "Add Inventory Item" \
+        4  "Remove Inventory Item" \
+        5  "Set Equipped Gun" \
+        6  "Back" \
         2>&1 >/dev/tty)
 
     clear
@@ -103,24 +127,17 @@ while true; do
 
         1)
             PLAYER=$(pick_user)
-            clear
-            [ -n "$PLAYER" ] && cli players stats "$PLAYER"
-            read -p "Press enter..."
-            ;;
-
-        2)
-            PLAYER=$(pick_user)
             [ -n "$PLAYER" ] && stats_menu "$PLAYER"
             ;;
 
-        3)
+        2)
             PLAYER=$(pick_user)
             clear
             [ -n "$PLAYER" ] && cli inventory show "$PLAYER"
             read -p "Press enter..."
             ;;
 
-        4)
+        3)
             PLAYER=$(pick_user)
             ITEM=$(dialog --inputbox "Item Name" 8 40 2>&1 >/dev/tty)
             QTY=$(dialog --inputbox "Quantity" 8 40 "1" 2>&1 >/dev/tty)
@@ -134,7 +151,7 @@ while true; do
             read -p "Press enter..."
             ;;
 
-        5)
+        4)
             PLAYER=$(pick_user)
             ITEM=$(dialog --inputbox "Item Name" 8 40 2>&1 >/dev/tty)
             QTY=$(dialog --inputbox "Quantity (blank = all)" 8 45 2>&1 >/dev/tty)
@@ -145,7 +162,7 @@ while true; do
             read -p "Press enter..."
             ;;
 
-        6)
+        5)
             PLAYER=$(pick_user)
             [ -n "$PLAYER" ] && equip_gun "$PLAYER"
             ;;

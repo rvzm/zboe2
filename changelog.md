@@ -6,7 +6,9 @@
 
 ## 2.0.24 RC1 [dev] *bugfix
  - fixed unjam from [Github Issue #3][gh-issue-3] [a070010f0deb22d0e20d78af9178f5e0b2d546eb][gh-commit-a070010]
+ - updated default censor file [dfe1fc79a19254363ff5a1783cd332b9517a5d94][gh-commit-dfe1fc7]
 
+ [gh-commit-dfe1fc7]: https://github.com/rvzm/zboe2/commit/dfe1fc79a19254363ff5a1783cd332b9517a5d94
  [gh-commit-1070010]: https://github.com/rvzm/zboe2/commit/a070010f0deb22d0e20d78af9178f5e0b2d546eb
  [gh-issue-3]: https://github.com/rvzm/zboe2/issues/3#issue-4890234789
 

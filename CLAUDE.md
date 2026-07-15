@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-zboe2 (Zombie Biohazard Occult Experiment 2) is a web-based multiplayer zombie-hunting game — a NodeJS/Express rewrite of an older IRC-based game. Early development (this is the first playable dev-rc after a prior build was lost to a drive failure). Pure ESM (`"type": "module"`), no build step, no test suite, no linter configured. Long-term direction: a text-based zombie-themed RPG with a traversal map of named locations (some zombie-threatened, some safe), a dynamic per-location actions panel, crafting/smithing, armor, spells, and resource gathering — several currently-idle hooks (e.g. `getLocationCount`, `public/img/` for location/state backgrounds) exist for that.
+zboe2 (Zombie Biohazard Outbreak Experiment 2) is a web-based multiplayer zombie-hunting game — a NodeJS/Express rewrite of an older IRC-based game. Early development (this is the first playable dev-rc after a prior build was lost to a drive failure). Pure ESM (`"type": "module"`), no build step, no test suite, no linter configured. Long-term direction: a text-based zombie-themed RPG with a traversal map of named locations (some zombie-threatened, some safe), a dynamic per-location actions panel, crafting/smithing, armor, spells, and resource gathering — several currently-idle hooks (e.g. `getLocationCount`, `public/img/` for location/state backgrounds) exist for that.
 
 ## Commands
 

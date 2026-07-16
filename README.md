@@ -2,7 +2,7 @@
 
 ### Zombie Biohazard Outbreak Experiment 2
 
-[ Version 2.0.24-dev-rc ]
+[ Version 2.0.25-dev-rc ]
 
 zboe2 is a web-based NodeJS game, adapted from my original IRC-based game.
 

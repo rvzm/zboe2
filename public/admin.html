@@ -40,9 +40,15 @@
     </div>
   </nav>
 
+  <!-- Destroyed-base warning — always visible (any tab) while the base is down -->
+  <div id="baseWarningBanner" class="alert alert-danger text-center fw-semibold mb-0 rounded-0 d-none" role="alert">
+    ⚠️ WARNING! Base destroyed! <span id="baseResetCountdown">—</span> Until Base Resets
+  </div>
+
   <main class="container my-4">
     <ul class="nav nav-pills mb-3" id="tabs">
       <li class="nav-item"><button class="nav-link active" data-tab="world">World</button></li>
+      <li class="nav-item"><button class="nav-link" data-tab="locations">Locations</button></li>
       <li class="nav-item"><button class="nav-link" data-tab="users">Users</button></li>
       <li class="nav-item"><button class="nav-link" data-tab="players">Players</button></li>
       <li class="nav-item"><button class="nav-link" data-tab="shop">Items</button></li>
@@ -66,9 +72,22 @@
             <div class="card-body text-center">
               <div class="statval fs-3" id="wHorde">0</div>
               <div class="muted-mono mb-2" id="wHordeStatus">—</div>
-              <div class="d-flex gap-1 justify-content-center">
+              <div class="d-flex gap-1 justify-content-center mb-2">
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-10">-10</button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-5">-5</button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-1">-1</button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="1">+1</button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="5">+5</button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="10">+10</button>
+              </div>
+              <div class="d-flex gap-1 justify-content-center mb-2">
                 <input class="form-control form-control-sm" id="wHordeSize" style="max-width:90px" placeholder="size">
                 <button class="btn btn-sm btn-outline-danger" id="wHordeSet">Set</button>
+              </div>
+              <div class="d-flex gap-1 justify-content-center flex-wrap">
+                <button class="btn btn-sm btn-outline-warning" id="wHordeInstantHorde">Instant Horde</button>
+                <button class="btn btn-sm btn-outline-danger" id="wHordeInstantRaid">Instant Raid</button>
+                <button class="btn btn-sm btn-danger" id="wHordeNuke">☢️ Nuke All</button>
               </div>
             </div>
           </div>
@@ -81,19 +100,102 @@
               <div class="progress mb-2" style="height:10px; background: rgba(255,255,255,.08);">
                 <div class="progress-bar bg-success" id="wBaseBar" style="width:100%"></div>
               </div>
+              <div class="mb-2">
+                <span class="badge rounded-pill text-bg-secondary" id="wSentryPill">Sentry: off</span>
+                <span class="badge rounded-pill text-bg-dark border ms-1" id="wRepairKitsPill">Kits: 0</span>
+              </div>
+              <div class="d-flex gap-1 justify-content-center mb-2">
+                <button class="btn btn-sm btn-outline-success" id="wBaseRefill">Refill Base Health</button>
+                <button class="btn btn-sm btn-outline-info" id="wBaseSentry">Activate Free Sentry</button>
+              </div>
               <button class="btn btn-sm btn-outline-danger" id="wBaseReset">Reset Experiment</button>
             </div>
           </div>
         </div>
       </div>
-      <div class="card soft-card">
-        <div class="card-header fw-semibold d-flex justify-content-between">
-          <span>Online Players <span class="muted-mono" id="wOnlineCount"></span></span>
-          <button class="btn btn-sm btn-outline-light" id="reloadWorld">Reload</button>
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">World Chat &amp; Events</div>
+            <div class="card-body p-0 d-flex flex-column">
+              <div class="panel p-2" id="wFeed" style="max-height: 50vh;"></div>
+              <form class="d-flex gap-2 p-2 border-top" style="border-color: rgba(255,255,255,.12) !important;" id="wChatForm">
+                <select class="form-select form-select-sm" id="wChatTarget" style="max-width:140px">
+                  <option value="">(broadcast)</option>
+                </select>
+                <input class="form-control form-control-sm" id="wChatMsg" placeholder="Message…" maxlength="300" autocomplete="off">
+                <button class="btn btn-sm btn-primary">Send</button>
+              </form>
+            </div>
+          </div>
         </div>
-        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Player</th><th>Location</th><th>Zone</th><th>Status</th></tr></thead><tbody id="wOnlineRows"></tbody></table></div>
+        <div class="col-lg-7">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold d-flex justify-content-between">
+              <span>Users <span class="muted-mono" id="wUserCount"></span></span>
+              <button class="btn btn-sm btn-outline-light" id="reloadWorld">Reload</button>
+            </div>
+            <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>User</th><th>Level</th><th>Online</th><th>Location</th><th>Zone</th><th class="text-end">Actions</th></tr></thead><tbody id="wUserRows"></tbody></table></div>
+          </div>
+        </div>
       </div>
     </section>
+
+    <!-- Per-user moderation: chat gates, temp ban, exile -->
+    <div class="modal fade" id="modActions" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+          <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+            <h5 class="modal-title mb-0">Actions — <span id="actName"></span></h5>
+            <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <div class="fw-semibold muted-mono mb-1">Chat</div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="actMute" data-flag="mute">Mute</button>
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="actDeaf" data-flag="deaf">Deaf</button>
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="actStrict" data-flag="strict">Strict</button>
+              </div>
+            </div>
+            <hr style="border-color: rgba(255,255,255,.15);">
+            <div class="mb-3">
+              <div class="fw-semibold muted-mono mb-1">Ban <span class="muted-mono" id="actBanStatus"></span></div>
+              <div class="d-flex gap-2 mb-2">
+                <select class="form-select form-select-sm" id="actBanDur">
+                  <option value="60">1m</option>
+                  <option value="300">5m</option>
+                  <option value="900">15m</option>
+                  <option value="1800">30m</option>
+                  <option value="3600">1hr</option>
+                  <option value="7200">2hr</option>
+                  <option value="18000">5hr</option>
+                  <option value="43200">12hr</option>
+                  <option value="86400" selected>24hr</option>
+                  <option value="259200">72hr</option>
+                  <option value="custom">custom…</option>
+                </select>
+                <input class="form-control form-control-sm d-none" id="actBanCustom" placeholder="seconds">
+              </div>
+              <input class="form-control form-control-sm mb-2" id="actBanReason" placeholder="Reason (optional — defaults to a standard notice)">
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-danger flex-fill" id="actBanBtn">Ban</button>
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="actUnbanBtn">Unban</button>
+              </div>
+            </div>
+            <hr style="border-color: rgba(255,255,255,.15);">
+            <div>
+              <div class="fw-semibold muted-mono mb-1">Exile <span class="muted-mono" id="actExileStatus"></span></div>
+              <input class="form-control form-control-sm mb-2" id="actExileReason" placeholder="Reason (optional — defaults to a standard notice)">
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-danger flex-fill" id="actExileBtn">Exile (permanent)</button>
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="actUnexileBtn">Un-exile</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- USERS -->
     <section id="tab-users" class="d-none">
@@ -113,6 +215,101 @@
         <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Username</th><th>Admin</th><th class="text-end">Actions</th></tr></thead><tbody id="userRows"></tbody></table></div>
       </div>
     </section>
+
+    <!-- LOCATIONS: per-location occupancy + bulk teleport tools -->
+    <section id="tab-locations" class="d-none">
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">Basecamp (Outside)</div>
+            <div class="card-body text-center">
+              <div class="statval fs-3" id="lcBasecampOutside">—</div>
+              <div class="muted-mono" id="lcBasecampOutsideOnline"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">Inside the Base</div>
+            <div class="card-body text-center">
+              <div class="statval fs-3" id="lcBasecampInside">—</div>
+              <div class="muted-mono" id="lcBasecampInsideOnline"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">Bunker</div>
+            <div class="card-body text-center">
+              <div class="statval fs-3" id="lcBunker">—</div>
+              <div class="muted-mono" id="lcBunkerOnline"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">Base Health</div>
+            <div class="card-body text-center">
+              <div class="statval fs-5 mb-1" id="lcBaseHealth">—</div>
+              <div class="progress mb-2" style="height:8px; background: rgba(255,255,255,.08);">
+                <div class="progress-bar bg-success" id="lcBaseHealthBar" style="width:100%"></div>
+              </div>
+              <span class="badge rounded-pill text-bg-info" id="lcBaseApPill">Base AP: 0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card soft-card">
+        <div class="card-header fw-semibold d-flex justify-content-between"><span>Locations</span><button class="btn btn-sm btn-outline-light" id="reloadLocations">Reload</button></div>
+        <div class="card-body p-0 panel">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Location</th><th>Users</th><th>Zone</th><th class="text-end">Actions</th></tr></thead>
+            <tbody id="locationRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Location Manager: per-location player list + blanket Empty/Teleport All -->
+    <div class="modal fade" id="modLocationManager" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+          <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+            <h5 class="modal-title mb-0">Location Manager — <span id="lmName"></span> <span id="lmZonePill"></span></h5>
+            <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="muted-mono mb-2" id="lmUserCount"></div>
+            <div class="panel p-0 mb-3" style="max-height: 40vh;">
+              <table class="table table-sm mb-0">
+                <thead><tr><th>Player</th><th>Level</th><th>Online</th><th class="text-end">Actions</th></tr></thead>
+                <tbody id="lmPlayerRows"></tbody>
+              </table>
+            </div>
+            <hr style="border-color: rgba(255,255,255,.15);">
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-warning flex-fill" id="lmEmptyBtn">Empty (move everyone here into the base)</button>
+              <button class="btn btn-sm btn-outline-info flex-fill" id="lmTeleportAllBtn">Teleport All (move everyone else here)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teleport Options: pick a destination for one player, opened from the Location Manager -->
+    <div class="modal fade" id="modTeleportOptions" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+          <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+            <h5 class="modal-title mb-0">Teleport — <span id="toName"></span></h5>
+            <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="list-group" id="toOptions"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- PLAYERS: list of everyone in the DB; picking one swaps to Edit Player -->
     <section id="tab-players" class="d-none">
@@ -249,6 +446,7 @@
   <div id="toast" class="position-fixed bottom-0 end-0 m-3 px-3 py-2 rounded text-light"
        style="background: rgba(0,0,0,.85); border: 1px solid rgba(255,255,255,.2); display:none; z-index:1080;"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
@@ -269,8 +467,9 @@
     $("tabs").querySelectorAll("button[data-tab]").forEach(b => b.addEventListener("click", () => {
       $("tabs").querySelectorAll("button").forEach(x => x.classList.remove("active"));
       b.classList.add("active");
-      ["world","users","players","shop"].forEach(t => $("tab-"+t).classList.toggle("d-none", t !== b.dataset.tab));
+      ["world","locations","users","players","shop"].forEach(t => $("tab-"+t).classList.toggle("d-none", t !== b.dataset.tab));
       if (b.dataset.tab === "world") loadWorld();
+      if (b.dataset.tab === "locations") loadLocations();
       if (b.dataset.tab === "shop") loadShop();
       if (b.dataset.tab === "users") loadUsers();
       if (b.dataset.tab === "players") {
@@ -282,12 +481,15 @@
     }));
 
     // ---- World (game state + online players) ----
+    let currentHordeSize = 0;
+    let baseResetAt = null; // countdown target (ms epoch) while the base is destroyed
     async function loadWorld(){
       const w = await api("/api/admin/world");
       if (!w?.ok) return;
       $("wHunt").textContent = w.hunt ? "ACTIVE" : "OFF";
       $("wHunt").style.color = w.hunt ? "#4caf50" : "#9aa0a6";
       $("wHorde").textContent = w.hordeSize;
+      currentHordeSize = w.hordeSize;
       $("wHordeStatus").textContent = `${w.hordeStatus}${w.raid ? " · RAID LATCHED" : ""}`;
       const pct = w.base.max > 0 ? Math.max(0, Math.min(100, (w.base.health / w.base.max) * 100)) : 0;
       $("wBase").textContent = w.base.destroyed ? "DESTROYED" : `${w.base.health} / ${w.base.max}`;
@@ -295,25 +497,180 @@
       bar.style.width = pct + "%";
       bar.className = "progress-bar " + (pct > 50 ? "bg-success" : pct > 20 ? "bg-warning" : "bg-danger");
 
-      $("wOnlineCount").textContent = `(${w.online.length})`;
-      const rows = $("wOnlineRows"); rows.innerHTML = "";
-      if (!w.online.length) rows.innerHTML = `<tr><td class="muted-mono" colspan="4">(nobody online)</td></tr>`;
-      w.online.forEach(p => {
-        rows.insertAdjacentHTML("beforeend", `
-          <tr><td>${esc(p.username)}</td>
-          <td>${esc(p.locationName)}</td>
-          <td>${p.zombieZone ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
-          <td>${p.busy ? '<span class="badge text-bg-warning text-dark">busy</span> ' : ""}${p.campfire ? '<span class="badge text-bg-warning text-dark">🔥 campfire</span>' : ""}</td></tr>`);
+      $("wSentryPill").className = "badge rounded-pill " + (w.base.sentryActive ? "text-bg-success" : "text-bg-secondary");
+      $("wSentryPill").textContent = w.base.sentryActive ? "🤖 Sentry: ON" : "Sentry: off";
+      $("wRepairKitsPill").textContent = `Kits: ${w.base.repairKits}`;
+      $("wBaseRefill").disabled = w.base.destroyed;
+      $("wBaseSentry").disabled = w.base.destroyed;
+
+      // Destroyed-base warning banner (visible regardless of active tab).
+      baseResetAt = w.base.destroyed ? w.base.resetAt : null;
+      $("baseWarningBanner").classList.toggle("d-none", !w.base.destroyed);
+      tickBaseCountdown();
+
+      renderFeed(w.events);
+      await loadWorldUsers();
+    }
+
+    // World Chat & Events — plain lines, admin-authored ones read
+    // "[Admin->user] text" / "[Admin] text" straight out of the message text.
+    function renderFeed(events){
+      const el = $("wFeed");
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      el.innerHTML = events.length
+        ? events.map(e => `<div class="muted-mono mb-1">${esc(e.msg)}</div>`).join("")
+        : `<div class="muted-mono">(nothing yet)</div>`;
+      if (nearBottom) el.scrollTop = el.scrollHeight;
+    }
+    $("wChatForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const message = $("wChatMsg").value.trim();
+      if (!message) return;
+      const target = $("wChatTarget").value;
+      const r = await api("/api/admin/chat", { message, target });
+      if (r.ok) $("wChatMsg").value = "";
+      loadWorld();
+    });
+
+    // World tab's Users list: level/online/location/safe + an Actions button
+    // opening the moderation modal. Reuses /api/admin/users (same data as the
+    // Users/Players tabs) — also refreshes the chat-target dropdown options.
+    let worldUsers = [];
+    async function loadWorldUsers(){
+      worldUsers = await api("/api/admin/users") || [];
+      $("wUserCount").textContent = `(${worldUsers.length})`;
+
+      const targetSel = $("wChatTarget");
+      const prevTarget = targetSel.value;
+      targetSel.innerHTML = `<option value="">(broadcast)</option>`;
+      worldUsers.forEach(u => targetSel.insertAdjacentHTML("beforeend", `<option value="${esc(u.username)}">${esc(u.username)}</option>`));
+      targetSel.value = prevTarget;
+
+      const rows = $("wUserRows"); rows.innerHTML = "";
+      if (!worldUsers.length) { rows.innerHTML = `<tr><td class="muted-mono" colspan="6">(no users)</td></tr>`; return; }
+      worldUsers.forEach(u => {
+        const flags = [
+          u.chat_mute ? '<span class="badge text-bg-warning text-dark" title="Muted">M</span>' : "",
+          u.chat_deaf ? '<span class="badge text-bg-warning text-dark" title="Deaf">D</span>' : "",
+          u.chat_strict ? '<span class="badge text-bg-warning text-dark" title="Strict">S</span>' : "",
+          u.login_restricted ? '<span class="badge text-bg-danger" title="Temp banned">BAN</span>' : "",
+          u.user_exiled ? '<span class="badge text-bg-dark border" title="Exiled">EXILE</span>' : "",
+        ].filter(Boolean).join(" ");
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${esc(u.username)} ${flags}</td>
+          <td class="statval">${u.level ?? "—"}</td>
+          <td>${u.online ? '<span class="badge text-bg-success">online</span>' : '<span class="badge text-bg-secondary">offline</span>'}</td>
+          <td class="muted-mono">${esc(u.locationName || "—")}</td>
+          <td>${u.zombieZone ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
+          <td class="text-end"><button class="btn btn-sm btn-outline-info py-0 px-2">Actions</button></td>`;
+        tr.querySelector("button").onclick = () => openActions(u.username);
+        rows.appendChild(tr);
       });
     }
+
+    // ---- Per-user moderation modal ----
+    let actionsModal = null, actUser = null;
+    function openActions(username){
+      const u = worldUsers.find(x => x.username === username);
+      if (!u) return;
+      actUser = username;
+      $("actName").textContent = username;
+
+      ["mute", "deaf", "strict"].forEach(flag => {
+        const on = Boolean(u[`chat_${flag}`]);
+        const btn = $("act" + flag[0].toUpperCase() + flag.slice(1));
+        btn.className = "btn btn-sm flex-fill " + (on ? "btn-warning" : "btn-outline-secondary");
+        btn.textContent = `${flag[0].toUpperCase()}${flag.slice(1)}${on ? " ✓" : ""}`;
+      });
+
+      if (u.login_restricted) {
+        const liftsAt = u.login_res_set_time + u.login_res_time * 1000;
+        $("actBanStatus").textContent = `— banned until ${new Date(liftsAt).toLocaleString()} (${esc(u.login_res_reason)})`;
+      } else {
+        $("actBanStatus").textContent = "";
+      }
+      $("actUnbanBtn").disabled = !u.login_restricted;
+      $("actBanReason").value = "";
+      $("actBanDur").value = "86400";
+      $("actBanCustom").classList.add("d-none");
+
+      $("actExileStatus").textContent = u.user_exiled ? `— currently exiled (${esc(u.user_exiled_reason)})` : "";
+      $("actExileBtn").disabled = Boolean(u.user_exiled);
+      $("actUnexileBtn").disabled = !u.user_exiled;
+      $("actExileReason").value = "";
+
+      if (!actionsModal) actionsModal = new bootstrap.Modal($("modActions"));
+      actionsModal.show();
+    }
+    document.querySelectorAll("#modActions [data-flag]").forEach(btn => btn.onclick = async () => {
+      const u = worldUsers.find(x => x.username === actUser);
+      const flag = btn.dataset.flag;
+      const value = !u[`chat_${flag}`] ? "true" : "false";
+      await api("/api/admin/moderation/chatflag", { username: actUser, flag, value });
+      await loadWorldUsers();
+      openActions(actUser); // refresh the modal's own button states in place
+    });
+    $("actBanDur").addEventListener("change", () => {
+      $("actBanCustom").classList.toggle("d-none", $("actBanDur").value !== "custom");
+    });
+    $("actBanBtn").onclick = async () => {
+      const seconds = $("actBanDur").value === "custom" ? Number($("actBanCustom").value) : Number($("actBanDur").value);
+      if (!seconds || seconds <= 0) { flash("Enter a valid ban duration."); return; }
+      await api("/api/admin/moderation/ban", { username: actUser, seconds, reason: $("actBanReason").value.trim() });
+      actionsModal.hide();
+      loadWorld();
+    };
+    $("actUnbanBtn").onclick = async () => {
+      await api("/api/admin/moderation/unban", { username: actUser });
+      actionsModal.hide();
+      loadWorld();
+    };
+    $("actExileBtn").onclick = async () => {
+      if (!confirm(`Permanently exile ${actUser}? This is a permaban.`)) return;
+      await api("/api/admin/moderation/exile", { username: actUser, reason: $("actExileReason").value.trim() });
+      actionsModal.hide();
+      loadWorld();
+    };
+    $("actUnexileBtn").onclick = async () => {
+      await api("/api/admin/moderation/unexile", { username: actUser });
+      actionsModal.hide();
+      loadWorld();
+    };
+    // Per-second countdown display, driven by the resetAt target loadWorld sets
+    // (no extra fetch — just formats the remaining ms).
+    function tickBaseCountdown(){
+      if (!baseResetAt) return;
+      const left = Math.max(0, baseResetAt - Date.now());
+      const h = Math.floor(left / 3600000), m = Math.floor((left % 3600000) / 60000), s = Math.floor((left % 60000) / 1000);
+      $("baseResetCountdown").textContent = `${h}h ${m}m ${s}s`;
+    }
+    setInterval(tickBaseCountdown, 1000);
+
     $("reloadWorld").onclick = loadWorld;
     $("wHuntToggle").onclick = async () => { await api("/api/hunt/toggle", {}); loadWorld(); };
+    document.querySelectorAll("[data-hordedelta]").forEach(b => b.onclick = async () => {
+      const size = Math.max(0, currentHordeSize + Number(b.dataset.hordedelta));
+      await api("/api/admin/world/horde", { size }); loadWorld();
+    });
     $("wHordeSet").onclick = async () => {
       const v = $("wHordeSize").value;
       if (v === "") return;
       const r = await api("/api/admin/world/horde", { size: v });
       if (r.ok){ $("wHordeSize").value = ""; loadWorld(); }
     };
+    $("wHordeNuke").onclick = async () => {
+      if (!confirm("Nuke the entire horde down to 0?")) return;
+      await api("/api/admin/world/horde/nuke", {}); loadWorld();
+    };
+    $("wHordeInstantHorde").onclick = async () => {
+      await api("/api/admin/world/horde/instant", { tier: "horde" }); loadWorld();
+    };
+    $("wHordeInstantRaid").onclick = async () => {
+      await api("/api/admin/world/horde/instant", { tier: "raid" }); loadWorld();
+    };
+    $("wBaseRefill").onclick = async () => { await api("/api/admin/world/base/repair", {}); loadWorld(); };
+    $("wBaseSentry").onclick = async () => { await api("/api/admin/world/base/sentry", {}); loadWorld(); };
     $("wBaseReset").onclick = async () => {
       if (!confirm("Reset the experiment? Rebuilds the base and wipes global state.")) return;
       await api("/api/base/reset", {}); loadWorld();
@@ -328,10 +685,11 @@
         tr.innerHTML = `
           <td class="muted-mono">${u.id}</td>
           <td>${esc(u.username)}</td>
-          <td>${u.is_admin ? '<span class="badge text-bg-danger">admin</span>' : '<span class="badge text-bg-secondary">user</span>'}</td>
+          <td>${u.is_admin ? '<span class="badge text-bg-danger">admin</span>' : '<span class="badge text-bg-secondary">user</span>'}${u.is_admin ? (u.adm_fun ? ' <span class="badge text-bg-warning text-dark">🎉 fun</span>' : "") : ""}</td>
           <td class="text-end">
             <button class="btn btn-sm btn-outline-info" data-act="pw">Password</button>
             <button class="btn btn-sm btn-outline-warning" data-act="admin">${u.is_admin ? "Revoke" : "Grant"}</button>
+            ${u.is_admin ? `<button class="btn btn-sm btn-outline-warning" data-act="admfun">${u.adm_fun ? "Revoke Fun" : "Grant Fun"}</button>` : ""}
             <button class="btn btn-sm btn-outline-danger" data-act="del">Delete</button>
           </td>`;
         tr.querySelector('[data-act="pw"]').onclick = async () => {
@@ -340,6 +698,10 @@
         };
         tr.querySelector('[data-act="admin"]').onclick = async () => {
           await api("/api/admin/users/admin", { username: u.username, admin: u.is_admin ? "false" : "true" }); loadUsers();
+        };
+        const admFunBtn = tr.querySelector('[data-act="admfun"]');
+        if (admFunBtn) admFunBtn.onclick = async () => {
+          await api("/api/admin/users/admfun", { username: u.username, value: u.adm_fun ? "false" : "true" }); loadUsers();
         };
         tr.querySelector('[data-act="del"]').onclick = async () => {
           if (!confirm(`Delete user "${u.username}" and ALL their data? This cannot be undone.`)) return;
@@ -355,6 +717,122 @@
       const r = await api("/api/admin/users/add", { username: f.username.value, password: f.password.value, admin: f.admin.checked ? "true" : "false" });
       if (r.ok){ f.reset(); loadUsers(); }
     });
+
+    // ---- Locations tab: header dash + per-location table ----
+    let locationsData = [];
+    async function loadLocations(){
+      const [locRes, worldRes] = await Promise.all([
+        api("/api/admin/world/locations"),
+        api("/api/admin/world"),
+      ]);
+      if (locRes?.ok) {
+        locationsData = locRes.locations;
+        const byKey = Object.fromEntries(locationsData.map(l => [l.key, l]));
+        const bo = byKey.basecamp_outside, bi = byKey.basecamp_inside, bk = byKey.bunker;
+        $("lcBasecampOutside").textContent = bo?.count ?? "—";
+        $("lcBasecampOutsideOnline").textContent = bo ? `${bo.online} online` : "";
+        $("lcBasecampInside").textContent = bi?.count ?? "—";
+        $("lcBasecampInsideOnline").textContent = bi ? `${bi.online} online` : "";
+        $("lcBunker").textContent = bk?.count ?? "—";
+        $("lcBunkerOnline").textContent = bk ? `${bk.online} online` : "";
+
+        const rows = $("locationRows"); rows.innerHTML = "";
+        locationsData.forEach(loc => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${esc(loc.name)}</td>
+            <td class="statval">${loc.count} <span class="muted-mono">(${loc.online} online)</span></td>
+            <td>${loc.zombie ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-info py-0 px-2">Manage</button></td>`;
+          tr.querySelector("button").onclick = () => openLocationManager(loc.key);
+          rows.appendChild(tr);
+        });
+      }
+      if (worldRes?.ok) {
+        const b = worldRes.base;
+        $("lcBaseHealth").textContent = b.destroyed ? "DESTROYED" : `${b.health} / ${b.max}`;
+        const pct = b.max > 0 ? Math.max(0, Math.min(100, (b.health / b.max) * 100)) : 0;
+        const bar = $("lcBaseHealthBar");
+        bar.style.width = pct + "%";
+        bar.className = "progress-bar " + (pct > 50 ? "bg-success" : pct > 20 ? "bg-warning" : "bg-danger");
+        $("lcBaseApPill").textContent = `Base AP: ${b.ap}`;
+        $("lcBaseApPill").className = "badge rounded-pill " + (b.ap > 0 ? "text-bg-info" : "text-bg-secondary");
+      }
+    }
+    $("reloadLocations").onclick = loadLocations;
+
+    // ---- Location Manager modal ----
+    let locationManagerModal = null, lmKey = null;
+    async function openLocationManager(key){
+      lmKey = key;
+      await renderLocationManager();
+      if (!locationManagerModal) locationManagerModal = new bootstrap.Modal($("modLocationManager"));
+      locationManagerModal.show();
+    }
+    async function renderLocationManager(){
+      const loc = locationsData.find(l => l.key === lmKey);
+      if (!loc) return;
+      $("lmName").textContent = loc.name;
+      $("lmZonePill").innerHTML = loc.zombie ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>';
+      $("lmEmptyBtn").classList.toggle("d-none", loc.key === "basecamp_inside");
+
+      const users = (await api("/api/admin/users") || []).filter(u => {
+        const locKey = locationsData.some(l => l.key === u.location) ? u.location : "basecamp_outside";
+        return locKey === loc.key;
+      });
+      $("lmUserCount").textContent = `${users.length} player(s) here`;
+      const rows = $("lmPlayerRows"); rows.innerHTML = "";
+      if (!users.length) { rows.innerHTML = `<tr><td class="muted-mono" colspan="4">(nobody here)</td></tr>`; }
+      users.forEach(u => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${esc(u.username)}</td>
+          <td class="statval">${u.level ?? "—"}</td>
+          <td>${u.online ? '<span class="badge text-bg-success">online</span>' : '<span class="badge text-bg-secondary">offline</span>'}</td>
+          <td class="text-end"><button class="btn btn-sm btn-outline-warning py-0 px-2">Teleport Away</button></td>`;
+        tr.querySelector("button").onclick = () => openTeleportOptions(u.username, loc.key);
+        rows.appendChild(tr);
+      });
+    }
+    $("lmEmptyBtn").onclick = async () => {
+      const loc = locationsData.find(l => l.key === lmKey);
+      if (!loc || !confirm(`Move everyone at ${loc.name} into the base?`)) return;
+      await api("/api/admin/world/locations/empty", { location: lmKey });
+      await loadLocations();
+      await renderLocationManager();
+    };
+    $("lmTeleportAllBtn").onclick = async () => {
+      const loc = locationsData.find(l => l.key === lmKey);
+      if (!loc || !confirm(`Teleport everyone NOT at ${loc.name} to it?`)) return;
+      await api("/api/admin/world/locations/teleport-all", { location: lmKey });
+      await loadLocations();
+      await renderLocationManager();
+    };
+
+    // ---- Teleport Options modal (single player, opened from Location Manager) ----
+    let teleportOptionsModal = null;
+    function openTeleportOptions(username, fromKey){
+      $("toName").textContent = username;
+      const el = $("toOptions"); el.innerHTML = "";
+      locationsData.filter(l => l.key !== fromKey).forEach(l => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "list-group-item list-group-item-action d-flex justify-content-between align-items-center";
+        btn.style.background = "transparent";
+        btn.style.color = "inherit";
+        btn.style.borderColor = "rgba(255,255,255,.12)";
+        btn.innerHTML = `${esc(l.name)} ${l.zombie ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'} <span class="btn btn-sm btn-outline-info py-0 px-2">Teleport Here</span>`;
+        btn.onclick = async () => {
+          await api("/api/admin/player/location", { username, location: l.key });
+          teleportOptionsModal.hide();
+          await loadLocations();
+          await renderLocationManager();
+        };
+        el.appendChild(btn);
+      });
+      if (!teleportOptionsModal) teleportOptionsModal = new bootstrap.Modal($("modTeleportOptions"));
+      teleportOptionsModal.show();
+    }
 
     // ---- Players ----
     // List view (everyone in the DB) <-> Edit Player view.
@@ -451,22 +929,23 @@
       // living in the Player Card's quick rows are left out of the table.
       const QUICK_FIELDS = new Set(quick.map(([f]) => f));
       const groupOf = (f) =>
-        f.startsWith("handgun_") ? "Handgun" :
-        f.startsWith("rifle_")   ? "Rifle" :
-        f.startsWith("shotgun_") ? "Shotgun" :
-        f.startsWith("s_")       ? "Skills" : "Core";
+        f.startsWith("handgun_")    ? "Handgun" :
+        f.startsWith("rifle_")      ? "Rifle" :
+        f.startsWith("shotgun_")    ? "Shotgun" :
+        f.startsWith("burstrifle_") ? "Burst Rifle" :
+        f.startsWith("s_")          ? "Skills" : "Core";
       const groups = {};
       data.stats.filter(s => !QUICK_FIELDS.has(s.field)).forEach(s => (groups[groupOf(s.field)] ||= []).push(s));
 
       const st = $("statRows"); st.innerHTML = "";
-      ["Core", "Handgun", "Rifle", "Shotgun", "Skills"].forEach(g => {
+      ["Core", "Handgun", "Rifle", "Shotgun", "Burst Rifle", "Skills"].forEach(g => {
         if (!groups[g]) return;
         st.insertAdjacentHTML("beforeend",
           `<tr><td colspan="3" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
         groups[g].forEach(s => {
           // Strip the group prefix for readability (handgun_ammo → ammo, s_magic_lvl → magic lvl).
           const label = g === "Skills" ? s.field.slice(2).replace(/_/g, " ")
-            : g === "Core" ? s.field : s.field.replace(/^(handgun|rifle|shotgun)_/, "");
+            : g === "Core" ? s.field : s.field.replace(/^(handgun|rifle|shotgun|burstrifle)_/, "");
           const tr = document.createElement("tr");
           if (s.max === 1) {
             // Boolean (0/1) stat: one toggle instead of the ± spread.
@@ -603,6 +1082,24 @@
       });
     }
     $("reloadShop").onclick = loadShop;
+
+    // ---- Live updating ----
+    // World state (and the destroyed-base banner) refreshes every 3s no matter
+    // which tab is active — it's cheap and the banner must stay current
+    // globally. Whichever OTHER tab is currently showing also gets refreshed,
+    // so users/players data doesn't go stale while you're looking at it.
+    function activeTab(){ return $("tabs").querySelector("button.active")?.dataset.tab; }
+    setInterval(() => {
+      loadWorld();
+      const t = activeTab();
+      if (t === "users") loadUsers();
+      if (t === "locations") loadLocations();
+      if (t === "players") {
+        if (!$("playerPanel").classList.contains("d-none") && currentPlayer) loadPlayer(currentPlayer);
+        else if (!$("playerListCard").classList.contains("d-none")) loadPlayerList();
+      }
+      // Shop tab is the static item_backbone.js registry — nothing to refresh.
+    }, 3000);
 
     // ---- init ----
     fetch("/api/game-state", { credentials: "same-origin" }).then(r => r.json()).then(d => { $("meName").textContent = d?.me?.user || "—"; }).catch(()=>{});

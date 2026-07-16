@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZBOE — Banned</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body{
+      min-height: 100vh;
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(220,53,69,.22), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(220,53,69,.12), transparent 60%),
+                  #0b0f14;
+    }
+    .soft-card{
+      background: rgba(255,255,255,.03);
+      border-color: rgba(220,53,69,.35);
+    }
+    .soft-card .card-header{
+      background: rgba(220,53,69,.08);
+      border-color: rgba(220,53,69,.35);
+      color: #ffffff;
+    }
+    .soft-card .card-body, .soft-card .card-footer{
+      color: rgba(255,255,255,.9);
+      border-color: rgba(220,53,69,.35);
+    }
+    .muted-mono{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      color: rgba(255,255,255,.65);
+      font-size: .9rem;
+    }
+    .ban-icon{ font-size: 3.5rem; line-height: 1; }
+    .ban-headline{ text-shadow: 0 0 14px rgba(220,53,69,.5); }
+  </style>
+</head>
+<body class="text-light d-flex align-items-center">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-12 col-md-8 col-lg-6">
+
+        <div class="text-center mb-3 d-none" id="loading">
+          <div class="muted-mono">Checking status…</div>
+        </div>
+
+        <div class="card soft-card shadow d-none" id="banCard">
+          <div class="card-header text-center py-4">
+            <div class="ban-icon mb-2" id="banIcon">🚫</div>
+            <div class="display-6 fw-semibold ban-headline" id="banHeadline">You Have Been Banned</div>
+          </div>
+          <div class="card-body">
+            <div class="mb-3 text-center" id="banSubline"></div>
+            <table class="table table-sm table-borderless mb-0">
+              <tbody>
+                <tr><td class="muted-mono">User</td><td id="banUser" class="text-end fw-semibold"></td></tr>
+                <tr><td class="muted-mono">Admin</td><td id="banAdmin" class="text-end"></td></tr>
+                <tr><td class="muted-mono">Reason</td><td id="banReason" class="text-end"></td></tr>
+                <tr class="d-none" id="banExpiresRow"><td class="muted-mono">Expires</td><td id="banExpires" class="text-end"></td></tr>
+                <tr class="d-none" id="banCountdownRow"><td class="muted-mono">Time Left</td><td id="banCountdown" class="text-end statval"></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-footer text-center muted-mono">
+            <a class="link-info" href="/playercard.html">← Back to the public leaderboard</a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const username = (params.get("u") || "").trim();
+
+    async function init(){
+      if (!username) { location.replace("/playercard.html"); return; }
+      $("loading").classList.remove("d-none");
+      let data = null;
+      try {
+        const res = await fetch(`/api/ban-status?u=${encodeURIComponent(username)}`);
+        data = await res.json().catch(() => null);
+      } catch (err) { console.error(err); }
+      $("loading").classList.add("d-none");
+
+      // No active ban/exile on record (lapsed, lifted, or unknown user) — this
+      // page has nothing to show, so send them somewhere that does.
+      if (!data?.ok) { location.replace("/playercard.html"); return; }
+
+      $("banUser").textContent = data.username;
+      $("banAdmin").textContent = data.admin || "—";
+      $("banReason").textContent = data.reason || "—";
+
+      if (data.exiled) {
+        $("banIcon").textContent = "☣️";
+        $("banHeadline").textContent = "You Have Been Exiled From The Experiment";
+        $("banSubline").innerHTML = '<span class="text-danger fw-semibold">This is permanent.</span> You will not be able to log back in.';
+      } else {
+        $("banIcon").textContent = "🚫";
+        $("banHeadline").textContent = "You Have Been Banned";
+        $("banSubline").textContent = "You've been temporarily restricted from logging in.";
+        $("banExpiresRow").classList.remove("d-none");
+        $("banCountdownRow").classList.remove("d-none");
+        $("banExpires").textContent = new Date(data.until).toLocaleString();
+        tickCountdown(data.until);
+        setInterval(() => tickCountdown(data.until), 1000);
+      }
+
+      $("banCard").classList.remove("d-none");
+    }
+
+    function tickCountdown(until){
+      const left = Math.max(0, until - Date.now());
+      if (left <= 0) { $("banCountdown").textContent = "expired — try logging in again"; return; }
+      const h = Math.floor(left / 3600000), m = Math.floor((left % 3600000) / 60000), s = Math.floor((left % 60000) / 1000);
+      $("banCountdown").textContent = `${h}h ${m}m ${s}s`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

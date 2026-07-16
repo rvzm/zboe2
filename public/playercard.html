@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZBOE — Player Card</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(220,53,69,.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(13,110,253,.12), transparent 60%),
+                  #0b0f14;
+    }
+    .muted-mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.6); font-size: .8rem; }
+    .soft-card { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.12); }
+    .soft-card .card-header { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); color: #fff; }
+    .soft-card .card-header .fw-semibold { text-shadow: 0 0 8px rgba(255,255,255,.25); letter-spacing: .02em; }
+    .table { --bs-table-color: #e9ecef; --bs-table-bg: transparent; --bs-table-border-color: rgba(255,255,255,.12); }
+    .statval { color: #fff; font-weight: 600; }
+    .stat-tile { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.12); border-radius: .5rem; padding: .75rem; height: 100%; }
+
+    /* Shiny player name — color tier set by JS from the player's level. */
+    .shiny-name {
+      background-image: linear-gradient(90deg, #9aa0a6 0%, #cfd3d8 20%, #ffffff 50%, #cfd3d8 80%, #9aa0a6 100%);
+      background-size: 200% auto;
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent; color: transparent;
+      text-shadow: 0 0 6px rgba(255,255,255,.18);
+      animation: gold-shimmer 3.5s linear infinite;
+    }
+    .shiny-name.name-green { background-image: linear-gradient(90deg, #1a5c1a 0%, #4caf50 20%, #c9ffcf 50%, #4caf50 80%, #1a5c1a 100%); }
+    .shiny-name.name-blue  { background-image: linear-gradient(90deg, #123a6b 0%, #3b82f6 20%, #cfe6ff 50%, #3b82f6 80%, #123a6b 100%); }
+    .shiny-name.name-red   { background-image: linear-gradient(90deg, #6b1414 0%, #e04747 20%, #ffcccc 50%, #e04747 80%, #6b1414 100%); }
+    .shiny-name.name-gold  { background-image: linear-gradient(90deg, #8a6d1d 0%, #d4af37 20%, #fff4c2 50%, #8a6d1d 100%); }
+    @keyframes gold-shimmer { to { background-position: -200% center; } }
+    @media (prefers-reduced-motion: reduce) { .shiny-name { animation: none; } }
+
+    /* Vertical category tabs inside the Backpack sub-panel */
+    #bpTabs .btn { text-align: left; }
+    #bpTabs .btn.active { font-weight: 600; }
+
+    /* Bootstrap has no built-in gold/purple pill — Currency box needs both. */
+    .badge-gold { background: #d4af37; color: #1a1a1a; }
+    .badge-purple { background: #8b5cf6; color: #fff; }
+
+    /* One divider line per stat row in the Survival tile. */
+    .sv-row { display: flex; justify-content: space-between; align-items: center; padding: .2rem 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .sv-row:last-child { border-bottom: none; }
+
+    /* Currency / Location values read larger than the default stat-tile text. */
+    .stat-tile.stat-tile-lg .statval { font-size: 1.7rem; }
+    .stat-tile.stat-tile-lg .badge { font-size: 1.4rem; padding: .5em .85em; }
+  </style>
+</head>
+<body class="text-light">
+  <nav class="navbar navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
+    <div class="container py-2 d-flex justify-content-between">
+      <span class="navbar-brand fw-semibold">🧟 ZBOE <span class="opacity-75" id="pageTitle">Leaderboard</span></span>
+      <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-light d-none" href="/playercard.html" id="btnBackToLeaderboard">← Playercard Leaderboard</a>
+        <a class="btn btn-sm btn-outline-light" href="/game">← Game</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+
+    <!-- ===== Leaderboard mode (no ?p=) ===== -->
+    <section id="leaderboardView" class="d-none">
+      <div class="card soft-card">
+        <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+          <span>🏆 Leaderboard</span>
+          <span class="muted-mono" id="lbCount"></span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0 align-middle">
+            <thead><tr><th style="width:70px;">Rank</th><th>Player</th><th>Level</th><th>Lifetime XP</th><th class="text-end"></th></tr></thead>
+            <tbody id="lbRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Card mode (?p=<user>) ===== -->
+    <section id="cardView" class="d-none">
+
+      <!-- Header box: identity + vitals, then the four info tiles -->
+      <div class="card soft-card mb-3">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-3 mb-3">
+            <div class="d-flex align-items-center justify-content-center flex-shrink-0"
+                 style="width:64px; height:64px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05);">
+              <span class="fs-3 fw-semibold statval" id="pcLevel">1</span>
+            </div>
+            <div class="flex-grow-1" style="min-width:0;">
+              <div class="fs-3 fw-semibold text-truncate shiny-name" id="pcName">player</div>
+              <div class="d-flex justify-content-between muted-mono" style="font-size:.75rem;">
+                <span>Health</span><span id="pcHealthText">— / —</span>
+              </div>
+              <div class="progress mb-1" style="height:14px; background: rgba(255,255,255,.08);">
+                <div class="progress-bar bg-danger" id="pcHealthBar" style="width:0%;"></div>
+              </div>
+              <div class="d-flex justify-content-between muted-mono" style="font-size:.75rem;">
+                <span>Shield</span><span id="pcShieldText">— / —</span>
+              </div>
+              <div class="progress" style="height:14px; background: rgba(255,255,255,.08);">
+                <div class="progress-bar bg-primary" id="pcShieldBar" style="width:0%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-2">
+            <div class="col-6 col-lg-3">
+              <div class="stat-tile">
+                <div class="fw-semibold muted-mono mb-2">Survival</div>
+                <div class="sv-row"><span class="muted-mono">Kills</span><span class="statval" id="svKills">0</span></div>
+                <div class="sv-row"><span class="muted-mono">Accuracy</span><span class="statval" id="svAcc">0%</span></div>
+                <div id="svAuthOnly">
+                  <div class="sv-row"><span class="muted-mono">Lifetime XP</span><span class="statval" id="svLxp">0</span></div>
+                  <div class="sv-row"><span class="muted-mono">Gun Oil</span><span class="statval" id="svGunOil">0</span></div>
+                  <div class="sv-row" style="border-bottom:none;"><span class="muted-mono">Guns</span></div>
+                  <div id="svGuns"><span class="muted-mono">none</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-lg-3" id="currencyBox">
+              <div class="stat-tile stat-tile-lg">
+                <div class="fw-semibold muted-mono mb-2">Currency</div>
+                <div class="d-flex justify-content-between align-items-center mb-2"><span class="muted-mono">Gold</span><span class="badge rounded-pill badge-gold" id="curGold">0</span></div>
+                <div class="d-flex justify-content-between align-items-center"><span class="muted-mono">Tokens</span><span class="badge rounded-pill badge-purple" id="curTokens">0</span></div>
+              </div>
+            </div>
+            <div class="col-6 col-lg-3" id="locationBox">
+              <div class="stat-tile stat-tile-lg">
+                <div class="fw-semibold muted-mono mb-2">Location</div>
+                <div class="statval mb-2" id="locName">—</div>
+                <span class="badge rounded-pill" id="locPill">—</span>
+              </div>
+            </div>
+            <div class="col-6 col-lg-3">
+              <div class="stat-tile text-center">
+                <div class="fw-semibold muted-mono mb-2">Leaderboard standing</div>
+                <div style="font-size: 4rem; line-height: 1;" id="lbEmoji">☣️</div>
+                <div class="statval mt-2" id="lbStanding">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <!-- Sidebar: skills (read-only — same layout as the Player Info modal) -->
+        <div class="col-lg-3">
+          <div class="card soft-card h-100">
+            <div class="card-header fw-semibold">Skills</div>
+            <div class="card-body" id="skillList"></div>
+          </div>
+        </div>
+
+        <!-- Main panel: Backpack (vertical category tabs) / Toolbelt / Potions
+             — swapped for a login prompt when viewing anonymously. -->
+        <div class="col-lg-9">
+          <div class="card soft-card">
+            <div id="mainLoginPrompt" class="d-none card-body text-center muted-mono py-5">
+              Please login to view this data.
+            </div>
+            <div id="mainAuthedContent">
+              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="mainTabs">
+                <button class="btn btn-outline-light active" data-maintab="backpack" type="button">Backpack</button>
+                <button class="btn btn-outline-light" data-maintab="toolbelt" type="button">Toolbelt</button>
+                <button class="btn btn-outline-light" data-maintab="potions" type="button">Potions</button>
+              </div>
+              <div class="card-body p-0">
+
+                <div id="mtBackpack" class="row g-0">
+                  <div class="col-3 col-md-2 border-end" style="border-color: rgba(255,255,255,.12) !important;">
+                    <div class="d-grid gap-1 p-2" id="bpTabs">
+                      <button class="btn btn-sm btn-outline-info active" data-bptab="guns" type="button">Guns</button>
+                      <button class="btn btn-sm btn-outline-info" data-bptab="armor" type="button">Armor</button>
+                      <button class="btn btn-sm btn-outline-info" data-bptab="materials" type="button">Materials</button>
+                      <button class="btn btn-sm btn-outline-info" data-bptab="treasure" type="button">Treasure</button>
+                      <button class="btn btn-sm btn-outline-info" data-bptab="food" type="button">Food</button>
+                      <button class="btn btn-sm btn-outline-info" data-bptab="base" type="button">Base</button>
+                    </div>
+                  </div>
+                  <div class="col-9 col-md-10">
+                    <div class="p-2" id="bpBody" style="max-height: 55vh; overflow-y: auto;"></div>
+                  </div>
+                </div>
+
+                <div id="mtToolbelt" class="d-none p-2" style="max-height: 55vh; overflow-y: auto;"></div>
+                <div id="mtPotions" class="d-none p-2" style="max-height: 55vh; overflow-y: auto;"></div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="text-center muted-mono mt-4 d-none" id="notFound">No such player.</div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
+
+    // Player-name colour tier by level — identical to game.html's
+    // nameClassForLevel, so the same player always shows the same tier here.
+    function nameClassForLevel(lvl){
+      if (lvl <= 4)  return "";
+      if (lvl <= 9)  return "name-green";
+      if (lvl <= 19) return "name-blue";
+      if (lvl <= 69) return "name-red";
+      return "name-gold";
+    }
+
+    // Top-of-box glyph for the Leaderboard standing tile: podium medals for
+    // #1-3, a random wave for the "close but no medal" #4-9 range, biohazard
+    // for everyone else (including unranked).
+    const WAVING_EMOJI = ["👋", "🙋", "🙋‍♂️", "🙋‍♀️"];
+    function rankEmoji(rank){
+      if (rank === 1) return "🥇";
+      if (rank === 2) return "🥈";
+      if (rank === 3) return "🥉";
+      if (rank >= 4 && rank <= 9) return WAVING_EMOJI[Math.floor(Math.random() * WAVING_EMOJI.length)];
+      return "☣️";
+    }
+
+    const params = new URLSearchParams(location.search);
+    const targetUser = params.get("p");
+
+    if (!targetUser) {
+      $("leaderboardView").classList.remove("d-none");
+      loadLeaderboard();
+    } else {
+      $("pageTitle").textContent = "Player Card";
+      $("btnBackToLeaderboard").classList.remove("d-none");
+      loadCard(targetUser);
+    }
+
+    // ---- Leaderboard mode ----
+    async function loadLeaderboard(){
+      const res = await fetch("/api/leaderboard?limit=100", { credentials: "same-origin" });
+      const data = await res.json().catch(() => ({}));
+      const rows = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+      $("lbCount").textContent = `${rows.length} player${rows.length === 1 ? "" : "s"}`;
+      const tbody = $("lbRows"); tbody.innerHTML = "";
+      if (!rows.length) { tbody.innerHTML = `<tr><td class="muted-mono" colspan="5">(nobody's played yet)</td></tr>`; return; }
+      rows.forEach((r, idx) => {
+        const tier = nameClassForLevel(r.level ?? 1);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="statval">#${idx + 1}</td>
+          <td class="fw-semibold shiny-name ${tier}">${esc(r.user)}</td>
+          <td class="statval">${r.level ?? 1}</td>
+          <td class="muted-mono">${r.xp ?? 0}</td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-info py-0 px-2" href="/playercard.html?p=${encodeURIComponent(r.user)}">View</a></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ---- Card mode ----
+    async function loadCard(username){
+      const res = await fetch(`/api/playercard?user=${encodeURIComponent(username)}`, { credentials: "same-origin" });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) { $("notFound").classList.remove("d-none"); return; }
+      $("cardView").classList.remove("d-none");
+      $("pageTitle").textContent = `Player Card — ${username}`;
+
+      const tier = nameClassForLevel(data.level);
+      $("pcLevel").textContent = data.level;
+      $("pcName").textContent = data.username;
+      $("pcName").className = "fs-3 fw-semibold text-truncate shiny-name " + tier;
+
+      const pct = (v, max) => max > 0 ? Math.max(0, Math.min(100, (v / max) * 100)) : 0;
+      $("pcHealthText").textContent = `${data.health} / ${data.maxHealth}`;
+      $("pcHealthBar").style.width = pct(data.health, data.maxHealth) + "%";
+      $("pcShieldText").textContent = `${data.shield} / ${data.maxShield}`;
+      $("pcShieldBar").style.width = pct(data.shield, data.maxShield) + "%";
+
+      $("svKills").textContent = data.kills;
+      $("svAcc").textContent = `${data.accuracy}%`;
+
+      $("lbEmoji").textContent = rankEmoji(data.rank);
+      $("lbStanding").textContent = data.rank ? `#${data.rank} of ${data.totalPlayers}` : "unranked";
+
+      renderSkills(data.skills);
+
+      // Anonymous viewers get health/shield/kills/accuracy/skills/leaderboard
+      // standing only — Currency and Location are hidden outright, Survival
+      // drops to just Kills/Accuracy, and the Backpack/Toolbelt/Potions panel
+      // is replaced with a login prompt. The server already withheld the
+      // underlying data (gold/location/inventory/etc. are simply absent from
+      // an unauthenticated response), this just matches the UI to it.
+      $("svAuthOnly").classList.toggle("d-none", !data.authenticated);
+      $("currencyBox").classList.toggle("d-none", !data.authenticated);
+      $("locationBox").classList.toggle("d-none", !data.authenticated);
+      $("mainLoginPrompt").classList.toggle("d-none", data.authenticated);
+      $("mainAuthedContent").classList.toggle("d-none", !data.authenticated);
+      if (!data.authenticated) { currentCard = null; return; }
+
+      $("svLxp").textContent = data.lifetimeXp;
+      $("svGunOil").textContent = data.gunOil;
+      // data.guns (not gunsOwned) carries .equipped — the equipped one gets a
+      // blue pill, everything else owned stays neutral dark.
+      $("svGuns").innerHTML = data.guns.length
+        ? data.guns.map(g => `<span class="badge rounded-pill ${g.equipped ? "text-bg-primary" : "text-bg-dark border"} me-1 mb-1">${esc(g.name)}</span>`).join("")
+        : `<span class="muted-mono">none</span>`;
+
+      $("curGold").textContent = data.gold;
+      $("curTokens").textContent = data.tokens;
+
+      $("locName").textContent = data.locationName;
+      $("locPill").className = "badge rounded-pill " + (data.zombieZone ? "text-bg-danger" : "text-bg-success");
+      $("locPill").textContent = data.zombieZone ? "zombies" : "safe";
+
+      renderBackpack(data);
+      renderFlat("mtToolbelt", ["Tool", "Tier", "Qty"], data.tools, (i) => [i.tier || "General"]);
+      renderFlat("mtPotions", ["Item", "Qty"], data.potions, () => []);
+      currentCard = data;
+    }
+
+    // ---- Skills (read-only — same numbers as the Player Info modal, no Buy) ----
+    function renderSkills(skills){
+      const wrap = $("skillList"); wrap.innerHTML = "";
+      skills.forEach(s => {
+        const pct = Math.max(0, Math.min(100, (s.xp / s.nextCost) * 100));
+        const row = document.createElement("div");
+        row.className = "mb-2";
+        row.innerHTML = `
+          <div class="d-flex justify-content-between muted-mono mb-1">
+            <span>${esc(s.name)} <span class="badge text-bg-dark border">Lv ${s.level}</span></span>
+            <span>${s.xp} / ${s.nextCost} XP</span>
+          </div>
+          <div class="progress" style="height: 8px; background: rgba(255,255,255,.08);">
+            <div class="progress-bar bg-info" style="width: ${pct}%"></div>
+          </div>`;
+        wrap.appendChild(row);
+      });
+    }
+
+    // ---- Main panel tabs (Backpack / Toolbelt / Potions) ----
+    let currentCard = null, mainTab = "backpack", bpTab = "guns";
+    $("mainTabs").querySelectorAll("[data-maintab]").forEach(b => b.addEventListener("click", () => {
+      mainTab = b.dataset.maintab;
+      $("mainTabs").querySelectorAll("button").forEach(x => x.classList.toggle("active", x === b));
+      ["Backpack", "Toolbelt", "Potions"].forEach(t => $("mt" + t).classList.toggle("d-none", t.toLowerCase() !== mainTab));
+    }));
+    $("bpTabs").querySelectorAll("[data-bptab]").forEach(b => b.addEventListener("click", () => {
+      bpTab = b.dataset.bptab;
+      $("bpTabs").querySelectorAll("button").forEach(x => x.classList.toggle("active", x === b));
+      if (currentCard) renderBackpack(currentCard);
+    }));
+
+    function packTable(headers, rowsHtml){
+      return `<table class="table table-sm mb-0"><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+    }
+    const packEmpty = (t) => `<div class="p-3 muted-mono">${t}</div>`;
+
+    // Materials, grouped under a header row per metal (item_backbone.js's
+    // SMELT_TYPES, in order — matched by name prefix, e.g. "copper ore" and
+    // "copper wire" both fall under "Copper"); anything that isn't a
+    // recognized metal family (firewood, raw food, trade goods…) lands in a
+    // trailing "Other" group.
+    function materialRowsHtml(materials, smeltTypes){
+      const groups = smeltTypes.map(t => ({ label: t[0].toUpperCase() + t.slice(1), items: [] }));
+      const other = { label: "Other", items: [] };
+      materials.forEach(i => {
+        const g = groups.find(g => i.name.startsWith(g.label.toLowerCase() + " "));
+        (g || other).items.push(i);
+      });
+      const itemRow = (i) => `
+        <tr><td class="fw-semibold">${esc(i.label)}${i.desc ? `<div class="muted-mono fw-normal">${esc(i.desc)}</div>` : ""}</td><td>x${i.quantity}</td></tr>`;
+      return [...groups, other]
+        .filter(g => g.items.length)
+        .map(g => `<tr><td colspan="2" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${esc(g.label)}</td></tr>${g.items.map(itemRow).join("")}`)
+        .join("");
+    }
+
+    function renderBackpack(data){
+      const body = $("bpBody");
+      if (bpTab === "guns") {
+        if (!data.guns.length) { body.innerHTML = packEmpty("No guns owned."); return; }
+        body.innerHTML = packTable(["Gun", "Cond", "Ammo", "Clips", ""], data.guns.map(g => `
+          <tr><td class="fw-semibold">${esc(g.name)}</td><td>${g.condition}</td><td>${g.ammo} / ${g.maxAmmo}</td>
+          <td>${g.clips} / ${g.maxClips}</td>
+          <td>${g.equipped ? '<span class="badge text-bg-primary">equipped</span>' : ""}${g.jammed ? ' <span class="badge text-bg-danger">JAMMED</span>' : ""}</td></tr>`).join(""));
+      } else if (bpTab === "armor") {
+        if (!data.armors.length) { body.innerHTML = packEmpty("No armor owned."); return; }
+        body.innerHTML = packTable(["Armor", "AP", "Cond", "Qty", ""], data.armors.map(a => `
+          <tr><td class="fw-semibold">${esc(a.label)}</td><td><span class="badge text-bg-dark border">AP ${a.ap}</span></td>
+          <td>${a.condition}%</td><td>x${a.quantity}</td>
+          <td>${a.equipped ? '<span class="badge text-bg-primary">equipped</span>' : ""}</td></tr>`).join(""));
+      } else if (bpTab === "materials") {
+        if (!data.materials.length) { body.innerHTML = packEmpty("Nothing gathered yet."); return; }
+        body.innerHTML = packTable(["Item", "Qty"], materialRowsHtml(data.materials, data.smeltTypes || []));
+      } else if (bpTab === "treasure") {
+        if (!data.treasure.length) { body.innerHTML = packEmpty("No treasure found yet."); return; }
+        body.innerHTML = packTable(["Treasure", "Value", "Qty"], data.treasure.map(i => `
+          <tr><td class="fw-semibold">${esc(i.label)}</td><td class="muted-mono">${i.value}g</td><td>x${i.quantity}</td></tr>`).join(""));
+      } else if (bpTab === "food") {
+        if (!data.food.length) { body.innerHTML = packEmpty("No food owned."); return; }
+        body.innerHTML = packTable(["Food", "Qty"], data.food.map(i => `
+          <tr><td class="fw-semibold">${esc(i.label)}${i.desc ? `<div class="muted-mono fw-normal">${esc(i.desc)}</div>` : ""}</td><td>x${i.quantity}</td></tr>`).join(""));
+      } else {
+        if (!data.base.length) { body.innerHTML = packEmpty("No base systems owned."); return; }
+        body.innerHTML = packTable(["System", "Qty"], data.base.map(i => `
+          <tr><td class="fw-semibold">${esc(i.label)}</td><td>x${i.quantity}</td></tr>`).join(""));
+      }
+    }
+
+    // Generic flat list for Toolbelt/Potions — extraCols(item) returns any
+    // additional <td> contents beyond Item/Qty.
+    function renderFlat(elId, headers, rows, extraCols){
+      const el = $(elId);
+      if (!rows.length) { el.innerHTML = packEmpty(elId === "mtToolbelt" ? "No tools owned." : "No consumables owned."); return; }
+      el.innerHTML = packTable(headers, rows.map(i => `
+        <tr><td class="fw-semibold">${esc(i.label)}${i.desc ? `<div class="muted-mono fw-normal">${esc(i.desc)}</div>` : ""}</td>
+        ${extraCols(i).map(c => `<td>${esc(String(c))}</td>`).join("")}
+        <td>x${i.quantity}</td></tr>`).join(""));
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

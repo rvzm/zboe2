@@ -3,7 +3,7 @@
 
 // Single source of truth for the app version. Code reads it from here — only
 // changelog.md and README.md state versions of their own.
-export const app_version = "2.0.24-dev-rc";
+export const app_version = "2.0.25-dev-rc";
 
 export const file_config = {
   logFile: "server.log", // Default log file name
@@ -23,6 +23,12 @@ export const game_config = {
   experimentResetHours: 24, // Hours a destroyed base persists before auto-resetting the experiment
   tokenExchangeGold: 500 // Gold granted per horde token exchanged in the shop
 
+};
+
+export const account_config = {
+  ban_timeout: 86400, // Default temp-ban length (seconds) when none is given — 24h
+  failed_login_max: 5, // Failed password attempts before a lockout
+  failed_login_lockout_seconds: 300 // Auto-lockout length after too many failed attempts — 5m
 };
 
 export const ssl_config = {

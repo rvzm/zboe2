@@ -1,8 +1,9 @@
 // db.js (ESM)
 import Database from "better-sqlite3";
+import crypto from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
-import { file_config } from "./config.js";
+import { file_config, game_config } from "./config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +11,38 @@ const __dirname = path.dirname(__filename);
 // Put the DB somewhere persistent on your VPS.
 // This makes a ./data folder beside your app.
 export const DB_PATH = process.env.DB_PATH || path.join(__dirname, "data", file_config.databaseFile || "zboe.sqlite");
+const DB_BASENAME = path.basename(DB_PATH);
+
+// ----- DB provenance stamp -----
+// A deterministic fingerprint of (sessionSecret, db filename) — NOT random,
+// so the same deployment reproduces the SAME stamp across restarts. It's
+// written onto every row this app inserts into game_state/player_inventory/
+// events/nuke_votes; a stored value that doesn't match what a run computes
+// means that row (or the whole DB file) didn't come from an app instance
+// sharing this secret + filename — a swapped-in DB, or rows written directly
+// by something that doesn't know the secret. `key` mirrors the users/players
+// session_key shape (a 64-hex HMAC); `id` is UUID-shaped for the same reason
+// their session_id is, though neither is random here — both are pure
+// functions of (secret, filename).
+//
+// Computed lazily (never memoized at module load): server.js applies
+// --set game_config.sessionSecret=... overrides AFTER importing this module
+// (ES module imports evaluate before the importing module's own top-level
+// code runs), so an eager computation here would freeze in the pre-override
+// secret. Reading game_config.sessionSecret fresh on every call — the object
+// is shared by reference, not copied — always sees the final, overridden value.
+export function computeDbStamp() {
+  const key = crypto.createHmac("sha256", game_config.sessionSecret).update(DB_BASENAME).digest("hex");
+  const raw = crypto.createHash("sha256").update(`${game_config.sessionSecret}:${DB_BASENAME}:id`).digest("hex");
+  const id = `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20, 32)}`;
+  return { key, id };
+}
+// The schema's column defaults (see CREATE TABLE below) — a game_state row
+// still carrying these has never been stamped (fresh DB, or one just
+// migrated to add the columns), as opposed to a row stamped under a
+// different secret/filename.
+const STAMP_DEFAULT_KEY = "0000000000000000000000000000000000000000000000000000000000000000";
+const STAMP_DEFAULT_ID = "00000";
 
 // Display names for the world map — the object keys are ALSO the canonical
 // list of valid location keys. basecamp_inside is entered via the base
@@ -55,10 +88,10 @@ export const LOCATION_LINKS = {
 };
 
 // ----- Skills -----
-// Six trainable skills; each has s_<key>_lvl / s_<key>_xp columns on players.
+// Trainable skills; each has s_<key>_lvl / s_<key>_xp columns on players.
 // Skill XP comes from location actions and is SPENT on skill levels (same
 // philosophy as the main level): buy the next level when xp >= skillLevelCost.
-export const SKILLS = ["magic", "woodcutting", "fishing", "mining", "smithing", "crafting"];
+export const SKILLS = ["magic", "woodcutting", "fishing", "mining", "smithing", "crafting", "foraging", "trapping", "alchemy", "cooking"];
 export const SKILL_NAMES = {
   magic: "Magic",
   woodcutting: "Woodcutting",
@@ -66,6 +99,10 @@ export const SKILL_NAMES = {
   mining: "Mining",
   smithing: "Smithing",
   crafting: "Crafting",
+  foraging: "Foraging",
+  trapping: "Trapping",
+  alchemy: "Alchemy",
+  cooking: "Cooking"
 };
 export function skillLevelCost(targetLevel) { return Math.round(50 * Math.pow(targetLevel, 1.4)); }
 
@@ -82,40 +119,105 @@ export function skillLevelCost(targetLevel) { return Math.round(50 * Math.pow(ta
 //   requires    inventory item (tool) that must be OWNED to attempt — not
 //               consumed. Omit for no requirement (mushrooms need nothing;
 //               mining copper needs a stone pickaxe).
+//   uses        inventory item CONSUMED (×1, up front) to attempt — fuel or
+//               feedstock; a failed roll still burns it (like craft inputs).
+//   station     "campfire" | "forge" | "beacon" — the action additionally
+//               needs that station usable, same check as RECIPES (campfire
+//               burning / Mountains forge fired / live beacon at the Bunker).
+//   activates   "forge" (success sets players.forge_fired) or "beacon"
+//               (success sets players.beacon_fired — cleared again when a
+//               beacon-station craft redeems the drop) instead of granting
+//               an item.
+//               Mutually exclusive with grants.
 //   drops       true = successful runs also roll the RANDOM_DROPS treasure
 //               table (item_backbone.js) for a bonus find.
+//
+// A row can instead be { recipe: "<RECIPES key>" } — a pointer that surfaces
+// an item_backbone.js recipe in this location's Actions card. Everything
+// (label/timer/skill/level/inputs/tool/station/xp) comes from the recipe, and
+// /api/action/do delegates to the craft flow (no success roll — crafts always
+// land). Use it instead of duplicating a recipe as a hand-rolled action.
 export const LOCATION_ACTIONS = {
   basecamp_outside: [
     { key: "gather_firewood", label: "Gather Firewood", timer: 10, skill: "woodcutting", skillLevel: 1, successRate: 90, grants: "firewood", xp: 5, drops: true },
   ],
   bunker: [
-    { key: "tinker_radio", label: "Tinker with the Radio", timer: 15, skill: "crafting", skillLevel: 3, successRate: 60, grants: "radio part", xp: 10 },
+    { key: "tinker_radio", label: "Tinker with the Radio", timer: 15, skill: "crafting", skillLevel: 1, successRate: 60, grants: "radio part", xp: 10 },
+    { key: "repair_radio", label: "Repair the Radio", timer: 20, skill: "crafting", skillLevel: 3, successRate: 20, requires: "radio part", grants: "functional radio", xp: 15 },
+    { key: "attempt_supply_beacon", label: "Attempt Supply Beacon", timer: 30, skill: "crafting", skillLevel: 5, successRate: 25, requires: "functional radio", grants: "supply beacon", xp: 20 },
+    { key: "activate_supply_beacon", label: "Activate Supply Beacon", timer: 10, skill: "crafting", skillLevel: 5, successRate: 65, requires: "supply beacon", activates: "beacon", xp: 10 },
+    { recipe: "enable_supply_beacon" },
+    { recipe: "craft_base_repair_kit" },
+    { recipe: "craft_external_antenna" },
+    { recipe: "craft_signal_amplifier" },
+    { recipe: "craft_sentry_turret" },
+    { recipe: "craft_storage_locker" },
+    { recipe: "craft_supply_beacon" }
   ],
   forest: [
-    { key: "gather_mushrooms", label: "Gather Mushrooms", timer: 8, skill: "crafting", skillLevel: 1, successRate: 90, grants: "mushroom", xp: 5, drops: true },
+    { key: "gather_mushrooms", label: "Gather Mushrooms", timer: 8, skill: "foraging", skillLevel: 1, successRate: 90, grants: "mushroom", xp: 5, drops: true },
     { key: "chop_wood", label: "Chop Wood", timer: 15, skill: "woodcutting", skillLevel: 1, successRate: 80, grants: "wood log", requires: "axe", xp: 10, drops: true },
-    { key: "trap_game", label: "Trap Game", timer: 15, skill: "crafting", skillLevel: 2, successRate: 70, grants: "raw meat", xp: 8 },
+    { key: "trap_rabbit", label: "Trap Rabbit", timer: 4, skill: "trapping", skillLevel: 1, successRate: 75, grants: "raw small meat", xp: 8 },
+    { key: "trap_game", label: "Trap Game", timer: 9, skill: "trapping", skillLevel: 2, successRate: 70, grants: "raw meat", xp: 8 },
   ],
   lake: [
     { key: "fish_shallows", label: "Fish the Shallows", timer: 15, skill: "fishing", skillLevel: 1, successRate: 75, grants: "raw fish", requires: "fishing rod", xp: 10 },
+    { key: "fish_deep", label: "Fish the Deep", timer: 25, skill: "fishing", skillLevel: 3, successRate: 60, grants: "raw fish", requires: "fishing rod", xp: 15 },
+    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 10, skill: "foraging", skillLevel: 1, successRate: 85, grants: "mushroom", xp: 6, drops: true },
+    { key: "gather herbs", label: "Gather Herbs", timer: 12, skill: "foraging", skillLevel: 2, successRate: 80, grants: "lake herb", xp: 8, drops: true },
   ],
   river: [
     { key: "net_minnows", label: "Net Minnows", timer: 10, skill: "fishing", skillLevel: 1, successRate: 85, grants: "minnow", xp: 6 },
+    { key: "fish_river", label: "Fish the River", timer: 20, skill: "fishing", skillLevel: 2, successRate: 70, grants: "raw tuna", requires: "fishing rod", xp: 12 },
+    { key: "gather herbs", label: "Gather Herbs", timer: 12, skill: "foraging", skillLevel: 2, successRate: 80, grants: "river herb", xp: 8, drops: true },
+    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 10, skill: "foraging", skillLevel: 1, successRate: 85, grants: "raw mushroom", xp: 6, drops: true },
   ],
   mountains: [
-    { key: "mine_copper", label: "Mine Copper", timer: 20, skill: "mining", skillLevel: 1, successRate: 75, grants: "copper ore", requires: "stone pickaxe", xp: 10 },
-    { key: "mine_iron", label: "Mine Iron", timer: 30, skill: "mining", skillLevel: 5, successRate: 60, grants: "iron ore", requires: "stone pickaxe", xp: 20 },
+    { key: "fire_forge", label: "Get the Forge Going", timer: 20, skill: "smithing", skillLevel: 1, successRate: 70, activates: "forge", uses: "firewood", xp: 12 },
+    { key: "mine_iron", label: "Mine Iron", timer: 30, skill: "mining", skillLevel: 3, successRate: 60, grants: "iron ore", requires: "stone pickaxe", xp: 20 },
+    // Forge work — pointers into item_backbone.js RECIPES (see comment above).
+    { recipe: "smelt_copper" },
+    { recipe: "smelt_tin" },
+    { recipe: "smelt_iron" },
+    { recipe: "smelt_silver" },
+    { recipe: "smelt_gold" },
+    { recipe: "smelt_mythril" },
+    { recipe: "smelt_adamantite" },
+    { recipe: "smelt_syllic" },
+    { recipe: "smith_iron_armor" },
+    { recipe: "smith_silver_armor" },
+    { recipe: "smith_gold_armor" },
+    { recipe: "smith_gold_and_silver_armor" },
+    { recipe: "smith_mythril_armor" },
+    { recipe: "smith_adamantite_armor" },
+    { recipe: "smith_syllic_armor" },
+    { recipe: "crude_blade" },
+    { recipe: "magic_amulet" },
+    { recipe: "fishing_rod" },
+    { recipe: "gun_oil" },
   ],
   swamp: [
     { key: "gather_herbs", label: "Gather Herbs", timer: 10, skill: "crafting", skillLevel: 1, successRate: 85, grants: "swamp herb", xp: 6, drops: true },
   ],
   cave: [
-    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "magic", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8 },
+    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "foraging", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8 },
     { key: "channel_leyline", label: "Channel the Ley Line", timer: 20, skill: "magic", skillLevel: 5, successRate: 70, grants: "mana shard", xp: 15 },
+    { key: "mine_copper", label: "Mine Copper", timer: 20, skill: "mining", skillLevel: 1, successRate: 75, grants: "copper ore", requires: "stone pickaxe", xp: 10 },
+    { key: "mine_tin", label: "Mine Tin", timer: 22, skill: "mining", skillLevel: 2, successRate: 70, grants: "tin ore", requires: "stone pickaxe", xp: 12 },
+    { key: "mine_silver", label: "Mine Silver", timer: 28, skill: "mining", skillLevel: 4, successRate: 65, grants: "silver ore", requires: "stone pickaxe", xp: 18 },
+    { key: "mine_gold", label: "Mine Gold", timer: 35, skill: "mining", skillLevel: 5, successRate: 60, grants: "gold ore", requires: "stone pickaxe", xp: 25 },
+    { key: "mine_coal", label: "Mine Coal", timer: 25, skill: "mining", skillLevel: 3, successRate: 70, grants: "coal", requires: "stone pickaxe", xp: 12 },
+    { key: "mine_mythril", label: "Mine Mythril", timer: 40, skill: "mining", skillLevel: 6, successRate: 55, grants: "mythril ore", requires: "iron pickaxe", xp: 30 },
+    { key: "mine_adamantite", label: "Mine Adamantite", timer: 50, skill: "mining", skillLevel: 7, successRate: 50, grants: "adamantite ore", requires: "mythril pickaxe", xp: 40 },
+    { key: "mine_syllic", label: "Mine Syllic", timer: 60, skill: "mining", skillLevel: 8, successRate: 45, grants: "syllic ore", requires: "adamantite pickaxe", xp: 50 },
   ],
   town: [
     { key: "scavenge_scrap", label: "Scavenge Scrap", timer: 12, skill: "crafting", skillLevel: 1, successRate: 80, grants: "scrap metal", xp: 8 },
-    { key: "smith_scrap", label: "Smith at the Old Forge", timer: 20, skill: "smithing", skillLevel: 1, successRate: 70, grants: "crude blade", requires: "hammer", xp: 12 },
+    { recipe: "craft_weak_blade" },
+    { recipe: "craft_radio_part" },
+    { recipe: "craft_mana_potion" },
+    { recipe: "craft_healing_potion" },
+    { recipe: "craft_shield_potion" },
   ],
 };
 
@@ -139,6 +241,23 @@ CREATE TABLE IF NOT EXISTS users (
   -- login. Defaults are the logged-out state ('LOGGED_OUT' + 64 zeros).
   session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
   session_id TEXT NOT NULL DEFAULT 'LOGGED_OUT',
+  -- Gates
+  adm_fun BOOLEAN NOT NULL DEFAULT 0, -- admin functions (user mgmt, nuke votes, etc)
+  chat_mute BOOLEAN NOT NULL DEFAULT 0, -- muted from chat
+  chat_deaf BOOLEAN NOT NULL DEFAULT 0, -- deaf to chat
+  chat_strict BOOLEAN NOT NULL DEFAULT 0, -- can only see admin-panel chats.
+  login_restricted BOOLEAN NOT NULL DEFAULT 0, -- cannot log in (Account Timeout)
+  login_res_time INTEGER NOT NULL DEFAULT 0, -- Time restriction lasts
+  login_res_set_time INTEGER NOT NULL DEFAULT 0, -- time restriction was placed
+  login_res_reason TEXT NOT NULL DEFAULT 'none', -- Restriction reason
+  login_res_admin TEXT NOT NULL DEFAULT '', -- who placed the temp ban (banned.html attribution)
+  user_exiled BOOLEAN NOT NULL DEFAULT 0, -- cannot log in (Exiled) - exiled users are permanently banned from the game
+  user_exiled_reason TEXT NOT NULL DEFAULT 'none', -- Exile reason (banned.html attribution)
+  user_exiled_admin TEXT NOT NULL DEFAULT '', -- who placed the exile
+  -- Automatic (not admin-issued) lockout after too many bad passwords in a row.
+  failed_login_count INTEGER NOT NULL DEFAULT 0,
+  failed_login_lockout_until INTEGER NOT NULL DEFAULT 0, -- epoch ms; 0 = not locked
+  -- Timestamps (epoch seconds)
   created_at INTEGER NOT NULL,
   last_login INTEGER NOT NULL
 );
@@ -160,11 +279,12 @@ CREATE TABLE IF NOT EXISTS players (
   shield INTEGER NOT NULL DEFAULT 0,
   max_shield INTEGER NOT NULL DEFAULT 100,
   kills INTEGER NOT NULL DEFAULT 0,
-  accuracy INTEGER NOT NULL DEFAULT 35,      -- % hit chance
+  accuracy INTEGER NOT NULL DEFAULT 45,      -- % hit chance
   gold INTEGER NOT NULL DEFAULT 0,             -- in-game currency
   horde_tokens INTEGER NOT NULL DEFAULT 0,        -- number of horde tokens player has
   golden_shots INTEGER NOT NULL DEFAULT 0,     -- remaining Golden Gun power-up shots (0 = not active)
   equipped_gun TEXT NOT NULL DEFAULT 'Handgun',
+  equipped_armor TEXT NOT NULL DEFAULT '',         -- '' = no armor worn (registry armor name otherwise)
   -- Per-type gun stats. Page stats (ammo/clips/condition/etc) read from the equipped gun's type.
   handgun_ammo INTEGER NOT NULL DEFAULT 6,
   handgun_max_ammo INTEGER NOT NULL DEFAULT 6,
@@ -178,6 +298,12 @@ CREATE TABLE IF NOT EXISTS players (
   rifle_max_clips INTEGER NOT NULL DEFAULT 4,
   rifle_condition INTEGER NOT NULL DEFAULT 100,
   rifle_jammed INTEGER NOT NULL DEFAULT 0,
+  burstrifle_ammo INTEGER NOT NULL DEFAULT 30,
+  burstrifle_max_ammo INTEGER NOT NULL DEFAULT 30,
+  burstrifle_clips INTEGER NOT NULL DEFAULT 2,
+  burstrifle_max_clips INTEGER NOT NULL DEFAULT 2,
+  burstrifle_condition INTEGER NOT NULL DEFAULT 100,
+  burstrifle_jammed INTEGER NOT NULL DEFAULT 0,
   shotgun_ammo INTEGER NOT NULL DEFAULT 5,
   shotgun_max_ammo INTEGER NOT NULL DEFAULT 5,
   shotgun_clips INTEGER NOT NULL DEFAULT 6,
@@ -199,8 +325,16 @@ CREATE TABLE IF NOT EXISTS players (
   s_crafting_xp INTEGER NOT NULL DEFAULT 0, -- spendable crafting XP (spent on skill levels)
   s_cooking_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's cooking skill
   s_cooking_xp INTEGER NOT NULL DEFAULT 0, -- spendable cooking XP (spent on skill levels)
+  s_alchemy_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's alchemy skill
+  s_alchemy_xp INTEGER NOT NULL DEFAULT 0, -- spendable alchemy XP (spent on skill levels)
+  s_trapping_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's trapping skill
+  s_trapping_xp INTEGER NOT NULL DEFAULT 0, -- spendable trapping XP (spent on skill levels)
+  s_foraging_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's foraging skill
+  s_foraging_xp INTEGER NOT NULL DEFAULT 0, -- spendable foraging XP (spent on skill levels)
   location TEXT NOT NULL DEFAULT 'basecamp_outside', -- current location key (see LOCATION_NAMES)
   -- Player Tracking Information
+  forge_fired INTEGER NOT NULL DEFAULT 0,          -- 0/1, has the player fired the forge yet?
+  beacon_fired INTEGER NOT NULL DEFAULT 0,         -- 0/1, live supply beacon at the Bunker (cleared when the drop is redeemed)
   hidden INTEGER NOT NULL DEFAULT 0,         -- 0/1, hiding at current location
   last_seen INTEGER NOT NULL DEFAULT 0,             -- timestamp of last activity 
   updated_at INTEGER NOT NULL
@@ -209,6 +343,9 @@ CREATE TABLE IF NOT EXISTS players (
 CREATE TABLE IF NOT EXISTS player_inventory (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
+  -- Auth Keys
+  session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+  session_id TEXT NOT NULL DEFAULT '00000',
   item_name TEXT NOT NULL,
   quantity INTEGER NOT NULL DEFAULT 1,
   condition INTEGER NOT NULL DEFAULT 100,
@@ -217,9 +354,24 @@ CREATE TABLE IF NOT EXISTS player_inventory (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS player_block (
+  user_id PRIMARY KEY,
+  -- Auth Keys
+  session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+  session_id TEXT NOT NULL DEFAULT '00000',
+  u_grant TEXT NOT NULL DEFAULT 'USER',
+  u_time TEXT NOT NULL DEFAULT 'TIMESTAMP',
+  u_title TEXT NOT NULL DEFAULT 'AWARD TYPE',
+  u_comment TEXT NOT NULL DEFAULT 'COMMENT',
+  updated_at INTEGER NOT NULL
+);
+
 -- global event feed
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Auth Keys
+  session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+  session_id TEXT NOT NULL DEFAULT '00000',
   ts INTEGER NOT NULL,
   type TEXT NOT NULL,
   visibility TEXT NOT NULL DEFAULT 'public', -- public, private, admin
@@ -230,6 +382,9 @@ CREATE TABLE IF NOT EXISTS events (
 -- Game State Table (Hunt enabled, horde size/status, raid enabled, etc)
 CREATE TABLE IF NOT EXISTS game_state (
   key TEXT PRIMARY KEY,
+  -- Auth Keys
+  session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+  session_id TEXT NOT NULL DEFAULT '00000',
   hunt_enabled TEXT NOT NULL DEFAULT 'false',
   horde_size INTEGER NOT NULL DEFAULT 0,
   horde_status TEXT NOT NULL DEFAULT 'idle', -- idle, partial, full, raid
@@ -237,12 +392,17 @@ CREATE TABLE IF NOT EXISTS game_state (
   online_players INTEGER NOT NULL DEFAULT 0,
   base_health INTEGER NOT NULL DEFAULT 10000,      -- inside/base health pool
   base_destroyed_at INTEGER NOT NULL DEFAULT 0,    -- ts the base fell (0 = intact)
+  base_repair_kits INTEGER NOT NULL DEFAULT 0, -- number of repair kits in the base
+  sentry_until INTEGER NOT NULL DEFAULT 0,     -- epoch ms the sentry turret protects the base until (0 = offline)
   updated_at INTEGER NOT NULL
 );
 
 -- Vote-to-nuke ballots while the base is destroyed (cleared on experiment reset).
 CREATE TABLE IF NOT EXISTS nuke_votes (
   user_id INTEGER PRIMARY KEY,
+  -- Auth Keys
+  session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+  session_id TEXT NOT NULL DEFAULT '00000',
   ts INTEGER NOT NULL
 );
 
@@ -268,11 +428,75 @@ db.prepare(`
   VALUES ('main', ?)
 `).run(Date.now());
 
+// Whether the live schema actually has the provenance-stamp columns yet — a
+// DB that predates this feature (or was migrated via `database update` before
+// the columns existed) needs that same toolkit run before ensureDbStamp/
+// rotateDbStamp can touch it. Checked by server.js first, turning what would
+// otherwise be a raw SQLITE_ERROR crash into one clear, actionable message.
+export function hasProvenanceColumns() {
+  const cols = db.prepare("PRAGMA table_info(game_state)").all().map((c) => c.name);
+  return cols.includes("session_key") && cols.includes("session_id");
+}
+
+// Verify (or, on a never-stamped row, establish) this DB's provenance stamp.
+// Not run automatically at import — server.js calls it once at startup,
+// AFTER CLI --set overrides are applied, so an overridden sessionSecret is
+// what actually gets checked/stamped rather than config.js's raw default.
+// A game_state row still holding the schema's column defaults has never been
+// stamped (fresh DB, or one just migrated to add the columns) — that's this
+// run's genesis moment, so it's stamped now rather than flagged as foreign.
+// An already-stamped row is only ever compared, never overwritten, so a
+// mismatch remains as evidence.
+export function ensureDbStamp() {
+  const gs = db.prepare("SELECT session_key, session_id FROM game_state WHERE key = 'main'").get();
+  const expected = computeDbStamp();
+  if (gs.session_key === STAMP_DEFAULT_KEY && gs.session_id === STAMP_DEFAULT_ID) {
+    db.prepare("UPDATE game_state SET session_key = ?, session_id = ?, updated_at = ? WHERE key = 'main'")
+      .run(expected.key, expected.id, Date.now());
+    return { status: "stamped", expected };
+  }
+  const matched = gs.session_key === expected.key && gs.session_id === expected.id;
+  return { status: matched ? "ok" : "mismatch", expected, stored: { key: gs.session_key, id: gs.session_id } };
+}
+
+// Force-rekey EVERY row in the four stamped tables to whatever the CURRENT
+// sessionSecret + db filename computes — used by server.js's --rotate-keys
+// flag, typically right after a deliberate sessionSecret rotation. Verifies
+// the db's key is actually stale first: if game_state's stored stamp already
+// matches what this run would compute, there's nothing to rotate (returns
+// "unchanged" without touching any row) — the caller warns instead of
+// claiming a rotation happened. Otherwise every row across all four tables
+// is unconditionally overwritten with the new stamp (an explicit, deliberate
+// action — this is not the same as ensureDbStamp's compare-only default path).
+export function rotateDbStamp() {
+  const gs = db.prepare("SELECT session_key, session_id FROM game_state WHERE key = 'main'").get();
+  const next = computeDbStamp();
+  if (gs.session_key === next.key && gs.session_id === next.id) {
+    return { status: "unchanged", stamp: next };
+  }
+  const previous = { key: gs.session_key, id: gs.session_id };
+  const now = Date.now();
+  const counts = db.transaction(() => ({
+    game_state: db.prepare("UPDATE game_state SET session_key = ?, session_id = ?, updated_at = ?").run(next.key, next.id, now).changes,
+    player_inventory: db.prepare("UPDATE player_inventory SET session_key = ?, session_id = ?, updated_at = ?").run(next.key, next.id, now).changes,
+    events: db.prepare("UPDATE events SET session_key = ?, session_id = ?").run(next.key, next.id).changes,
+    nuke_votes: db.prepare("UPDATE nuke_votes SET session_key = ?, session_id = ?").run(next.key, next.id).changes,
+  }))();
+  return { status: "rotated", stamp: next, previous, counts };
+}
+
 // ----- Prepared statements -----
-const stmtUserByName = db.prepare(`SELECT id, username, pass_salt, pass_hash, session_key, session_id FROM users WHERE username = ?`);
-// Auth check needs both tables' session pairs in one hit (they must agree).
+// SELECT * — the login route needs every gate/ban/lockout column, and this is
+// the one place they're all read together; easier to keep it broad than to
+// re-edit this list every time a new gate column shows up.
+const stmtUserByName = db.prepare(`SELECT * FROM users WHERE username = ?`);
+// Auth check needs both tables' session pairs in one hit (they must agree),
+// plus the chat/fun gates every authenticated request wants on req.gates.
 const stmtAuthRecord = db.prepare(`
   SELECT u.id, u.username, u.session_key, u.session_id,
+         u.adm_fun, u.chat_mute, u.chat_deaf, u.chat_strict,
+         u.login_restricted, u.login_res_time, u.login_res_set_time, u.login_res_reason, u.login_res_admin,
+         u.user_exiled, u.user_exiled_reason, u.user_exiled_admin,
          p.session_key AS p_session_key, p.session_id AS p_session_id
   FROM users u LEFT JOIN players p ON p.user_id = u.id
   WHERE u.username = ?
@@ -304,11 +528,6 @@ const stmtInsertPlayer = db.prepare(`
   INSERT INTO players (user_id, updated_at)
   VALUES (?, ?)
 `);
-const stmtInsertEvent = db.prepare(`
-  INSERT INTO events (ts, type, visibility, target, msg)
-  VALUES (?, ?, ?, ?, ?)
-`);
-
 // ----- Query functions -----
 export function getUserByName(username) { return stmtUserByName.get(username); }
 export function getAuthRecord(username) { return stmtAuthRecord.get(username); }
@@ -336,6 +555,24 @@ export function getUserIdByName(username) { return stmtUserIdByName.get(username
 export function isUserAdmin(userId) { return Boolean(db.prepare(`SELECT is_admin FROM users WHERE id = ?`).get(userId)?.is_admin); }
 export function getPlayerByUserId(userId) { return stmtPlayerByUserId.get(userId); }
 export function getLeaderboard(limit) { return stmtLeaderboard.all(limit); }
+
+// One player's exact standing — same tie-break order as stmtLeaderboard
+// (lifetime_xp DESC, level DESC, username ASC) — plus the total player count,
+// for playercard.html's "# of <total>" readout. { rank: null, total } if the
+// player row doesn't exist.
+export function getLeaderboardRank(userId) {
+  const total = db.prepare("SELECT COUNT(*) AS n FROM players").get().n;
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return { rank: null, total };
+  const username = db.prepare("SELECT username FROM users WHERE id = ?").get(userId)?.username ?? "";
+  const ahead = db.prepare(`
+    SELECT COUNT(*) AS n FROM players p JOIN users u ON u.id = p.user_id
+    WHERE p.lifetime_xp > @xp
+       OR (p.lifetime_xp = @xp AND p.level > @level)
+       OR (p.lifetime_xp = @xp AND p.level = @level AND u.username < @username)
+  `).get({ xp: player.lifetime_xp, level: player.level, username }).n;
+  return { rank: ahead + 1, total };
+}
 // Returns global events plus events targeted at this specific user_id.
 export function getRecentEvents(limit, userId) { return stmtRecentEvents.all({ limit, target: String(userId) }); }
 export function insertUser(username, salt, hash, createdAt) { return stmtInsertUser.run(username, salt, hash, createdAt, createdAt); }
@@ -344,7 +581,19 @@ export function insertPlayer(userId, createdAt) {
   giveInventoryItem(userId, "Handgun", 1); // everyone starts with (and has equipped) a Handgun
   return info;
 }
-export function insertEvent(type, msg, visibility = "public", target = "global") { return stmtInsertEvent.run(Date.now(), type, visibility, String(target), msg); }
+// Prepared inline (not module-level cached) — a module-level db.prepare() runs
+// unconditionally at import time, which would hard-crash EVERY server.js
+// invocation (even --help) against a DB that predates the session_key/
+// session_id columns, before ensureDbStamp's own actionable error ever gets a
+// chance to run. Preparing lazily means only an actual call to insertEvent
+// fails on an unmigrated DB — same as every other write in this file already.
+export function insertEvent(type, msg, visibility = "public", target = "global") {
+  const stamp = computeDbStamp();
+  return db.prepare(`
+    INSERT INTO events (ts, type, visibility, target, msg, session_key, session_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(Date.now(), type, visibility, String(target), msg, stamp.key, stamp.id);
+}
 
 // Records the moment a user authenticated (account-level metadata on `users`).
 export function updateLastLogin(userId) {
@@ -392,6 +641,21 @@ export function adjustBaseHealth(delta) {
   return getGameState().base_health;
 }
 
+// Shared stock of base repair kits (game_state) — stocked by using a
+// "base repair kit" at the Bunker, spent by /api/base/repair. Floored at 0.
+export function adjustRepairKits(delta) {
+  db.prepare(`UPDATE game_state SET base_repair_kits = MAX(0, base_repair_kits + ?), updated_at = ? WHERE key = 'main'`)
+    .run(delta, Date.now());
+  return getGameState().base_repair_kits;
+}
+
+// Sentry turret window: the base ignores zombie damage (and shoots back
+// during raids) until this epoch ms. Set by using a "sentry turret" item.
+export function setSentryUntil(ts) {
+  db.prepare(`UPDATE game_state SET sentry_until = ?, updated_at = ? WHERE key = 'main'`)
+    .run(ts, Date.now());
+}
+
 export function setBaseDestroyedAt(ts) {
   db.prepare(`UPDATE game_state SET base_destroyed_at = ?, updated_at = ? WHERE key = 'main'`)
     .run(ts, Date.now());
@@ -402,7 +666,8 @@ export function resetGameState(baseMaxHealth) {
   db.prepare(`
     UPDATE game_state
     SET hunt_enabled = 'false', horde_size = 0, raid_enabled = 'false',
-        horde_status = 'idle', base_health = ?, base_destroyed_at = 0, updated_at = ?
+        horde_status = 'idle', base_health = ?, base_destroyed_at = 0,
+        base_repair_kits = 0, sentry_until = 0, updated_at = ?
     WHERE key = 'main'
   `).run(baseMaxHealth, Date.now());
   db.prepare("DELETE FROM nuke_votes").run();
@@ -410,7 +675,9 @@ export function resetGameState(baseMaxHealth) {
 
 // ----- Vote-to-nuke -----
 export function recordNukeVote(userId) {
-  db.prepare("INSERT OR IGNORE INTO nuke_votes (user_id, ts) VALUES (?, ?)").run(userId, Date.now());
+  const stamp = computeDbStamp();
+  db.prepare("INSERT OR IGNORE INTO nuke_votes (user_id, ts, session_key, session_id) VALUES (?, ?, ?, ?)")
+    .run(userId, Date.now(), stamp.key, stamp.id);
 }
 export function getNukeVoterIds() {
   return db.prepare("SELECT user_id FROM nuke_votes").all().map((r) => r.user_id);
@@ -445,11 +712,12 @@ export function ensurePlayer(userId) {
 }
 
 // ----- Per-gun ammo/clip helpers -----
-// Ammo/clips are stored per gun type (handgun/rifle/shotgun). Column names are
-// built from a whitelisted type so they can't be injected.
-export const GUN_TYPES = ["handgun", "rifle", "shotgun"];
-// Canonical gun item names (map 1:1 to the types above).
-export const GUN_NAMES = ["Handgun", "Rifle", "Shotgun"];
+// Ammo/clips are stored per gun type (handgun/rifle/shotgun/burstrifle).
+// Column names are built from a whitelisted type so they can't be injected.
+export const GUN_TYPES = ["handgun", "rifle", "shotgun", "burstrifle"];
+// Canonical gun item names (map 1:1 to the types above); list order is the
+// display order of the gun switcher / admin gun buttons (by unlock cost).
+export const GUN_NAMES = ["Handgun", "Rifle", "Shotgun", "Burst Rifle"];
 function gunCol(type, suffix) {
   if (!GUN_TYPES.includes(type)) throw new Error(`Invalid gun type: ${type}`);
   return `${type}_${suffix}`;
@@ -468,9 +736,10 @@ export function gunAmmoOf(player, type) {
 }
 
 // Players seen within the last `sinceMs` epoch — i.e. currently active.
+// equipped_armor rides along for the tick's armor/Base-AP hit calc.
 export function getActivePlayers(sinceMs) {
   return db.prepare(`
-    SELECT p.user_id, u.username, p.health, p.shield, p.location
+    SELECT p.user_id, u.username, p.health, p.shield, p.location, p.equipped_armor
     FROM players p JOIN users u ON u.id = p.user_id
     WHERE p.last_seen >= ?
   `).all(sinceMs);
@@ -582,23 +851,35 @@ export function reloadGun(userId, type) {
 export function unjamGun(userId, type) {
   const player = stmtPlayerByUserId.get(userId);
   if (!player) return { ok: false, reason: "no_player" };
+
   const { ammo, maxAmmo, clips, jammed } = gunAmmoOf(player, type);
+
   if (!jammed) return { ok: false, reason: "not_jammed" };
-  if (ammo == 0) {
+
+  if (ammo === 0) {
     if (clips <= 0) return { ok: false, reason: "no_clips" };
+
     db.prepare(`
       UPDATE players
-      SET ${gunCol(type, "jammed")} = 0, ${gunCol(type, "ammo")} = ?, ${gunCol(type, "clips")} = ${gunCol(type, "clips")} - 1, updated_at = ?
+      SET ${gunCol(type, "jammed")} = 0,
+          ${gunCol(type, "ammo")} = ?,
+          ${gunCol(type, "clips")} = ${gunCol(type, "clips")} - 1,
+          updated_at = ?
       WHERE user_id = ?
     `).run(maxAmmo, Date.now(), userId);
-  } else {
-    db.prepare(`
-      UPDATE players
-      SET ${gunCol(type, "jammed")} = 0, ${gunCol(type, "ammo")} = ${gunCol(type, "ammo")} - 1, updated_at = ?
-      WHERE user_id = ?
-    `).run(Date.now(), userId);
+
+    return { ok: true, method: "clip" };
   }
-  return { ok: true };
+
+  db.prepare(`
+    UPDATE players
+    SET ${gunCol(type, "jammed")} = 0,
+        ${gunCol(type, "ammo")} = ${gunCol(type, "ammo")} - 1,
+        updated_at = ?
+    WHERE user_id = ?
+  `).run(Date.now(), userId);
+
+  return { ok: true, method: "ammo" };
 }
 
 export function updateGunMaxAmmo(userId, type, change) {
@@ -782,6 +1063,26 @@ export function getPlayersByLocation(location) {
   return db.prepare("SELECT user_id FROM players WHERE location = ?").all(location);
 }
 
+export function getPlayersNotAtLocation(location) {
+  return db.prepare("SELECT user_id FROM players WHERE location != ?").all(location);
+}
+
+// The Mountains forge is a persistent per-player flag (unlike the in-memory
+// campfire): lit by the fire_forge action, it stays fired across restarts
+// until put out (/api/forge/toggle), admin-toggled, or death resets the row.
+export function setForgeFired(userId, fired) {
+  db.prepare(`UPDATE players SET forge_fired = ?, updated_at = ? WHERE user_id = ?`)
+    .run(fired ? 1 : 0, Date.now(), userId);
+}
+
+// The Bunker supply beacon, same persistent-flag pattern as the forge: lit by
+// activate_supply_beacon, cleared when a beacon-station craft redeems the
+// drop (or admin toggle / death). One activation = one supply drop.
+export function setBeaconFired(userId, fired) {
+  db.prepare(`UPDATE players SET beacon_fired = ?, updated_at = ? WHERE user_id = ?`)
+    .run(fired ? 1 : 0, Date.now(), userId);
+}
+
 // Jam state is per gun type (a jammed Rifle doesn't stop the Handgun).
 export function setGunJammed(userId, type, jammed) {
   db.prepare(`
@@ -789,6 +1090,12 @@ export function setGunJammed(userId, type, jammed) {
     SET ${gunCol(type, "jammed")} = ?, updated_at = ?
     WHERE user_id = ?
   `).run(jammed ? 1 : 0, Date.now(), userId);
+}
+
+// Equip (or with '' unequip) an armor. One slot — equipping swaps implicitly.
+export function updatePlayerArmor(userId, armorName) {
+  db.prepare(`UPDATE players SET equipped_armor = ?, updated_at = ? WHERE user_id = ?`)
+    .run(armorName || "", Date.now(), userId);
 }
 
 export function updatePlayerGun(userId, gun) {
@@ -900,8 +1207,9 @@ export function giveInventoryItem(userId, itemName, quantity = 1) {
     db.prepare(`UPDATE player_inventory SET quantity = quantity + ?, updated_at = ? WHERE id = ?`)
       .run(quantity, Date.now(), owned.id);
   } else {
-    db.prepare(`INSERT INTO player_inventory (user_id, item_name, quantity, updated_at) VALUES (?, ?, ?, ?)`)
-      .run(userId, itemName, quantity, Date.now());
+    const stamp = computeDbStamp();
+    db.prepare(`INSERT INTO player_inventory (user_id, item_name, quantity, updated_at, session_key, session_id) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(userId, itemName, quantity, Date.now(), stamp.key, stamp.id);
   }
 }
 
@@ -980,15 +1288,85 @@ export function purchaseItem(userId, itemName, cost, currency = "gold") {
 // ===== Admin accessors (for the web admin panel & CLI) =====
 
 // --- Users ---
+// Carries the moderation gates/ban state too — the World tab's user list and
+// its per-user Actions modal both need these to render current state, and
+// the Players tab reuses this same list (the extra columns are just ignored
+// there).
 export function listUsers() {
   return db.prepare(`
-    SELECT u.id, u.username, u.is_admin, p.level, p.location, p.last_seen
+    SELECT u.id, u.username, u.is_admin, p.level, p.location, p.last_seen,
+           u.adm_fun, u.chat_mute, u.chat_deaf, u.chat_strict,
+           u.login_restricted, u.login_res_time, u.login_res_set_time, u.login_res_reason, u.login_res_admin,
+           u.user_exiled, u.user_exiled_reason, u.user_exiled_admin
     FROM users u LEFT JOIN players p ON p.user_id = u.id
     ORDER BY u.id
   `).all();
 }
 export function setUserAdmin(userId, isAdmin) {
   db.prepare("UPDATE users SET is_admin = ? WHERE id = ?").run(isAdmin ? 1 : 0, userId);
+}
+
+// Sub-permission within admin: whether this admin has the 🎉 Fun button/API
+// (users.adm_fun) — separate from is_admin, which just gates the panel itself.
+export function setAdmFun(userId, value) {
+  db.prepare("UPDATE users SET adm_fun = ? WHERE id = ?").run(value ? 1 : 0, userId);
+}
+
+const CHAT_FLAGS = { mute: "chat_mute", deaf: "chat_deaf", strict: "chat_strict" };
+// flag: "mute" | "deaf" | "strict" — see the column comments in the users
+// CREATE TABLE for what each one does.
+export function setChatFlag(userId, flag, value) {
+  const col = CHAT_FLAGS[flag];
+  if (!col) throw new Error(`Invalid chat flag: ${flag}`);
+  db.prepare(`UPDATE users SET ${col} = ? WHERE id = ?`).run(value ? 1 : 0, userId);
+}
+
+// Temp ban: durationSeconds from now. Auto-lifts on the next login attempt
+// once it's expired (see the /login route) — nothing needs to run on a timer.
+// `admin` is who placed it (attribution shown on banned.html).
+export function banUser(userId, durationSeconds, reason, admin) {
+  db.prepare(`
+    UPDATE users SET login_restricted = 1, login_res_time = ?, login_res_set_time = ?, login_res_reason = ?, login_res_admin = ?
+    WHERE id = ?
+  `).run(durationSeconds, Date.now(), reason || "none", admin || "", userId);
+}
+export function unbanUser(userId) {
+  db.prepare(`
+    UPDATE users SET login_restricted = 0, login_res_time = 0, login_res_set_time = 0, login_res_reason = 'none', login_res_admin = ''
+    WHERE id = ?
+  `).run(userId);
+}
+
+// Exile is permanent and supersedes a temp ban entirely — clears it rather
+// than leaving a stale restriction record alongside the exile.
+export function exileUser(userId, reason, admin) {
+  db.prepare(`
+    UPDATE users
+    SET user_exiled = 1, user_exiled_reason = ?, user_exiled_admin = ?,
+        login_restricted = 0, login_res_time = 0, login_res_set_time = 0, login_res_reason = 'none', login_res_admin = ''
+    WHERE id = ?
+  `).run(reason || "none", admin || "", userId);
+}
+export function unexileUser(userId) {
+  db.prepare("UPDATE users SET user_exiled = 0, user_exiled_reason = 'none', user_exiled_admin = '' WHERE id = ?").run(userId);
+}
+
+// Automatic (not admin-issued) lockout after too many bad passwords in a row.
+// Returns the new failed-attempt count so the login route can decide whether
+// this attempt just tripped the lockout.
+export function recordFailedLogin(userId, maxAttempts, lockoutSeconds) {
+  const row = db.prepare("SELECT failed_login_count FROM users WHERE id = ?").get(userId);
+  const count = (row?.failed_login_count ?? 0) + 1;
+  if (count >= maxAttempts) {
+    db.prepare("UPDATE users SET failed_login_count = 0, failed_login_lockout_until = ? WHERE id = ?")
+      .run(Date.now() + lockoutSeconds * 1000, userId);
+  } else {
+    db.prepare("UPDATE users SET failed_login_count = ? WHERE id = ?").run(count, userId);
+  }
+  return count;
+}
+export function resetFailedLogin(userId) {
+  db.prepare("UPDATE users SET failed_login_count = 0 WHERE id = ?").run(userId);
 }
 // Caller does the hashing (server.js owns the PBKDF2 params); this just stores it.
 export function setUserAuth(userId, salt, hash) {
@@ -1009,10 +1387,11 @@ export const EDITABLE_STATS = {
   xp: {}, lifetime_xp: {}, level: {}, kills: {}, gold: {}, horde_tokens: {}, golden_shots: {},
   health: { maxCol: "max_health" }, max_health: {},
   shield: { maxCol: "max_shield" }, max_shield: {}, accuracy: { max: 100 },
-  hidden: { max: 1 },
+  hidden: { max: 1 }, forge_fired: { max: 1 }, beacon_fired: { max: 1 },
   handgun_ammo: {}, handgun_max_ammo: {}, handgun_clips: {}, handgun_max_clips: {}, handgun_condition: { max: 100 }, handgun_jammed: { max: 1 },
   rifle_ammo: {}, rifle_max_ammo: {}, rifle_clips: {}, rifle_max_clips: {}, rifle_condition: { max: 100 }, rifle_jammed: { max: 1 },
   shotgun_ammo: {}, shotgun_max_ammo: {}, shotgun_clips: {}, shotgun_max_clips: {}, shotgun_condition: { max: 100 }, shotgun_jammed: { max: 1 },
+  burstrifle_ammo: {}, burstrifle_max_ammo: {}, burstrifle_clips: {}, burstrifle_max_clips: {}, burstrifle_condition: { max: 100 }, burstrifle_jammed: { max: 1 },
   // Skill levels/XP (one _lvl/_xp pair per entry in SKILLS).
   ...Object.fromEntries(SKILLS.flatMap((s) => [[`s_${s}_lvl`, {}], [`s_${s}_xp`, {}]])),
 };

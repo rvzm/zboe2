@@ -103,6 +103,8 @@
         <span class="badge rounded-pill text-bg-warning text-dark" id="hordeBadge">HORDE: NO</span>
         <span class="badge rounded-pill badge-soft" id="zombieBadge">ZOMBIES: 1</span>
         <span class="muted-mono">Logged in as <span class="text-white" id="meName">rvzm</span></span>
+        <a class="btn btn-sm btn-outline-info" id="playercardLink" href="/playercard.html">Player Card</a>
+        <button class="btn btn-sm btn-outline-warning d-none" id="btnFun" type="button">🎉 Fun</button>
         <a class="btn btn-sm btn-outline-danger d-none" id="adminLink" href="/admin">Admin</a>
         <form method="POST" action="/logout" class="m-0">
           <button class="btn btn-sm btn-outline-secondary" type="submit">Logout</button>
@@ -180,6 +182,7 @@
                   <button class="btn btn-sm btn-primary w-100" data-gun="Handgun" type="button">Handgun</button>
                   <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Rifle" type="button">Rifle</button>
                   <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Shotgun" type="button">Shotgun</button>
+                  <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Burst Rifle" type="button">Burst Rifle</button>
                 </div>
                 <div class="d-flex gap-2">
                   <button class="btn btn-outline-light w-50" id="btnReload">Reload</button>
@@ -197,6 +200,14 @@
                 <div class="d-flex gap-2">
                   <button class="btn btn-outline-success w-50" id="btnCook">Cook Food</button>
                   <button class="btn btn-outline-secondary w-50" id="btnDouse">Put Out Fire</button>
+                </div>
+                <!-- The Mountains forge (persistent per player — lit via the fire_forge action) -->
+                <div class="d-grid gap-2 d-none" id="forgePanel">
+                  <div class="p-2 border rounded muted-mono d-none" id="forgeStatus" style="border-color: rgba(255,94,0,.5) !important;">⚒️ Forge is fired</div>
+                  <div class="d-flex gap-2">
+                    <button class="btn btn-outline-warning w-50" id="btnForge">Use Forge</button>
+                    <button class="btn btn-outline-secondary w-50 d-none" id="btnForgeOut">Put Out Forge</button>
+                  </div>
                 </div>
                 <button class="btn btn-outline-info" id="btnMeditate">Meditate on Magical Theory</button>
               </div>
@@ -303,11 +314,14 @@
         <div class="card soft-card mb-3" id="baseCard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="fw-semibold">The Base</div>
-            <button class="btn btn-sm btn-outline-info" id="btnInsideOutside">Go Inside</button>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-success d-none" id="btnRepair">Use Repair Kit</button>
+              <button class="btn btn-sm btn-outline-info" id="btnInsideOutside">Go Inside</button>
+            </div>
           </div>
           <div class="card-body">
             <div class="d-flex justify-content-between muted-mono mb-1">
-              <span>Base Health</span>
+              <span>Base Health <span class="badge rounded-pill text-bg-info ms-1" id="baseApPill" title="Summed armor AP of everyone inside — deflects base damage">Base AP: 0</span><span class="badge rounded-pill text-bg-success ms-1 d-none" id="sentryPill" title="Sentry turret online — the base takes no zombie damage and returns fire during raids">🤖 Sentry</span></span>
               <span id="baseHealthText">10000 / 10000</span>
             </div>
             <div class="progress" style="height: 14px; background: rgba(255,255,255,.08);">
@@ -474,9 +488,12 @@
           <div id="invBackpack" class="d-none">
             <div class="btn-group btn-group-sm w-100 px-2 pb-2" role="group" id="packTabs">
               <button class="btn btn-outline-info active" data-packtab="guns" type="button">Guns</button>
+              <button class="btn btn-outline-info" data-packtab="armor" type="button">Armor</button>
               <button class="btn btn-outline-info" data-packtab="tools" type="button">Tools</button>
               <button class="btn btn-outline-info" data-packtab="consumables" type="button">Consumables</button>
               <button class="btn btn-outline-info" data-packtab="materials" type="button">Materials</button>
+              <button class="btn btn-outline-info" data-packtab="treasure" type="button">Treasure</button>
+              <button class="btn btn-outline-info" data-packtab="base" type="button">Base</button>
             </div>
             <div id="packBody" class="px-2 pb-2"></div>
           </div>
@@ -522,6 +539,42 @@
     </div>
   </div>
 
+  <!-- Admin Fun modal: self-targeted cheats + the zombie nuke (admin only) -->
+  <div class="modal fade" id="funModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">🎉 Admin Fun</h5>
+          <span class="badge text-bg-danger ms-2">admin only</span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="funList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Forge modal: forge-station recipes (the fired forge at the Mountains) -->
+  <div class="modal fade" id="forgeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">⚒️ The Forge</h5>
+          <span class="badge text-bg-warning text-dark ms-2" id="forgeHeat"></span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="btn-group btn-group-sm w-100 px-2 pt-2 pb-1" role="group" id="forgeTabs">
+            <button class="btn btn-outline-warning active" data-forgetab="smelting" type="button">Smelting</button>
+            <button class="btn btn-outline-warning" data-forgetab="smithing" type="button">Smithing</button>
+          </div>
+          <div class="list-group list-group-flush" id="forgeList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -536,7 +589,7 @@
       raid: false,
       zombies: 0,
       tickSeconds: 15,
-      base: { health: 10000, max: 10000, destroyed: false },
+      base: { health: 10000, max: 10000, destroyed: false, ap: 0, repairKits: 0, sentryActive: false },
       nuke: null,
       online: [],
       leaderboard: [],
@@ -570,9 +623,12 @@
         zombieZone: true,
         busyUntil: 0,
         campfireUntil: 0,
+        forgeFired: false,
+        beaconFired: false,
         skills: [],
         map: [],
         isAdmin: false,
+        admFun: false,
         jammed: false
       },
       actions: [],
@@ -608,7 +664,11 @@
 
     // Chat events show "[World]" instead of the raw type name.
     function labelForEvent(type){
-      return type === "chat" ? "[World]" : type;
+      if (type === "chat") { return "[World]"; }
+      else if (type === "admin_chat") { return "[Heavens]"; }
+      else if (type === "death") { return "[Journeys End]"; }
+      else if (type === "system") { return "[Heavens]"; }
+      else return type;
     }
 
     // Player-name colour tier by level (empty string = white/default).
@@ -650,7 +710,9 @@
 
     function renderMe(){
       $("meName").textContent = state.me.user;
+      $("playercardLink").href = `/playercard.html?p=${encodeURIComponent(state.me.user)}`;
       $("adminLink").classList.toggle("d-none", !state.me.isAdmin);
+      $("btnFun").classList.toggle("d-none", !state.me.admFun);
       const hud = $("meHudName");
       hud.textContent = state.me.user;
       hud.classList.remove("name-green", "name-blue", "name-red", "name-gold");
@@ -715,6 +777,15 @@
         $("btnDouse").classList.toggle("d-none", !burning);
         $("btnMeditate").disabled = busy;
         $("btnMeditate").textContent = busy ? `Busy… ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : "Meditate on Magical Theory";
+        // The forge lives at the Mountains only; lighting it is the
+        // "Get the Forge Going" action in the Actions card below.
+        const atForge = state.me.location === "mountains";
+        $("forgePanel").classList.toggle("d-none", !atForge);
+        if (atForge) {
+          $("forgeStatus").classList.toggle("d-none", !state.me.forgeFired);
+          $("btnForge").disabled = !state.me.forgeFired;
+          $("btnForgeOut").classList.toggle("d-none", !state.me.forgeFired);
+        }
       }
 
       // While the Golden Gun overlay is active, show its remaining shots.
@@ -724,14 +795,9 @@
         : state.me.equippedGun;
       $("gunBadge").className = "badge rounded-pill border " + (golden ? "text-bg-warning text-dark" : "text-bg-dark");
 
-      // Condition pill: green 100-85, blue 84-61, yellow 60-41, red 40-21,
-      // white ≤20 — and a flat "BROKEN" at 0.
+      // Condition pill (see condTierOf: green 100-85 … white ≤20, BROKEN at 0).
       const cond = state.me.cond;
-      const condTier =
-        cond >= 85 ? "text-bg-success" :
-        cond >= 61 ? "text-bg-primary" :
-        cond >= 41 ? "text-bg-warning text-dark" :
-        cond >= 21 ? "text-bg-danger" : "text-bg-light text-dark";
+      const condTier = condTierOf(cond);
       const pill = $("condPill");
       pill.className = "badge rounded-pill " + condTier + (safe ? " d-none" : "");
       pill.textContent = cond <= 0 ? "BROKEN" : `${cond}%`;
@@ -769,6 +835,13 @@
 
     function renderBase(){
       const b = state.base;
+      $("baseApPill").textContent = `Base AP: ${b.ap}`;
+      $("baseApPill").className = "badge rounded-pill ms-1 " + (b.ap > 0 ? "text-bg-info" : "text-bg-secondary");
+      $("sentryPill").classList.toggle("d-none", !b.sentryActive);
+      // Repair kits are a shared stock (used from inside the base).
+      const canRepair = b.repairKits > 0 && b.health < b.max && !b.destroyed;
+      $("btnRepair").classList.toggle("d-none", !canRepair);
+      if (canRepair) $("btnRepair").textContent = `Use Repair Kit (${b.repairKits})`;
       $("baseHealthText").textContent = `${b.health} / ${b.max}`;
       const pct = b.max > 0 ? Math.max(0, Math.min(100, (b.health / b.max) * 100)) : 0;
       const bar = $("baseHealthBar");
@@ -867,19 +940,36 @@
     function renderActions(){
       const list = $("actionsList");
       list.innerHTML = "";
-      if (!state.actions.length) return;
+      // The server only sends actions the player can run right now — locked
+      // ones (skill/tool/materials/station) are hidden until unlocked.
+      if (!state.actions.length) {
+        list.innerHTML = `<div class="muted-mono">Nothing you can do here right now — skills, tools, materials or stations may unlock more.</div>`;
+        return;
+      }
       const busyLeft = Math.max(0, Math.ceil((state.me.busyUntil - Date.now()) / 1000));
 
       state.actions.forEach(a => {
+        // Recipe-pointer rows (a.recipe) surface an item_backbone recipe:
+        // multi-item inputs, no success roll — the meta line shows the trade.
+        const inputsTxt = a.inputs ? Object.entries(a.inputs).map(([k, v]) => `${v}× ${k}`).join(", ") : null;
         const blocked = !a.lvlOk ? `${a.skillName} ${a.skillLevel} required`
-          : !a.toolOk ? `needs ${a.requires}` : null;
+          : !a.toolOk ? `needs ${a.requires}`
+          : !a.useOk ? `needs ${a.uses}`
+          : (a.activates === "forge" && state.me.forgeFired) ? "forge is going"
+          : (a.activates === "beacon" && state.me.beaconFired) ? "beacon is live"
+          : !a.stationOk ? (a.station === "forge" ? "forge is cold" : a.station === "beacon" ? "no live beacon" : "campfire needed")
+          : !a.inputsOk ? `needs ${inputsTxt}` : null;
+        const gain = a.activates === "forge" ? "fires the forge"
+          : a.activates === "beacon" ? "lights the beacon"
+          : inputsTxt ? `${escapeHtml(inputsTxt)} → ${escapeHtml(a.grants)}`
+          : `+1 ${escapeHtml(a.grants)}`;
         const row = document.createElement("div");
         row.className = "p-2 border rounded mb-2 d-flex align-items-center justify-content-between gap-2";
         row.style.cssText = "border-color: rgba(255,255,255,.12) !important;";
         row.innerHTML = `
           <div>
             <div class="fw-semibold">${escapeHtml(a.label)}</div>
-            <div class="muted-mono">${escapeHtml(a.skillName)} ${a.skillLevel} · ${a.timer}s · ${a.successRate}% · +1 ${escapeHtml(a.grants)}${a.requires ? ` · needs ${escapeHtml(a.requires)}` : ""}</div>
+            <div class="muted-mono">${escapeHtml(a.skillName)} ${a.skillLevel} · ${a.timer}s${a.recipe ? "" : ` · ${a.successRate}%`} · ${gain}${a.requires ? ` · needs ${escapeHtml(a.requires)}` : ""}${a.uses ? ` · uses 1 ${escapeHtml(a.uses)}` : ""}</div>
           </div>
           ${blocked ? `<span class="muted-mono text-nowrap">${escapeHtml(blocked)}</span>`
             : `<button class="btn btn-sm btn-outline-success" data-action="${a.key}" ${busyLeft ? "disabled" : ""}>${busyLeft ? `${busyLeft}s…` : "Do"}</button>`}
@@ -926,6 +1016,16 @@
         .forEach(u => list.appendChild(playerRow({ user: u }, null, true)));
     }
 
+    // Condition → pill color tier: green 100-85, blue 84-61, yellow 60-41,
+    // red 40-21, white ≤20. Shared by the loadout gun pill and the Backpack's
+    // armor condition pills.
+    function condTierOf(cond){
+      return cond >= 85 ? "text-bg-success" :
+        cond >= 61 ? "text-bg-primary" :
+        cond >= 41 ? "text-bg-warning text-dark" :
+        cond >= 21 ? "text-bg-danger" : "text-bg-light text-dark";
+    }
+
     function escapeHtml(s){
       return String(s)
         .replaceAll("&","&amp;")
@@ -948,13 +1048,26 @@
     async function loadState(){
       try {
         const res = await fetch("/api/game-state", { credentials: "same-origin" });
+        const data = await res.json().catch(() => ({}));
+        if (handleBanned(data)) return;
         if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-        const data = await res.json();
         state = normalizeState(data);
         renderAll();
       } catch (err) {
         console.error(err);
       }
+    }
+
+    // requireAuth voids a session the instant it's found banned/exiled (see
+    // server.js) and every subsequent authenticated response — including this
+    // 500ms poll — carries { banned: true, redirect }. Freeze the page (no
+    // more inputs can fire) and hand off to banned.html for the details.
+    function handleBanned(data){
+      if (!data?.banned) return false;
+      if (refreshTimer) clearInterval(refreshTimer);
+      document.querySelectorAll("button, input, select, textarea").forEach((el) => { el.disabled = true; });
+      window.location.href = data.redirect || "/banned.html";
+      return true;
     }
 
     function normalizeState(data){
@@ -976,7 +1089,10 @@
         base: {
           health: Number(data?.base?.health ?? 0),
           max: Number(data?.base?.max ?? 10000),
-          destroyed: Boolean(data?.base?.destroyed)
+          destroyed: Boolean(data?.base?.destroyed),
+          ap: Number(data?.base?.ap ?? 0),
+          repairKits: Number(data?.base?.repairKits ?? 0),
+          sentryActive: Boolean(data?.base?.sentryActive)
         },
         nuke: data?.nuke ?? null,
         online: Array.isArray(data?.online) ? data.online : [],
@@ -1011,9 +1127,12 @@
           zombieZone: Boolean(data?.me?.zombieZone),
           busyUntil: Number(data?.me?.busyUntil ?? 0),
           campfireUntil: Number(data?.me?.campfireUntil ?? 0),
+          forgeFired: Boolean(data?.me?.forgeFired),
+          beaconFired: Boolean(data?.me?.beaconFired),
           skills: Array.isArray(data?.me?.skills) ? data.me.skills : [],
           map: Array.isArray(data?.me?.map) ? data.me.map : [],
           isAdmin: Boolean(data?.me?.isAdmin),
+          admFun: Boolean(data?.me?.admFun),
           jammed: Boolean(data?.me?.jammed)
         },
         actions: Array.isArray(data?.actions) ? data.actions : [],
@@ -1150,6 +1269,90 @@
       });
     }
 
+    // ----- Admin Fun modal: self-targeted cheats + the zombie nuke -----
+    const FUN_ACTIONS = [
+      { what: "boost",  title: "Player Boost",       btn: "Boost",  cls: "btn-warning", sub: "Level 99 · 100,000 gold · 100 tokens · every gun · max accuracy" },
+      { what: "items",  title: "One of Everything",  btn: "Grant",  cls: "btn-info",    sub: "99 of every item in the registry" },
+      { what: "ammo",   title: "Bottomless Pockets", btn: "Fill",   cls: "btn-success", sub: "Every gun: max ammo & clips set to 99 and fully loaded" },
+      { what: "vitals", title: "Juggernaut",         btn: "Pump",   cls: "btn-primary", sub: "Health & shield capacity 1000, filled to the brim" },
+      { what: "nuke",   title: "Nuke All Zombies",   btn: "☢️ Nuke", cls: "btn-danger",  sub: "Vaporizes the entire horde — announced in the World Feed" },
+    ];
+    let funModal = null;
+    $("btnFun").addEventListener("click", () => {
+      if (!funModal) funModal = new bootstrap.Modal($("funModal"));
+      renderFun();
+      funModal.show();
+    });
+    function renderFun(){
+      const list = $("funList");
+      list.innerHTML = "";
+      FUN_ACTIONS.forEach(f => list.appendChild(actionRow({
+        title: f.title,
+        sub: f.sub,
+        btnLabel: f.btn,
+        btnClass: f.cls,
+        onClick: async () => { await postAndRefresh("/api/admin/fun", { what: f.what }); renderFun(); }
+      })));
+    }
+
+    // ----- The Mountains forge: smelting modal + put-out toggle -----
+    $("btnForgeOut").addEventListener("click", (e) => postAction("/api/forge/toggle", e.currentTarget));
+
+    let forgeModal = null, forgeTab = "smelting";
+    $("btnForge").addEventListener("click", () => {
+      if (!forgeModal) forgeModal = new bootstrap.Modal($("forgeModal"));
+      renderForge();
+      forgeModal.show();
+    });
+    $("forgeTabs").querySelectorAll("[data-forgetab]").forEach(b =>
+      b.addEventListener("click", () => { forgeTab = b.dataset.forgetab; renderForge(); }));
+
+    // Section order within a forge tab (recipes carry `section` from the registry).
+    const FORGE_SECTIONS = ["Ingredients", "Tools", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
+
+    async function renderForge(){
+      $("forgeTabs").querySelectorAll("[data-forgetab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.forgetab === forgeTab));
+      const list = $("forgeList");
+      list.innerHTML = loadingRow();
+      // Main tabs: smelt_* recipes are Smelting, the rest of the forge is Smithing.
+      const recipes = (await fetchJson("/api/craft", [])).filter(r =>
+        r.station === "forge" && (r.key.startsWith("smelt_") ? "smelting" : "smithing") === forgeTab);
+
+      $("forgeHeat").textContent = state.me.forgeFired ? "forge is fired" : "forge is cold";
+
+      list.innerHTML = "";
+      if (!recipes.length) { list.innerHTML = emptyRow("Nothing forgeable exists yet."); return; }
+      const busy = state.me.busyUntil > Date.now();
+
+      const bySection = {};
+      recipes.forEach(r => (bySection[r.section || "Other"] ||= []).push(r));
+      [...FORGE_SECTIONS, "Other"].forEach(sec => {
+        if (!bySection[sec]) return;
+        const head = document.createElement("div");
+        head.className = "list-group-item text-light fw-semibold muted-mono";
+        head.style.cssText = "background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.12);";
+        head.textContent = sec;
+        list.appendChild(head);
+        bySection[sec].forEach(r => {
+          const inputsTxt = Object.entries(r.inputs).map(([k, v]) => `${v}× ${k}`).join(", ");
+          const blocked = !r.stationOk ? "forge is cold"
+            : !r.lvlOk ? `${r.skillName} ${r.level} required`
+            : !r.toolOk ? `needs ${r.requires}`
+            : !r.inputsOk ? `needs ${inputsTxt}`
+            : busy ? `busy ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : null;
+          list.appendChild(actionRow({
+            title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border">${escapeHtml(r.skillName)} ${r.level}</span>`,
+            sub: `${inputsTxt} → ${escapeHtml(r.output)} · ${r.timer}s · +${r.xp} ${escapeHtml(r.skillName)} XP${r.requires ? ` · needs ${escapeHtml(r.requires)}` : ""}`,
+            btnLabel: blocked ? blocked : forgeTab === "smelting" ? "Smelt" : "Smith",
+            btnClass: "btn-warning",
+            disabled: Boolean(blocked),
+            onClick: async () => { await postAndRefresh("/api/craft", { key: r.key }); renderForge(); }
+          }));
+        });
+      });
+    }
+
     let mapModal = null;
     $("btnMap").addEventListener("click", () => {
       if (state.me.inside) return; // belt & braces — the button is hidden inside
@@ -1166,6 +1369,7 @@
     $("btnLevelUp").addEventListener("click", (e) => postAction("/api/level/up", e.currentTarget));
     $("btnLevelMax").addEventListener("click", (e) => postAction("/api/level/max", e.currentTarget));
     $("btnInsideOutside").addEventListener("click", (e) => postAction("/api/base/toggle", e.currentTarget));
+    $("btnRepair").addEventListener("click", (e) => postAction("/api/base/repair", e.currentTarget));
     $("btnNuke").addEventListener("click", (e) => postAction("/api/nuke/vote", e.currentTarget));
     $("btnBaseReset").addEventListener("click", (e) => postAction("/api/base/reset", e.currentTarget));
 
@@ -1436,6 +1640,36 @@
             loadInventory();
           }));
 
+      } else if (packTab === "armor") {
+        // One armor slot: Equip swaps, the equipped row offers Unequip.
+        // Selling keeps the worn set (server-enforced; the modal max matches).
+        const rows = invData.armors || [];
+        if (!rows.length) { body.innerHTML = packEmpty("No armor — smith some at the forge."); return; }
+        body.innerHTML = packTable(["Armor", "AP", "Cond", "Qty", "", ""], rows.map((a, idx) => `
+          <tr>
+            <td class="fw-semibold">${escapeHtml(a.label)}</td>
+            <td><span class="badge text-bg-dark border">AP ${a.ap}</span></td>
+            <td><span class="badge rounded-pill ${condTierOf(a.condition)}">${a.condition <= 0 ? "BROKEN" : `${a.condition}%`}</span></td>
+            <td>x${a.quantity}</td>
+            <td class="text-end">${a.equipped
+              ? `<span class="badge text-bg-primary">equipped</span>
+                 <button class="btn btn-sm btn-outline-secondary py-0" data-armor="">Unequip</button>`
+              : `<button class="btn btn-sm btn-outline-primary py-0" data-armor="${escapeHtml(a.name)}">Equip</button>`}</td>
+            <td class="text-end">${a.quantity > (a.equipped ? 1 : 0)
+              ? `<button class="btn btn-sm btn-outline-success py-0" data-sellarmor="${idx}">Sell</button>` : ""}</td>
+          </tr>`).join(""));
+        body.querySelectorAll("[data-armor]").forEach(btn =>
+          btn.addEventListener("click", async (e) => {
+            await postAndRefresh("/api/armor/equip", { item: e.currentTarget.dataset.armor });
+            loadInventory();
+          }));
+        body.querySelectorAll("[data-sellarmor]").forEach(btn =>
+          btn.addEventListener("click", (e) => {
+            const a = rows[Number(e.currentTarget.dataset.sellarmor)];
+            // The worn set can't be sold — cap the modal at qty-1 while equipped.
+            openSell({ item_name: a.name, quantity: a.equipped ? a.quantity - 1 : a.quantity, value: a.value });
+          }));
+
       } else if (packTab === "tools") {
         const rows = owned.filter(i => i.type === "tool");
         if (!rows.length) { body.innerHTML = packEmpty("No tools yet — the shop sells the basics."); return; }
@@ -1458,16 +1692,39 @@
             loadInventory();
           }));
 
-      } else { // materials: crafting inputs, trade goods, treasure (sellable)
-        const rows = owned.filter(i => ["crafting", "trade", "treasure"].includes(i.type) || !i.type);
-        if (!rows.length) { body.innerHTML = packEmpty("Nothing gathered yet — try the location actions."); return; }
-        body.innerHTML = packTable(["Item", "Type", "Qty", ""], rows.map((i, idx) => `
+      } else if (packTab === "treasure") { // rare finds — every row sells for gold
+        const rows = owned.filter(i => i.type === "treasure");
+        if (!rows.length) { body.innerHTML = packEmpty("No treasure yet — keep foraging (and watch the supply drops)."); return; }
+        body.innerHTML = packTable(["Treasure", "Value", "Qty", ""], rows.map((i, idx) => `
           <tr><td class="fw-semibold">${escapeHtml(i.item_name)}${i.desc ? `<div class="muted-mono fw-normal">${escapeHtml(i.desc)}</div>` : ""}</td>
-          <td><span class="badge text-bg-dark border">${escapeHtml(i.type || "?")}</span></td>
+          <td class="muted-mono">${i.value ?? 0}g</td>
           <td>x${i.quantity}</td>
-          <td class="text-end">${i.type === "treasure" ? `<button class="btn btn-sm btn-outline-success py-0" data-sell="${idx}">Sell</button>` : ""}</td></tr>`).join(""));
+          <td class="text-end"><button class="btn btn-sm btn-outline-success py-0" data-sell="${idx}">Sell</button></td></tr>`).join(""));
         body.querySelectorAll("[data-sell]").forEach(btn =>
           btn.addEventListener("click", (e) => openSell(rows[Number(e.currentTarget.dataset.sell)])));
+
+      } else if (packTab === "base") { // base systems — usable only from the Bunker
+        const rows = owned.filter(i => i.type === "base_item");
+        if (!rows.length) { body.innerHTML = packEmpty("No base systems — craft them (or catch a lucky supply drop) at the Bunker."); return; }
+        body.innerHTML = packTable(["System", "Qty", ""], rows.map(i => `
+          <tr><td class="fw-semibold">${escapeHtml(i.item_name)}${i.desc ? `<div class="muted-mono fw-normal">${escapeHtml(i.desc)}</div>` : ""}</td>
+          <td>x${i.quantity}</td>
+          <td class="text-end">${i.usable
+            ? `<button class="btn btn-sm btn-outline-warning py-0" data-use="${escapeHtml(i.item_name)}">Use</button>`
+            : `<span class="badge text-bg-dark border">passive</span>`}</td></tr>`).join(""));
+        body.querySelectorAll("[data-use]").forEach(btn =>
+          btn.addEventListener("click", async (e) => {
+            await postAndRefresh("/api/inventory/use", { item: e.currentTarget.dataset.use });
+            loadInventory();
+          }));
+
+      } else { // materials: crafting inputs & trade goods (treasure has its own tab)
+        const rows = owned.filter(i => ["crafting", "trade"].includes(i.type) || !i.type);
+        if (!rows.length) { body.innerHTML = packEmpty("Nothing gathered yet — try the location actions."); return; }
+        body.innerHTML = packTable(["Item", "Type", "Qty"], rows.map(i => `
+          <tr><td class="fw-semibold">${escapeHtml(i.item_name)}${i.desc ? `<div class="muted-mono fw-normal">${escapeHtml(i.desc)}</div>` : ""}</td>
+          <td><span class="badge text-bg-dark border">${escapeHtml(i.type || "?")}</span></td>
+          <td>x${i.quantity}</td></tr>`).join(""));
       }
     }
 

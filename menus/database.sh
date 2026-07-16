@@ -18,11 +18,12 @@ while true; do
         22 74 12 \
         1 "Backup Database" \
         2 "Restore Backup" \
-        3 "Migrate Old Database" \
-        4 "Vacuum Database" \
-        5 "Database Size" \
-        6 "Reset Inventory" \
-        7 "Back" \
+        3 "Check For Schema Updates" \
+        4 "Migrate Old Database" \
+        5 "Vacuum Database" \
+        6 "Database Size" \
+        7 "Reset Inventory" \
+        8 "Back" \
         2>&1 >/dev/tty)
 
     clear
@@ -59,8 +60,47 @@ while true; do
             read -p "Press enter..."
             ;;
 
-        3)  # ---- Migrate Old Database ----
-            OLD=$(dialog --inputbox "Full path to the old database file:" 8 70 2>&1 >/dev/tty)
+        3)  # ---- Check For Schema Updates (live DB vs a fresh schema) ----
+            REPORT=$(cli database check)
+            case "$REPORT" in
+                OK*|MISSING*|INVALID*)
+                    dialog --title "Schema Check" --msgbox "$REPORT" 0 0 2>&1 >/dev/tty
+                    ;;
+                OUTDATED*)
+                    if server_running; then
+                        dialog --title "Schema Check" --msgbox "$REPORT\n\nThe server is running. Stop it (Server Management -> Stop) before updating the schema." 0 0 2>&1 >/dev/tty
+                        continue
+                    fi
+                    dialog --title "Schema Check" --yesno "$REPORT\n\nUpdate the database schema now? This modifies the live DB in place." 0 0 2>&1 >/dev/tty
+                    [ $? -ne 0 ] && continue
+                    clear
+                    cli database update
+                    read -p "Press enter..."
+                    ;;
+                *)
+                    dialog --msgbox "Schema check failed:\n$REPORT" 10 74 2>&1 >/dev/tty
+                    ;;
+            esac
+            ;;
+
+        4)  # ---- Migrate Old Database (from data/import/) ----
+            IMPORT_DIR="$BASE_DIR/data/import"
+            mkdir -p "$IMPORT_DIR"
+            dialog --title "Migrate Old Database" --yes-label "Continue" --no-label "Cancel" \
+                --yesno "Place old database file(s) in:\n\n  $IMPORT_DIR\n\nthen choose Continue." 11 70 2>&1 >/dev/tty
+            [ $? -ne 0 ] && continue
+            # Build a picker of the files found there, with sizes.
+            ARGS=()
+            for f in "$IMPORT_DIR"/*; do
+                [ -f "$f" ] || continue
+                case "$f" in *-wal|*-shm) continue ;; esac  # sqlite journals, not databases
+                ARGS+=("$f" "$(basename "$f") ($(du -h "$f" | cut -f1))")
+            done
+            if [ ${#ARGS[@]} -eq 0 ]; then
+                dialog --msgbox "No files found in:\n$IMPORT_DIR" 8 60 2>&1 >/dev/tty
+                continue
+            fi
+            OLD=$(dialog --title "Migrate Old Database" --menu "Select a database to migrate" 20 74 12 "${ARGS[@]}" 2>&1 >/dev/tty)
             [ -z "$OLD" ] && continue
             STATUS=$(cli database inspect "$OLD")
             case "$STATUS" in
@@ -78,18 +118,18 @@ while true; do
             esac
             ;;
 
-        4)
+        5)
             sqlite3 "$DB" "VACUUM;"
             echo "Vacuum complete."
             read -p "Press enter..."
             ;;
 
-        5)
+        6)
             du -h "$DB"
             read -p "Press enter..."
             ;;
 
-        6)
+        7)
             sqlite3 "$DB" "DELETE FROM player_inventory;"
             echo "Inventory cleared."
             read -p "Press enter..."

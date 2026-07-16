@@ -575,6 +575,12 @@ export function getLeaderboardRank(userId) {
 }
 // Returns global events plus events targeted at this specific user_id.
 export function getRecentEvents(limit, userId) { return stmtRecentEvents.all({ limit, target: String(userId) }); }
+// The admin World Chat & Events panel's "Clear Feed" — wipes just the
+// conversational subset shown there (chat/admin_chat/system); gameplay
+// history (spawn/kill/attack/death/shoot/etc.) is untouched.
+export function clearFeedEvents() {
+  return db.prepare(`DELETE FROM events WHERE type IN ('chat', 'admin_chat', 'system')`).run().changes;
+}
 export function insertUser(username, salt, hash, createdAt) { return stmtInsertUser.run(username, salt, hash, createdAt, createdAt); }
 export function insertPlayer(userId, createdAt) {
   const info = stmtInsertPlayer.run(userId, createdAt);

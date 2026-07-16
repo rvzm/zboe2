@@ -3,7 +3,7 @@
 // Version: see app_version in config.js
 import {
   getUserByName, getUserIdByName, getPlayerByUserId, isUserAdmin,
-  getLeaderboard, getRecentEvents,
+  getLeaderboard, getRecentEvents, clearFeedEvents,
   insertUser, insertPlayer, ensurePlayer, insertEvent,
   updatePlayerStats,
   setGunJammed, unjamGun, updatePlayerGun, updatePlayerAccuracy,
@@ -2203,6 +2203,15 @@ app.post("/api/admin/chat", adminReq, (req, res) => {
   return res.json({ ok: true });
 });
 
+// World Chat & Events panel's "Clear Feed" — wipes the chat/admin_chat/system
+// events shown there (not gameplay history) and leaves a marker behind.
+app.post("/api/admin/world/chat/clear", adminReq, (req, res) => {
+  const removed = clearFeedEvents();
+  insertEvent("system", `[Admin] ${req.user} cleared the event feed.`, "public", "global");
+  log("INFO", `${req.user} cleared the event feed (${removed} event(s) removed)`, game_config);
+  return res.json({ ok: true, message: `Cleared ${removed} event(s).` });
+});
+
 // --- Players ---
 app.get("/api/admin/player", adminReq, (req, res) => {
   const id = uidOf(req.query.username);
@@ -2238,6 +2247,19 @@ app.post("/api/admin/player/location", adminReq, (req, res) => {
   insertEvent("system", `[Admin] ${req.user} teleported ${req.body.username} to ${LOCATION_NAMES[to]}`, "public", "global");
   log("INFO", `${req.user} moved ${req.body.username} to ${to}`, game_config);
   return res.json({ ok: true, message: `Moved ${req.body.username} to ${LOCATION_NAMES[to]}.` });
+});
+
+// Admin power — the same reset a zombie kill triggers (full reset to level
+// 1), but attributed to the admin instead of the horde, both in the player's
+// own feed and the public world event.
+app.post("/api/admin/player/kill", adminReq, (req, res) => {
+  const id = uidOf(req.body.username);
+  if (id === null) return res.status(404).json({ ok: false, message: "No such user." });
+  resetPlayer(id);
+  insertEvent("death", `[Admin] ${req.user} killed you — back to level 1.`, "private", id);
+  insertEvent("system", `[Admin] ${req.user} killed ${req.body.username} — they died and lost everything.`, "public", "global");
+  log("WARN", `${req.user} admin-killed ${req.body.username}`, game_config);
+  return res.json({ ok: true, message: `${req.body.username} killed.` });
 });
 
 // Per-location occupancy (all players, online or not — mirrors getLocationCount's

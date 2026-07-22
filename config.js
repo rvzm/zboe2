@@ -3,7 +3,7 @@
 
 // Single source of truth for the app version. Code reads it from here — only
 // changelog.md and README.md state versions of their own.
-export const app_version = "2.0.27-dev-rc";
+export const app_version = "2.0.28-dev-rc";
 
 export const file_config = {
   logFile: "server.log", // Default log file name

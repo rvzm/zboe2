@@ -116,7 +116,10 @@
       <div class="row g-3">
         <div class="col-lg-5">
           <div class="card soft-card h-100">
-            <div class="card-header fw-semibold">World Chat &amp; Events</div>
+            <div class="card-header fw-semibold d-flex justify-content-between">
+              <span>World Chat &amp; Events</span>
+              <button class="btn btn-sm btn-outline-warning py-0 px-2" id="wFeedClear">Clear Feed</button>
+            </div>
             <div class="card-body p-0 d-flex flex-column">
               <div class="panel p-2" id="wFeed" style="max-height: 50vh;"></div>
               <form class="d-flex gap-2 p-2 border-top" style="border-color: rgba(255,255,255,.12) !important;" id="wChatForm">
@@ -531,6 +534,11 @@
       if (r.ok) $("wChatMsg").value = "";
       loadWorld();
     });
+    $("wFeedClear").onclick = async () => {
+      if (!confirm("Clear the World Chat & Events feed? This can't be undone.")) return;
+      await api("/api/admin/world/chat/clear", {});
+      loadWorld();
+    };
 
     // World tab's Users list: level/online/location/safe + an Actions button
     // opening the moderation modal. Reuses /api/admin/users (same data as the
@@ -563,8 +571,16 @@
           <td>${u.online ? '<span class="badge text-bg-success">online</span>' : '<span class="badge text-bg-secondary">offline</span>'}</td>
           <td class="muted-mono">${esc(u.locationName || "—")}</td>
           <td>${u.zombieZone ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
-          <td class="text-end"><button class="btn btn-sm btn-outline-info py-0 px-2">Actions</button></td>`;
-        tr.querySelector("button").onclick = () => openActions(u.username);
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-info py-0 px-2" data-act="mod">Mod Actions</button>
+            <button class="btn btn-sm btn-outline-danger py-0 px-2" data-act="kill">Kill</button>
+          </td>`;
+        tr.querySelector('[data-act="mod"]').onclick = () => openActions(u.username);
+        tr.querySelector('[data-act="kill"]').onclick = async () => {
+          if (!confirm(`Kill ${u.username}? They'll die and lose everything, same as a zombie kill.`)) return;
+          await api("/api/admin/player/kill", { username: u.username });
+          loadWorld();
+        };
         rows.appendChild(tr);
       });
     }

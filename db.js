@@ -4,6 +4,15 @@ import crypto from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { file_config, game_config } from "./config.js";
+import { STARTER_SPELLS } from "./magic.js";
+import { QUESTS } from "./quest_backbone.js";
+
+// Quests whose starter descriptor is `{ starter: true }` are granted from
+// character creation, the same convention as magic.js's STARTER_SPELLS.
+// Declared here (not beside the other quest functions further down) so the
+// startup backfill loop can reference it — a `const` isn't usable before its
+// own declaration line runs, unlike the hoisted function declarations below.
+export const STARTER_QUESTS = Object.keys(QUESTS).filter((k) => QUESTS[k].starter?.starter === true);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -79,21 +88,22 @@ export const LOCATION_LINKS = {
   basecamp_inside: [],
   bunker: ["basecamp_outside"],
   forest: ["basecamp_outside", "lake", "mountains", "river", "swamp", "cave", "town"],
-  lake: ["forest"],
-  mountains: ["forest"],
-  river: ["forest"],
-  swamp: ["forest"],
-  cave: ["forest"],
-  town: ["forest"],
+  lake: ["forest", "swamp"],
+  mountains: ["forest", "river", "cave", "town"],
+  river: ["forest", "cave", "town", "mountains"],
+  swamp: ["forest", "lake"],
+  cave: ["forest", "river", "mountains", "town"],
+  town: ["forest", "river", "cave", "mountains"],
 };
 
 // ----- Skills -----
 // Trainable skills; each has s_<key>_lvl / s_<key>_xp columns on players.
 // Skill XP comes from location actions and is SPENT on skill levels (same
 // philosophy as the main level): buy the next level when xp >= skillLevelCost.
-export const SKILLS = ["magic", "woodcutting", "fishing", "mining", "smithing", "crafting", "foraging", "trapping", "alchemy", "cooking"];
+export const SKILLS = ["magic", "defense", "woodcutting", "fishing", "mining", "smithing", "crafting", "foraging", "trapping", "alchemy", "cooking"];
 export const SKILL_NAMES = {
   magic: "Magic",
+  defense: "Defense",
   woodcutting: "Woodcutting",
   fishing: "Fishing",
   mining: "Mining",
@@ -137,9 +147,24 @@ export function skillLevelCost(targetLevel) { return Math.round(50 * Math.pow(ta
 // (label/timer/skill/level/inputs/tool/station/xp) comes from the recipe, and
 // /api/action/do delegates to the craft flow (no success roll — crafts always
 // land). Use it instead of duplicating a recipe as a hand-rolled action.
+//
+// A row can also be { key, button: true, label } — a pure UI button in the
+// Actions card (no Do button, no timer, no gating): the page opens the
+// matching modal (magic_table -> the Magic Table). /api/action/do refuses
+// them; they exist so location-bound surfaces stay in this catalogue.
+//
+// Two more optional fields on plain action rows:
+//   trainOnly   true = the action grants NO item — success awards only the
+//               skill XP (Train Defense). Exempts the row from the
+//               "grants or activates" boot check; still requires xp.
+//   text        custom start-event line ("You begin climbing and jumping
+//               from trees") instead of the default "You started: <label>".
 export const LOCATION_ACTIONS = {
   basecamp_outside: [
-    { key: "gather_firewood", label: "Gather Firewood", timer: 10, skill: "woodcutting", skillLevel: 1, successRate: 90, grants: "firewood", xp: 5, drops: true },
+    { key: "gather_firewood", label: "Gather Firewood", timer: 3, skill: "woodcutting", skillLevel: 1, successRate: 90, grants: "firewood", xp: 5, drops: true },
+    { key: "gather_mushrooms", label: "Gather Mushrooms", timer: 8, skill: "foraging", skillLevel: 1, successRate: 90, grants: "mushroom", xp: 5, drops: true },
+    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "foraging", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8, drops: true },
+    { key: "channel_leyline", label: "Channel the Ley Line", timer: 20, skill: "magic", skillLevel: 5, successRate: 70, grants: "mana shard", xp: 15 },
   ],
   bunker: [
     { key: "tinker_radio", label: "Tinker with the Radio", timer: 15, skill: "crafting", skillLevel: 1, successRate: 60, grants: "radio part", xp: 10 },
@@ -159,24 +184,28 @@ export const LOCATION_ACTIONS = {
     { key: "chop_wood", label: "Chop Wood", timer: 15, skill: "woodcutting", skillLevel: 1, successRate: 80, grants: "wood log", requires: "axe", xp: 10, drops: true },
     { key: "trap_rabbit", label: "Trap Rabbit", timer: 4, skill: "trapping", skillLevel: 1, successRate: 75, grants: "raw small meat", xp: 8 },
     { key: "trap_game", label: "Trap Game", timer: 9, skill: "trapping", skillLevel: 2, successRate: 70, grants: "raw meat", xp: 8 },
+    { key: "train_defense", label: "Train Defense", timer: 10, skill: "defense", skillLevel: 1, successRate: 100, xp: 15, trainOnly: true, text: "You begin climbing and jumping from trees" },
   ],
   lake: [
-    { key: "fish_shallows", label: "Fish the Shallows", timer: 15, skill: "fishing", skillLevel: 1, successRate: 75, grants: "raw fish", requires: "fishing rod", xp: 10 },
-    { key: "fish_deep", label: "Fish the Deep", timer: 25, skill: "fishing", skillLevel: 3, successRate: 60, grants: "raw fish", requires: "fishing rod", xp: 15 },
-    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 10, skill: "foraging", skillLevel: 1, successRate: 85, grants: "mushroom", xp: 6, drops: true },
-    { key: "gather herbs", label: "Gather Herbs", timer: 12, skill: "foraging", skillLevel: 2, successRate: 80, grants: "lake herb", xp: 8, drops: true },
+    { key: "fish_shallows", label: "Fish the Shallows", timer: 10, skill: "fishing", skillLevel: 1, successRate: 75, grants: "raw fish", requires: "fishing rod", xp: 10 },
+    { key: "fish_deep", label: "Fish the Deep", timer: 18, skill: "fishing", skillLevel: 3, successRate: 60, grants: "raw tuna", requires: "fishing rod", uses: "minnow", xp: 15 },
+    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 5, skill: "foraging", skillLevel: 1, successRate: 85, grants: "mushroom", xp: 6, drops: true },
+    { key: "gather herbs", label: "Gather Herbs", timer: 5, skill: "foraging", skillLevel: 2, successRate: 80, grants: "lake herb", xp: 8, drops: true },
+    { key: "dowse_ley_crystal", label: "Dowse for Ley Crystals", timer: 25, skill: "magic", skillLevel: 1, successRate: 60, grants: "ley crystal", xp: 15 },
   ],
   river: [
-    { key: "net_minnows", label: "Net Minnows", timer: 10, skill: "fishing", skillLevel: 1, successRate: 85, grants: "minnow", xp: 6 },
-    { key: "fish_river", label: "Fish the River", timer: 20, skill: "fishing", skillLevel: 2, successRate: 70, grants: "raw tuna", requires: "fishing rod", xp: 12 },
-    { key: "gather herbs", label: "Gather Herbs", timer: 12, skill: "foraging", skillLevel: 2, successRate: 80, grants: "river herb", xp: 8, drops: true },
-    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 10, skill: "foraging", skillLevel: 1, successRate: 85, grants: "raw mushroom", xp: 6, drops: true },
+    { key: "net_minnows", label: "Net Minnows", timer: 8, skill: "fishing", skillLevel: 1, successRate: 85, grants: "minnow", xp: 6 },
+    { key: "fish_river", label: "Fish the River", timer: 15, skill: "fishing", skillLevel: 1, successRate: 70, grants: "raw fish", requires: "fishing rod", xp: 12 },
+    { key: "gather herbs", label: "Gather Herbs", timer: 5, skill: "foraging", skillLevel: 2, successRate: 80, grants: "river herb", xp: 8, drops: true },
+    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 5, skill: "foraging", skillLevel: 1, successRate: 85, grants: "raw mushroom", xp: 6, drops: true },
+    { key: "dowse_ley_crystal", label: "Dowse for Ley Crystals", timer: 25, skill: "magic", skillLevel: 3, successRate: 60, grants: "ley crystal", xp: 15 },
   ],
   mountains: [
-    { key: "fire_forge", label: "Get the Forge Going", timer: 20, skill: "smithing", skillLevel: 1, successRate: 70, activates: "forge", uses: "firewood", xp: 12 },
+    { key: "fire_forge", label: "Get the Forge Going", timer: 10, skill: "smithing", skillLevel: 1, successRate: 70, activates: "forge", uses: "firewood", xp: 12 },
     { key: "mine_iron", label: "Mine Iron", timer: 30, skill: "mining", skillLevel: 3, successRate: 60, grants: "iron ore", requires: "stone pickaxe", xp: 20 },
     // Forge work — pointers into item_backbone.js RECIPES (see comment above).
     { recipe: "smelt_copper" },
+    { recipe: "smelt_bronze" },
     { recipe: "smelt_tin" },
     { recipe: "smelt_iron" },
     { recipe: "smelt_silver" },
@@ -184,24 +213,39 @@ export const LOCATION_ACTIONS = {
     { recipe: "smelt_mythril" },
     { recipe: "smelt_adamantite" },
     { recipe: "smelt_syllic" },
-    { recipe: "smith_iron_armor" },
-    { recipe: "smith_silver_armor" },
-    { recipe: "smith_gold_armor" },
-    { recipe: "smith_gold_and_silver_armor" },
-    { recipe: "smith_mythril_armor" },
-    { recipe: "smith_adamantite_armor" },
-    { recipe: "smith_syllic_armor" },
+    { recipe: "smith_bronze_head" }, { recipe: "smith_bronze_torso" }, { recipe: "smith_bronze_legs" },
+    { recipe: "smith_bronze_boots" }, { recipe: "smith_bronze_hands" }, { recipe: "smith_bronze_shield" },
+    { recipe: "smith_iron_head" }, { recipe: "smith_iron_torso" }, { recipe: "smith_iron_legs" },
+    { recipe: "smith_iron_boots" }, { recipe: "smith_iron_hands" }, { recipe: "smith_iron_shield" },
+    { recipe: "smith_silver_head" }, { recipe: "smith_silver_torso" }, { recipe: "smith_silver_legs" },
+    { recipe: "smith_silver_boots" }, { recipe: "smith_silver_hands" }, { recipe: "smith_silver_shield" },
+    { recipe: "smith_gold_head" }, { recipe: "smith_gold_torso" }, { recipe: "smith_gold_legs" },
+    { recipe: "smith_gold_boots" }, { recipe: "smith_gold_hands" }, { recipe: "smith_gold_shield" },
+    { recipe: "smith_gold_and_silver_head" }, { recipe: "smith_gold_and_silver_torso" }, { recipe: "smith_gold_and_silver_legs" },
+    { recipe: "smith_gold_and_silver_boots" }, { recipe: "smith_gold_and_silver_hands" }, { recipe: "smith_gold_and_silver_shield" },
+    { recipe: "smith_mythril_head" }, { recipe: "smith_mythril_torso" }, { recipe: "smith_mythril_legs" },
+    { recipe: "smith_mythril_boots" }, { recipe: "smith_mythril_hands" }, { recipe: "smith_mythril_shield" },
+    { recipe: "smith_adamantite_head" }, { recipe: "smith_adamantite_torso" }, { recipe: "smith_adamantite_legs" },
+    { recipe: "smith_adamantite_boots" }, { recipe: "smith_adamantite_hands" }, { recipe: "smith_adamantite_shield" },
+    { recipe: "smith_syllic_head" }, { recipe: "smith_syllic_torso" }, { recipe: "smith_syllic_legs" },
+    { recipe: "smith_syllic_boots" }, { recipe: "smith_syllic_hands" }, { recipe: "smith_syllic_shield" },
     { recipe: "crude_blade" },
     { recipe: "magic_amulet" },
     { recipe: "fishing_rod" },
     { recipe: "gun_oil" },
   ],
   swamp: [
-    { key: "gather_herbs", label: "Gather Herbs", timer: 10, skill: "crafting", skillLevel: 1, successRate: 85, grants: "swamp herb", xp: 6, drops: true },
+    { key: "gather_herbs", label: "Gather Herbs", timer: 5, skill: "crafting", skillLevel: 1, successRate: 85, grants: "swamp herb", xp: 6, drops: true },
+    { key: "gather_mushrooms", lavel: "Gather Mushrooms", timer: 5, skill: "foraging", skillLevel: 1, successRate: 80, grants: "raw mushroom", xp: 6, drops: true },
+    { key: "net_minnows", label: "Net Minnows", timer: 8, skill: "fishing", skillLevel: 1, successRate: 85, grants: "minnow", xp: 6 },
+    { key: "fish_gator", label: "Fish for Aligators", timer: 20, skill: "fishing", skillLevel: 4, successRate: 75, grants: "raw gator meat", xp: 6, drops: true },
+    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "magic", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8, drops: true },
+    { key: "pick_spirit_blooms", label: "Pick Spirit Blooms", timer: 12, skill: "magic", skillLevel: 1, successRate: 75, grants: "spirit bloom", xp: 8 },
   ],
   cave: [
     { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "foraging", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8 },
-    { key: "channel_leyline", label: "Channel the Ley Line", timer: 20, skill: "magic", skillLevel: 5, successRate: 70, grants: "mana shard", xp: 15 },
+    { key: "channel_leyline", label: "Channel the Ley Line", timer: 20, skill: "magic", skillLevel: 1, successRate: 70, grants: "mana shard", xp: 15 },
+    { key: "sift_arcane_dust", label: "Sift Arcane Dust", timer: 15, skill: "magic", skillLevel: 2, successRate: 70, grants: "arcane dust", xp: 10 },
     { key: "mine_copper", label: "Mine Copper", timer: 20, skill: "mining", skillLevel: 1, successRate: 75, grants: "copper ore", requires: "stone pickaxe", xp: 10 },
     { key: "mine_tin", label: "Mine Tin", timer: 22, skill: "mining", skillLevel: 2, successRate: 70, grants: "tin ore", requires: "stone pickaxe", xp: 12 },
     { key: "mine_silver", label: "Mine Silver", timer: 28, skill: "mining", skillLevel: 4, successRate: 65, grants: "silver ore", requires: "stone pickaxe", xp: 18 },
@@ -212,7 +256,11 @@ export const LOCATION_ACTIONS = {
     { key: "mine_syllic", label: "Mine Syllic", timer: 60, skill: "mining", skillLevel: 8, successRate: 45, grants: "syllic ore", requires: "adamantite pickaxe", xp: 50 },
   ],
   town: [
+    { key: "magic_table", button: true, label: "Learn at the Magic Table" },
+    { key: "craft_arcane_table", button: true, label: "Craft at the Arcane Table" },
+    { key: "activate_arcane_table", label: "Activate the Arcane Table", timer: 15, skill: "magic", skillLevel: 5, successRate: 70, uses: { "firewood": 2, "mana shard": 2 }, activates: "arcane_table", xp: 15 },
     { key: "scavenge_scrap", label: "Scavenge Scrap", timer: 12, skill: "crafting", skillLevel: 1, successRate: 80, grants: "scrap metal", xp: 8 },
+    { key: "train_defense", label: "Train Defense", timer: 10, skill: "defense", skillLevel: 1, successRate: 100, xp: 15, trainOnly: true, text: "You begin climbing and jumping from trees" },
     { recipe: "craft_weak_blade" },
     { recipe: "craft_radio_part" },
     { recipe: "craft_mana_potion" },
@@ -278,14 +326,17 @@ CREATE TABLE IF NOT EXISTS players (
   max_health INTEGER NOT NULL DEFAULT 100,
   shield INTEGER NOT NULL DEFAULT 0,
   max_shield INTEGER NOT NULL DEFAULT 100,
+  mana INTEGER NOT NULL DEFAULT 100,
+  mana_max INTEGER NOT NULL DEFAULT 100,
   kills INTEGER NOT NULL DEFAULT 0,
   accuracy INTEGER NOT NULL DEFAULT 45,      -- % hit chance
-  gold INTEGER NOT NULL DEFAULT 0,             -- in-game currency
-  horde_tokens INTEGER NOT NULL DEFAULT 0,        -- number of horde tokens player has
+  c_gold INTEGER NOT NULL DEFAULT 0,             -- in-game currency
+  c_tokens INTEGER NOT NULL DEFAULT 0,        -- number of horde tokens player has
   golden_shots INTEGER NOT NULL DEFAULT 0,     -- remaining Golden Gun power-up shots (0 = not active)
   equipped_gun TEXT NOT NULL DEFAULT 'Handgun',
-  equipped_armor TEXT NOT NULL DEFAULT '',         -- '' = no armor worn (registry armor name otherwise)
-  -- Per-type gun stats. Page stats (ammo/clips/condition/etc) read from the equipped gun's type.
+  equipped_weapon TEXT NOT NULL DEFAULT '',        -- '' = no weapon equipped (registry weapon name otherwise)
+  ap_level INTEGER NOT NULL DEFAULT 0,             -- innate "Base AP" — adds into armorApOf() on top of gear/spells; bought via the AP Base upgrade (mana + materials)
+  -- Per-type weapon stats. Page stats (ammo/clips/condition/type for guns, condition/quantity you have [minus the equipped item]) read from the equipped weapon's type.
   handgun_ammo INTEGER NOT NULL DEFAULT 6,
   handgun_max_ammo INTEGER NOT NULL DEFAULT 6,
   handgun_clips INTEGER NOT NULL DEFAULT 3,
@@ -310,6 +361,16 @@ CREATE TABLE IF NOT EXISTS players (
   shotgun_max_clips INTEGER NOT NULL DEFAULT 6,
   shotgun_condition INTEGER NOT NULL DEFAULT 100,
   shotgun_jammed INTEGER NOT NULL DEFAULT 0,
+  -- Playercard Armor — one equipped item name per paperdoll slot ('' = empty).
+  -- Condition of whatever's equipped is read live from player_inventory.condition
+  -- for that item_name (already tracked there, per stack) — no per-slot condition
+  -- column needed; armorApOf() and the UI both look it up live.
+  a_head TEXT NOT NULL DEFAULT '',
+  a_torso TEXT NOT NULL DEFAULT '',
+  a_legs TEXT NOT NULL DEFAULT '',
+  a_boots TEXT NOT NULL DEFAULT '',
+  a_hands TEXT NOT NULL DEFAULT '',
+  a_shield TEXT NOT NULL DEFAULT '',
   -- Playercard Skills
   s_magic_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's magic skill
   s_magic_xp INTEGER NOT NULL DEFAULT 0, -- spendable magic XP (spent on skill levels)
@@ -331,13 +392,28 @@ CREATE TABLE IF NOT EXISTS players (
   s_trapping_xp INTEGER NOT NULL DEFAULT 0, -- spendable trapping XP (spent on skill levels)
   s_foraging_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's foraging skill
   s_foraging_xp INTEGER NOT NULL DEFAULT 0, -- spendable foraging XP (spent on skill levels)
+  s_defense_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's defense skill
+  s_defense_xp INTEGER NOT NULL DEFAULT 0, -- spendable defense XP (spent on skill levels)
+  -- Playercard Location
   location TEXT NOT NULL DEFAULT 'basecamp_outside', -- current location key (see LOCATION_NAMES)
-  -- Player Tracking Information
-  forge_fired INTEGER NOT NULL DEFAULT 0,          -- 0/1, has the player fired the forge yet?
-  beacon_fired INTEGER NOT NULL DEFAULT 0,         -- 0/1, live supply beacon at the Bunker (cleared when the drop is redeemed)
   hidden INTEGER NOT NULL DEFAULT 0,         -- 0/1, hiding at current location
+  -- Playercard Quests
+  quest_active TEXT NOT NULL DEFAULT 'NONE',     -- '' = no active quest, otherwise QUESTS key (quest_backbone.js)
+  quest_objectives TEXT NOT NULL DEFAULT '', -- JSON-encoded object of the active quest's objectives and their completion status (quest_backbone.js)
+  quest_started TEXT NOT NULL DEFAULT '', -- comma-separated list of started QUESTS keys (QUEST_NAMES from quest_backbone.js)
+  quest_completed TEXT NOT NULL DEFAULT '',  -- comma-separated list of completed QUESTS keys (QUEST_NAMES from quest_backbone.js)
+  -- Player Tracking Information
+  -- - Station activations (beacon, forge, Arcane Table) are cleared when the player logs out or the server restarts.
+  beacon_fired INTEGER NOT NULL DEFAULT 0,         -- 0/1, live supply beacon at the Bunker (cleared when the drop is redeemed)
+  forge_fired INTEGER NOT NULL DEFAULT 0,          -- 0/1, has the player fired the forge yet?
+  forge_fired_at INTEGER NOT NULL DEFAULT 0,     -- timestamp of when the player fired the forge
+  arcane_table INTEGER NOT NULL DEFAULT 0,        -- 0/1, has the player activated the Arcane Table. 5min time active
+  arcane_table_activated_at INTEGER NOT NULL DEFAULT 0, -- timestamp of when the player activated the Arcane Table
+-- - zombie tracking (for horde attacks and hunting) — the player is only counted if they are in a ZOMBIE_LOCATIONS location, and have zombies near them.
+zombie_near INTEGER NOT NULL DEFAULT 0,          -- Number of zombies near the player, this is an exact count, not a boolean. 0 = no zombies near the player.
+  -- - timestamps for last activity and last update (used for online-player counters and leaderboard sorting)
   last_seen INTEGER NOT NULL DEFAULT 0,             -- timestamp of last activity 
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL                       -- timestamp of last update
 );
 
 CREATE TABLE IF NOT EXISTS player_inventory (
@@ -354,11 +430,22 @@ CREATE TABLE IF NOT EXISTS player_inventory (
   updated_at INTEGER NOT NULL
 );
 
+-- Per-player magic knowledge (spells learned at the Magic Table in Town).
+-- type is 'spell' for now — the column leaves room for future magic rows
+-- (enchantments, runes, ...) without another table. name = a MAGIC_SPELLS
+-- key (magic.js). The unique index makes grants/learns idempotent.
+CREATE TABLE IF NOT EXISTS player_magic (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  type TEXT NOT NULL DEFAULT 'spell',
+  name TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_player_magic_row ON player_magic(user_id, type, name);
+
 CREATE TABLE IF NOT EXISTS player_block (
-  user_id PRIMARY KEY,
-  -- Auth Keys
-  session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
-  session_id TEXT NOT NULL DEFAULT '00000',
+  user_id INTEGER PRIMARY KEY,
   u_grant TEXT NOT NULL DEFAULT 'USER',
   u_time TEXT NOT NULL DEFAULT 'TIMESTAMP',
   u_title TEXT NOT NULL DEFAULT 'AWARD TYPE',
@@ -379,6 +466,22 @@ CREATE TABLE IF NOT EXISTS events (
   msg TEXT NOT NULL
 );
 
+
+-- Chat tables
+CREATE TABLE IF NOT EXISTS chat_world (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Auth Keys
+  ts INTEGER NOT NULL,
+  user TEXT NOT NULL,
+  msg TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_support (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  user TEXT NOT NULL,
+  msg TEXT NOT NULL
+);
 -- Game State Table (Hunt enabled, horde size/status, raid enabled, etc)
 CREATE TABLE IF NOT EXISTS game_state (
   key TEXT PRIMARY KEY,
@@ -394,6 +497,20 @@ CREATE TABLE IF NOT EXISTS game_state (
   base_destroyed_at INTEGER NOT NULL DEFAULT 0,    -- ts the base fell (0 = intact)
   base_repair_kits INTEGER NOT NULL DEFAULT 0, -- number of repair kits in the base
   sentry_until INTEGER NOT NULL DEFAULT 0,     -- epoch ms the sentry turret protects the base until (0 = offline)
+  -- location zombie counts (for horde attacks and hunting) — the player is only counted if they are in a ZOMBIE_LOCATIONS location, and have zombies near them.
+  zombies_basecamp_outside INTEGER NOT NULL DEFAULT 0,
+  zombies_bunker INTEGER NOT NULL DEFAULT 0,
+  zombies_forest INTEGER NOT NULL DEFAULT 0,
+  zombies_lake INTEGER NOT NULL DEFAULT 0,
+  zombies_swamp INTEGER NOT NULL DEFAULT 0,
+  -- zombie-safe(?) locations, if too many spawn there is a chance for a "zombie break"
+  zombies_river INTEGER NOT NULL DEFAULT 0,
+  zombies_mountains INTEGER NOT NULL DEFAULT 0,
+  zombies_cave INTEGER NOT NULL DEFAULT 0,
+  zombies_town INTEGER NOT NULL DEFAULT 0,
+  zombie_break INTEGER NOT NULL DEFAULT 0, -- 0/1, a zombie break is in progress (zombies are spawning in safe locations)
+  -- Timestamps (epoch ms)
+  created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
@@ -423,10 +540,28 @@ if (!playerColumns.includes("hidden")) {
 }
 
 // Seed the single global game_state row that the online-player counters target.
-db.prepare(`
-  INSERT OR IGNORE INTO game_state (key, updated_at)
-  VALUES ('main', ?)
-`).run(Date.now());
+// created_at has no column default (unlike everything else here) — omitting
+// it from an INSERT OR IGNORE doesn't error, it just silently no-ops the
+// whole insert (NOT NULL violation swallowed by OR IGNORE), leaving the table
+// empty on a fresh DB. Must be provided explicitly.
+{
+  const seedNow = Date.now();
+  db.prepare(`
+    INSERT OR IGNORE INTO game_state (key, created_at, updated_at)
+    VALUES ('main', ?, ?)
+  `).run(seedNow, seedNow);
+}
+
+// Starter spells: every player knows the starter(s) (magic.js STARTER_SPELLS)
+// from creation — this backfills players created before player_magic existed.
+// Idempotent via the unique (user_id, type, name) index, so it's safe to run
+// every boot.
+for (const spellKey of STARTER_SPELLS) {
+  db.prepare(`
+    INSERT OR IGNORE INTO player_magic (user_id, type, name, updated_at)
+    SELECT user_id, 'spell', ?, ? FROM players
+  `).run(spellKey, Date.now());
+}
 
 // Whether the live schema actually has the provenance-stamp columns yet — a
 // DB that predates this feature (or was migrated via `database update` before
@@ -585,6 +720,8 @@ export function insertUser(username, salt, hash, createdAt) { return stmtInsertU
 export function insertPlayer(userId, createdAt) {
   const info = stmtInsertPlayer.run(userId, createdAt);
   giveInventoryItem(userId, "Handgun", 1); // everyone starts with (and has equipped) a Handgun
+  for (const spellKey of STARTER_SPELLS) learnSpell(userId, spellKey); // ...and the starter spell(s)
+  checkQuestTriggers(userId, { type: "starter" }); // ...and the starter quest(s)
   return info;
 }
 // Prepared inline (not module-level cached) — a module-level db.prepare() runs
@@ -742,10 +879,13 @@ export function gunAmmoOf(player, type) {
 }
 
 // Players seen within the last `sinceMs` epoch — i.e. currently active.
-// equipped_armor rides along for the tick's armor/Base-AP hit calc.
+// The 6 a_<slot> columns plus ap_level ride along for the tick's armor/Base-AP
+// hit calc (armorApOf() needs all 6 equipped-slot names, and player.ap_level —
+// previously missing here, so Base AP silently never contributed via this path).
 export function getActivePlayers(sinceMs) {
   return db.prepare(`
-    SELECT p.user_id, u.username, p.health, p.shield, p.location, p.equipped_armor
+    SELECT p.user_id, u.username, p.health, p.shield, p.location, p.ap_level,
+           p.a_head, p.a_torso, p.a_legs, p.a_boots, p.a_hands, p.a_shield
     FROM players p JOIN users u ON u.id = p.user_id
     WHERE p.last_seen >= ?
   `).all(sinceMs);
@@ -772,6 +912,214 @@ export function addShield(userId, amount) {
   return shield;
 }
 
+// Grant/spend mana, clamped to [0, mana_max]. Positive to restore (potions,
+// admin), negative to spend (spell casts) — the same signed-amount convention
+// as addShield/addTokens. The clamp is the overfill/below-zero safeguard:
+// callers that need a hard refusal (e.g. casting without enough mana) check
+// player.mana against the cost themselves before calling this. Returns the
+// new mana value.
+export function addMana(userId, amount) {
+  const p = stmtPlayerByUserId.get(userId);
+  if (!p) return null;
+  const mana = Math.max(0, Math.min(p.mana_max, p.mana + amount));
+  db.prepare(`UPDATE players SET mana = ?, updated_at = ? WHERE user_id = ?`).run(mana, Date.now(), userId);
+  return mana;
+}
+
+// ----- Magic knowledge (player_magic) -----
+// Spells learned at the Magic Table in Town (plus the starters granted at
+// creation). type is 'spell' today; the column leaves room for future magic
+// rows without another table. name = a MAGIC_SPELLS key (magic.js).
+export function getPlayerMagic(userId, type = "spell") {
+  return db.prepare(`SELECT name FROM player_magic WHERE user_id = ? AND type = ? ORDER BY id`)
+    .all(userId, type).map((r) => r.name);
+}
+export function knowsSpell(userId, spellKey) {
+  return Boolean(db.prepare(`SELECT 1 FROM player_magic WHERE user_id = ? AND type = 'spell' AND name = ?`)
+    .get(userId, spellKey));
+}
+// Idempotent — the unique (user_id, type, name) index makes re-learning a no-op.
+export function learnSpell(userId, spellKey) {
+  return db.prepare(`INSERT OR IGNORE INTO player_magic (user_id, type, name, updated_at) VALUES (?, 'spell', ?, ?)`)
+    .run(userId, spellKey, Date.now());
+}
+
+// ----- Quests (quest_backbone.js) -----
+// quest_active/quest_started/quest_completed are comma-separated QUESTS keys
+// on players; quest_objectives is a JSON object of { objectiveIndex:
+// progressCount } for whichever ONE quest is currently active — only the
+// active quest is ever progress-tracked, matching the column's own comment.
+// (STARTER_QUESTS is declared near the top of the file, not here — see that
+// comment for why.)
+
+function questKeyList(csv) { return csv ? csv.split(",").filter(Boolean) : []; }
+
+// Best-effort initial progress for a quest that's about to become active:
+// acquire_item/learn_spell objectives check real current state (owning
+// enough of the item / already knowing the spell) so a player who met the
+// condition before the quest existed for them isn't stuck; every other
+// objective type is a momentary event with no "current state" to check, so
+// it starts at 0 (standard — you don't get credit for an action performed
+// before the quest began).
+function seedObjectiveProgress(userId, quest) {
+  return Object.fromEntries(quest.objectives.map((obj, i) => {
+    if (obj.type === "acquire_item") {
+      const owned = db.prepare(`SELECT quantity FROM player_inventory WHERE user_id = ? AND item_name = ?`)
+        .get(userId, obj.item)?.quantity ?? 0;
+      return [i, Math.min(obj.qty, owned)];
+    }
+    if (obj.type === "learn_spell") {
+      return [i, knowsSpell(userId, obj.spell) ? obj.qty : 0];
+    }
+    return [i, 0];
+  }));
+}
+
+// Makes `questKey` the tracked/active quest with freshly-seeded objective
+// progress, then immediately resolves it if that seed already satisfies
+// every objective (and cascades: completing one quest may auto-activate
+// the next, which might ALSO already be satisfied).
+function activateQuest(userId, questKey) {
+  const quest = QUESTS[questKey];
+  if (!quest) return;
+  db.prepare(`UPDATE players SET quest_active = ?, quest_objectives = ?, updated_at = ? WHERE user_id = ?`)
+    .run(questKey, JSON.stringify(seedObjectiveProgress(userId, quest)), Date.now(), userId);
+  completeActiveQuestIfDone(userId);
+}
+
+// Begin tracking a quest: idempotent (a no-op if already in quest_started).
+// Appends to quest_started (always announced, whether or not it becomes the
+// active/tracked quest — a queued quest still belongs in the player's log);
+// if no quest is currently active, this one also becomes active (with seeded
+// objective progress, see activateQuest).
+export function startQuest(userId, questKey) {
+  const quest = QUESTS[questKey];
+  if (!quest) return;
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+  const started = questKeyList(player.quest_started);
+  if (started.includes(questKey)) return;
+  started.push(questKey);
+  db.prepare(`UPDATE players SET quest_started = ?, updated_at = ? WHERE user_id = ?`)
+    .run(started.join(","), Date.now(), userId);
+  insertEvent("action", `Quest started: ${quest.name}`, "private", userId);
+  if (player.quest_active === "NONE") activateQuest(userId, questKey);
+}
+
+// Player-driven switch: makes an already-started, not-yet-completed quest
+// the tracked/active one (see activateQuest). Objective progress is always
+// freshly re-seeded on activation, not restored from an earlier stint as
+// active — only one quest's objectives are ever persisted at a time under
+// this schema (quest_objectives holds just the active quest's progress), so
+// acquire_item/learn_spell objectives recover via real current state
+// (seedObjectiveProgress) but action/recipe/use_item/break_horde/clear_raid
+// progress made while a *different* quest was active isn't remembered —
+// switch back and redo it. Returns { ok, reason? }.
+export function setActiveQuest(userId, questKey) {
+  const quest = QUESTS[questKey];
+  if (!quest) return { ok: false, reason: "unknown_quest" };
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return { ok: false, reason: "no_player" };
+  if (!questKeyList(player.quest_started).includes(questKey)) return { ok: false, reason: "not_started" };
+  if (questKeyList(player.quest_completed).includes(questKey)) return { ok: false, reason: "already_completed" };
+  if (player.quest_active === questKey) return { ok: true, reason: "already_active" };
+
+  insertEvent("action", `Now tracking: ${quest.name}`, "private", userId);
+  activateQuest(userId, questKey);
+  return { ok: true };
+}
+
+// If the ACTIVE quest has a not-yet-complete objective of `objectiveType`
+// whose reference field (item/action/recipe/spell) matches `matchKey` — or
+// has no reference field at all, e.g. break_horde/clear_raid — increments
+// its progress (capped at qty). No-op if no quest is active or none matches.
+// Completion is checked automatically after any progress is recorded.
+export function recordQuestProgress(userId, objectiveType, matchKey, amount = 1) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player || player.quest_active === "NONE") return;
+  const quest = QUESTS[player.quest_active];
+  if (!quest) return;
+  const progress = player.quest_objectives ? JSON.parse(player.quest_objectives) : {};
+  let changed = false;
+  quest.objectives.forEach((obj, i) => {
+    if (obj.type !== objectiveType) return;
+    const ref = obj.item ?? obj.action ?? obj.recipe ?? obj.spell ?? null;
+    if (ref !== null && ref !== matchKey) return;
+    const current = progress[i] ?? 0;
+    if (current >= obj.qty) return;
+    progress[i] = Math.min(obj.qty, current + amount);
+    changed = true;
+  });
+  if (!changed) return;
+  db.prepare(`UPDATE players SET quest_objectives = ?, updated_at = ? WHERE user_id = ?`)
+    .run(JSON.stringify(progress), Date.now(), userId);
+  completeActiveQuestIfDone(userId);
+}
+
+// Grants the reward and advances quest_active to the next started-but-
+// incomplete quest (if any) once every objective of the current active
+// quest is satisfied. Returns the completed quest's key, or null. Cascades:
+// the newly-activated quest is itself seeded and completion-checked, so a
+// chain of instantly-satisfied quests resolves in one call.
+export function completeActiveQuestIfDone(userId) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player || player.quest_active === "NONE") return null;
+  const questKey = player.quest_active;
+  const quest = QUESTS[questKey];
+  if (!quest) return null;
+  const progress = player.quest_objectives ? JSON.parse(player.quest_objectives) : {};
+  const done = quest.objectives.every((obj, i) => (progress[i] ?? 0) >= obj.qty);
+  if (!done) return null;
+
+  if (quest.reward?.gold) updatePlayerGold(userId, quest.reward.gold);
+  if (quest.reward?.xp) updatePlayerStats(userId, quest.reward.xp, 0);
+
+  const completed = questKeyList(player.quest_completed);
+  completed.push(questKey);
+  const started = questKeyList(player.quest_started);
+  const nextKey = started.find((k) => k !== questKey && !completed.includes(k)) ?? "NONE";
+
+  db.prepare(`UPDATE players SET quest_completed = ?, quest_active = 'NONE', quest_objectives = '', updated_at = ? WHERE user_id = ?`)
+    .run(completed.join(","), Date.now(), userId);
+
+  const rewardBits = [];
+  if (quest.reward?.gold) rewardBits.push(`+${quest.reward.gold} gold`);
+  if (quest.reward?.xp) rewardBits.push(`+${quest.reward.xp} XP`);
+  insertEvent("action", `Quest complete: ${quest.name}!${rewardBits.length ? " " + rewardBits.join(", ") : ""}`, "private", userId);
+
+  if (nextKey !== "NONE") activateQuest(userId, nextKey);
+  return questKey;
+}
+
+// Check every quest whose starter trigger matches what just happened, and
+// start any that haven't already been started. `trigger` shapes:
+//   { type: "starter" }                       — character creation
+//   { type: "location", location }             — entered a location
+//   { type: "action", action }                 — performed a location action
+//   { type: "questComplete", quest }            — completed another quest
+export function checkQuestTriggers(userId, trigger) {
+  for (const [key, quest] of Object.entries(QUESTS)) {
+    const s = quest.starter;
+    if (!s) continue;
+    const matches =
+      (trigger.type === "starter" && s.starter === true) ||
+      (trigger.type === "location" && s.enter_location === trigger.location) ||
+      (trigger.type === "action" && s.type === "action" && s.action === trigger.action) ||
+      (trigger.type === "questComplete" && s.quest === trigger.quest);
+    if (matches) startQuest(userId, key);
+  }
+}
+
+// Starter quests: every player has the starter quest(s) already started —
+// backfills players created before quest_* existed. Placed here (not beside
+// the STARTER_SPELLS backfill near the top of the file) because startQuest()
+// depends on stmtPlayerByUserId and other consts that aren't initialized yet
+// that early — module top-level code runs in file order, unlike the hoisted
+// function declarations it calls. startQuest() is idempotent, safe every boot.
+for (const p of db.prepare("SELECT user_id FROM players").all()) {
+  for (const questKey of STARTER_QUESTS) startQuest(p.user_id, questKey);
+}
+
 // Booster: raise (or lower) shield capacity, floored at 0. Returns the new max.
 export function increaseMaxShield(userId, amount) {
   const p = stmtPlayerByUserId.get(userId);
@@ -794,8 +1142,8 @@ export function healPlayer(userId, amount) {
 export function addTokens(userId, amount) {
   const p = stmtPlayerByUserId.get(userId);
   if (!p) return null;
-  const tokens = Math.max(0, p.horde_tokens + amount);
-  db.prepare(`UPDATE players SET horde_tokens = ?, updated_at = ? WHERE user_id = ?`).run(tokens, Date.now(), userId);
+  const tokens = Math.max(0, p.c_tokens + amount);
+  db.prepare(`UPDATE players SET c_tokens = ?, updated_at = ? WHERE user_id = ?`).run(tokens, Date.now(), userId);
   return tokens;
 }
 
@@ -933,7 +1281,7 @@ function skillCols(skill) {
 //     `xp` and `lifetime_xp` (leaderboard) — spending never touches lifetime.
 //  2. Skills AUTO-LEVEL: the skill pool is progress toward the next skill
 //     level; on reaching skillLevelCost(next) it rolls over (looping for big
-//     awards) and a private 'level' event announces each level gained.
+//     awards) and a public 'level' event announces each level gained.
 // Returns { xp, level, leveled: [newLevels...] }.
 export function addSkillXp(userId, skill, amount) {
   const { lvl, xp } = skillCols(skill);
@@ -953,8 +1301,15 @@ export function addSkillXp(userId, skill, amount) {
       SET ${xp} = ?, ${lvl} = ?, xp = xp + ?, lifetime_xp = lifetime_xp + ?, updated_at = ?
       WHERE user_id = ?
     `).run(pool, level, amount, amount, Date.now(), userId);
-    for (const l of leveled) {
-      insertEvent("level", `Your ${SKILL_NAMES[skill]} reached level ${l}`, "private", String(userId));
+    // Leveling up Magic refills mana, same as a player level (see applyLevelUp).
+    if (skill === "magic" && leveled.length) {
+      db.prepare(`UPDATE players SET mana = mana_max, updated_at = ? WHERE user_id = ?`).run(Date.now(), userId);
+    }
+    if (leveled.length) {
+      const username = db.prepare("SELECT username FROM users WHERE id = ?").get(userId)?.username ?? "";
+      for (const l of leveled) {
+        insertEvent("level", `${username}'s ${SKILL_NAMES[skill]} skill increased to level ${l}!`, "public", "global");
+      }
     }
     return { xp: pool, level, leveled };
   })();
@@ -969,7 +1324,9 @@ export function buySkillLevel(userId, skill) {
   if (!p) return { ok: false, reason: "no_player" };
   const cost = skillLevelCost(p[lvl] + 1);
   if (p.xp < cost) return { ok: false, reason: "cant_afford", cost };
-  db.prepare(`UPDATE players SET ${lvl} = ${lvl} + 1, xp = xp - ?, updated_at = ? WHERE user_id = ?`)
+  // Leveling up Magic refills mana, same as a player level (see applyLevelUp).
+  const manaRefill = skill === "magic" ? ", mana = mana_max" : "";
+  db.prepare(`UPDATE players SET ${lvl} = ${lvl} + 1, xp = xp - ?${manaRefill}, updated_at = ? WHERE user_id = ?`)
     .run(cost, Date.now(), userId);
   return { ok: true, level: p[lvl] + 1, cost };
 }
@@ -985,9 +1342,10 @@ export function prevLevelOf(level) { return Math.max(1, level - 1); }
 export function levelCost(targetLevel) { return Math.round(100 * Math.pow(targetLevel, 1.6)); }
 export function levelGrantsBonus(level) { return level <= 15 || level % 5 === 0; }
 
-// Spend XP to gain a level: -cost XP, set new level. If the new level grants a
-// stat bonus, +accuracy/+max health and heal to the new max; otherwise just the
-// level number changes. lifetime_xp is untouched (spending doesn't lose rank).
+// Spend XP to gain a level: -cost XP, set new level, refill mana to mana_max
+// (every level, not just bonus ones). If the new level grants a stat bonus,
+// +accuracy/+max health and heal to the new max; otherwise just the level
+// number (and mana) changes. lifetime_xp is untouched (spending doesn't lose rank).
 export function applyLevelUp(userId, newLevel, cost) {
   const p = stmtPlayerByUserId.get(userId);
   if (!p) return null;
@@ -998,12 +1356,13 @@ export function applyLevelUp(userId, newLevel, cost) {
     maxHealth = p.max_health + LEVEL_HEALTH_BONUS;
     health = maxHealth; // heal to new max on a stat level
   }
+  const mana = p.mana_max; // every player level up refills mana, bonus level or not
   db.prepare(`
     UPDATE players
-    SET xp = ?, level = ?, accuracy = ?, max_health = ?, health = ?, updated_at = ?
+    SET xp = ?, level = ?, accuracy = ?, max_health = ?, health = ?, mana = ?, updated_at = ?
     WHERE user_id = ?
-  `).run(xp, newLevel, accuracy, maxHealth, health, Date.now(), userId);
-  return { xp, level: newLevel, accuracy, maxHealth, bonus: levelGrantsBonus(newLevel) };
+  `).run(xp, newLevel, accuracy, maxHealth, health, mana, Date.now(), userId);
+  return { xp, level: newLevel, accuracy, maxHealth, mana, bonus: levelGrantsBonus(newLevel) };
 }
 
 // Admin force-level by `steps` (+/-): applies the full per-level stack — level,
@@ -1052,6 +1411,8 @@ export function forceLevel(userId, steps) {
 export function resetPlayer(userId) {
   db.transaction(() => {
     db.prepare("DELETE FROM player_inventory WHERE user_id = ?").run(userId);
+    // Death forgets learned spells too — insertPlayer re-grants the starters.
+    db.prepare("DELETE FROM player_magic WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM players WHERE user_id = ?").run(userId);
     insertPlayer(userId, Date.now());
     // The fresh row defaults to logged-out session values — copy the live
@@ -1089,6 +1450,19 @@ export function setBeaconFired(userId, fired) {
     .run(fired ? 1 : 0, Date.now(), userId);
 }
 
+// The Town Arcane Table: unlike the forge/beacon's persistent on/off toggle,
+// this auto-expires ARCANE_TABLE_WINDOW_MS (server.js) after activation — the
+// timestamp is what lets stationOk() tell "on" apart from "on but expired".
+// Still settable off early via /api/arcane-table/toggle, mirroring the pair above.
+export function setArcaneTableActive(userId, active) {
+  if (active) {
+    db.prepare(`UPDATE players SET arcane_table = 1, arcane_table_activated_at = ?, updated_at = ? WHERE user_id = ?`)
+      .run(Date.now(), Date.now(), userId);
+  } else {
+    db.prepare(`UPDATE players SET arcane_table = 0, updated_at = ? WHERE user_id = ?`).run(Date.now(), userId);
+  }
+}
+
 // Jam state is per gun type (a jammed Rifle doesn't stop the Handgun).
 export function setGunJammed(userId, type, jammed) {
   db.prepare(`
@@ -1098,10 +1472,27 @@ export function setGunJammed(userId, type, jammed) {
   `).run(jammed ? 1 : 0, Date.now(), userId);
 }
 
-// Equip (or with '' unequip) an armor. One slot — equipping swaps implicitly.
-export function updatePlayerArmor(userId, armorName) {
-  db.prepare(`UPDATE players SET equipped_armor = ?, updated_at = ? WHERE user_id = ?`)
-    .run(armorName || "", Date.now(), userId);
+// Paperdoll — mirrors item_backbone.js's ARMOR_PIECES (kept as a separate
+// local const rather than importing item_backbone.js here, matching how
+// GUN_TYPES/GUN_NAMES are already declared independently in this file).
+export const ARMOR_SLOTS = ["head", "torso", "legs", "boots", "hands", "shield"];
+
+// Equip (or with '' unequip) one paperdoll slot. Six independent slots now —
+// equipping one never touches the others.
+export function equipArmorPiece(userId, slot, itemName) {
+  if (!ARMOR_SLOTS.includes(slot)) throw new Error(`Invalid armor slot: ${slot}`);
+  db.prepare(`UPDATE players SET a_${slot} = ?, updated_at = ? WHERE user_id = ?`)
+    .run(itemName || "", Date.now(), userId);
+}
+
+// Nudges one owned item's condition — armor pieces are keyed by whatever name
+// is equipped in a slot, and condition already lives on player_inventory (per
+// item-name stack), not a dedicated players column. First real caller of
+// updatePlayerInventory, which previously had zero call sites.
+export function adjustArmorCondition(userId, itemName, delta) {
+  updatePlayerInventory(userId, itemName, 0, delta, 0, 0);
+  return db.prepare(`SELECT condition FROM player_inventory WHERE user_id = ? AND item_name = ?`)
+    .get(userId, itemName)?.condition ?? 0;
 }
 
 export function updatePlayerGun(userId, gun) {
@@ -1182,10 +1573,10 @@ export function updatePlayerHidden(userId, hidden) {
 export function updatePlayerGold(userId, goldChange) {
   const player = stmtPlayerByUserId.get(userId);
   if (!player) return;
-  const newGold = Math.max(0, player.gold + goldChange);
+  const newGold = Math.max(0, player.c_gold + goldChange);
   db.prepare(`
     UPDATE players
-    SET gold = ?, updated_at = ?
+    SET c_gold = ?, updated_at = ?
     WHERE user_id = ?
   `).run(newGold, Date.now(), userId);
 }
@@ -1204,6 +1595,29 @@ export function getInventoryItem(userId, itemName) {
   return db.prepare(`
     SELECT id, quantity FROM player_inventory WHERE user_id = ? AND item_name = ?
   `).get(userId, itemName);
+}
+
+// Every player's ownership of one specific item — the admin panel's bulk
+// "Give" modal (Items tab) needs to show every player's current quantity of
+// whatever's about to be granted, not just one player's like getInventoryItem.
+export function getItemOwners(itemName) {
+  return db.prepare(`
+    SELECT u.username, p.user_id, p.last_seen, COALESCE(pi.quantity, 0) AS quantity
+    FROM users u
+    JOIN players p ON p.user_id = u.id
+    LEFT JOIN player_inventory pi ON pi.user_id = p.user_id AND pi.item_name = ?
+    ORDER BY u.username
+  `).all(itemName);
+}
+
+// Grant `quantity` of an item to every listed userId, atomically (all-or-
+// nothing — used by the admin panel's bulk "Give" modal so a mid-loop
+// failure can't leave some players granted and others not).
+export function giveItemToPlayers(userIds, itemName, quantity) {
+  const tx = db.transaction(() => {
+    for (const userId of userIds) giveInventoryItem(userId, itemName, quantity);
+  });
+  tx();
 }
 
 // Add quantity of an item, stacking onto an existing row if present.
@@ -1265,7 +1679,7 @@ export function sellItem(userId, itemName, qty, unitValue) {
     const gold = n * unitValue;
     db.prepare("UPDATE player_inventory SET quantity = quantity - ?, updated_at = ? WHERE user_id = ? AND item_name = ?")
       .run(n, Date.now(), userId, itemName);
-    db.prepare("UPDATE players SET gold = gold + ?, updated_at = ? WHERE user_id = ?")
+    db.prepare("UPDATE players SET c_gold = c_gold + ?, updated_at = ? WHERE user_id = ?")
       .run(gold, Date.now(), userId);
     return { ok: true, sold: n, gold };
   });
@@ -1277,7 +1691,7 @@ export function sellItem(userId, itemName, qty, unitValue) {
 // resolves the item + cost/currency from ITEMS; this just moves the money and
 // the item in one transaction so they can't drift apart on failure.
 export function purchaseItem(userId, itemName, cost, currency = "gold") {
-  const col = currency === "token" ? "horde_tokens" : "gold";
+  const col = currency === "token" ? "c_tokens" : "c_gold";
   const tx = db.transaction(() => {
     const player = stmtPlayerByUserId.get(userId);
     if (!player) return { ok: false, reason: "no_player" };
@@ -1390,10 +1804,13 @@ export function deleteUserCascade(userId) {
 // --- Editable player stats (whitelisted columns; floored at 0, some capped) ---
 // health is capped to the player's dynamic max_health via `maxCol`.
 export const EDITABLE_STATS = {
-  xp: {}, lifetime_xp: {}, level: {}, kills: {}, gold: {}, horde_tokens: {}, golden_shots: {},
+  xp: {}, lifetime_xp: {}, level: {}, kills: {}, c_gold: {}, c_tokens: {}, golden_shots: {},
   health: { maxCol: "max_health" }, max_health: {},
   shield: { maxCol: "max_shield" }, max_shield: {}, accuracy: { max: 100 },
+  mana: { maxCol: "mana_max" }, mana_max: {},
+  ap_level: {}, // innate "Base AP" (adds into armorApOf)
   hidden: { max: 1 }, forge_fired: { max: 1 }, beacon_fired: { max: 1 },
+  arcane_table: { max: 1 }, arcane_table_activated_at: {},
   handgun_ammo: {}, handgun_max_ammo: {}, handgun_clips: {}, handgun_max_clips: {}, handgun_condition: { max: 100 }, handgun_jammed: { max: 1 },
   rifle_ammo: {}, rifle_max_ammo: {}, rifle_clips: {}, rifle_max_clips: {}, rifle_condition: { max: 100 }, rifle_jammed: { max: 1 },
   shotgun_ammo: {}, shotgun_max_ammo: {}, shotgun_clips: {}, shotgun_max_clips: {}, shotgun_condition: { max: 100 }, shotgun_jammed: { max: 1 },

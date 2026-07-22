@@ -14,10 +14,11 @@ import {
   updateLastLogin, touchPlayerSeen,
   getGameState, setHuntEnabled, adjustHordeSize,
   purchaseItem, updatePlayerGold,
-  getInventory, giveInventoryItem, consumeInventoryItem,
+  getInventory, giveInventoryItem, consumeInventoryItem, getItemOwners, giveItemToPlayers,
   gunAmmoOf, updateGunAmmo, reloadGun, updateGunMaxAmmo, updateGunMaxClips,
   adjustGunCondition, getActivePlayers, damagePlayer,
-  applyLevelUp, resetPlayer, getPlayersByLocation, getPlayersNotAtLocation, getLocationCount, setForgeFired, setBeaconFired, updatePlayerArmor,
+  applyLevelUp, resetPlayer, getPlayersByLocation, getPlayersNotAtLocation, getLocationCount, setForgeFired, setBeaconFired,
+  equipArmorPiece, adjustArmorCondition, setArcaneTableActive,
   adjustRepairKits, setSentryUntil,
   setRaidEnabled, adjustBaseHealth, setBaseDestroyedAt, resetGameState,
   recordNukeVote, getNukeVoterIds, clearNukeVotes,
@@ -28,9 +29,11 @@ import {
   getAuthRecord, setUserSession, setUserLoggedOut, SESSION_LOGGED_OUT,
   EDITABLE_STATS, setPlayerStat, removeInventoryItem, consumeItems, sellItem,
   nextLevelOf, levelCost, forceLevel,
-  addShield, increaseMaxShield, healPlayer, addTokens,
+  addShield, increaseMaxShield, healPlayer, addTokens, addMana,
+  getPlayerMagic, knowsSpell, learnSpell,
   grantGoldenShots, useGoldenShot,
   ensureDbStamp, rotateDbStamp, hasProvenanceColumns, getLeaderboardRank,
+  checkQuestTriggers, recordQuestProgress, setActiveQuest,
 } from "./db.js";
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -43,7 +46,13 @@ import { styleText } from "node:util";
 import { game_config, file_config, zombie_config, ssl_config, app_version, account_config } from "./config.js";
 import https from "node:https";
 import http from "node:http";
-import { ITEMS, RECIPES, ITEM_TYPES, RANDOM_DROPS, SUPPLY_DROP_ROLL, SMELT_TYPES } from "./item_backbone.js";
+import { ITEMS, RECIPES, ITEM_TYPES, RANDOM_DROPS, BONUS_DROPS, SUPPLY_DROP_ROLL, SMELT_TYPES, ARMOR_PIECES } from "./item_backbone.js";
+import {
+  MAGIC_SPELLS, MAGIC_SPELL_CATEGORIES, validateMagicSpells,
+  SPELL_ARMOR_BUFFS, SPELL_ARMOR_BUFF_SECONDS, spellApOf,
+  MEDITATE_SECONDS, MEDITATE_XP,
+} from "./magic.js";
+import { QUESTS, QUEST_NAMES, QUEST_OBJECTIVE_TYPES } from "./quest_backbone.js";
 
 // Colorize text for a given stream only when that stream actually supports color.
 // util.styleText no-ops to plain text for non-TTYs, pipes/redirects, and when
@@ -142,7 +151,26 @@ function applyConfigOverride(pathStr, raw) {
   return `unknown config key '${pathStr}'`;
 }
 
+// ----- Dev-only flags -----
+// Cheats/conveniences for dev runs. Parsed like any other option (entries
+// carry `dev: true` below) but REFUSED without --dev — the post-parse check
+// exits with a FATAL pointing at `--dev -h`, which lists them.
+const DEV_FLAGS = {
+  fastTimers: false,    // -t: every action/craft/meditation timer runs at 3s
+  stealthAdmins: false, // -s: admins log in hidden; the tick can't see or hurt them
+  adminRegs: false,     // -a: every new registration is created as an admin
+  hordeRefill: false,   // -H: refill the horde to z_horde whenever it drops below
+  raidRefill: false,    // -r: refill the horde to z_raid whenever it drops below
+  zombieCap: 0,         // -z N: hard cap on tick spawns/call-zombie/refills (0 = off)
+};
+const devFlagsUsed = []; // which dev flags this invocation passed (for the no---dev FATAL)
+// -t: every busy timer (location actions, crafts, meditation) runs at 3s.
+const devTimerOf = (seconds) => (DEV_FLAGS.fastTimers ? 3 : seconds);
+
 // Declarative option table — add/remove/edit a flag by editing this array.
+// `dev: true` rows are the dev-only flags (grouped separately in -h, refused
+// without --dev); `takesValue: true` rows get the next argv token (or the
+// part after '=') as apply()'s second argument.
 const CLI_OPTIONS = [
   { test: (a) => a === "--dev",                    apply: () => { game_config.dev = true; },        help: "--dev                  dev mode (log to file)" },
   { test: (a) => a === "--production",             apply: () => { game_config.production = true; }, help: "--production           production mode" },
@@ -152,16 +180,43 @@ const CLI_OPTIONS = [
   { test: (a) => a === "--stop",                   apply: () => stopDaemon(),                       help: "--stop                 stop a backgrounded server (via its PID file)" },
   { test: (a) => a === "--mock-db",                apply: () => { game_config.mockDb = true; },     help: "--mock-db              seed a starter dev DB (3 users, 1 admin) with random passwords" },
   { test: (a) => a === "--rotate-keys",            apply: () => { game_config.rotateKeys = true; }, help: "--rotate-keys          re-key the DB provenance stamp to the current secret+filename, then exit" },
-  { test: (a) => a === "-h" || a === "--help",     apply: () => { printHelp(); process.exit(0); },  help: "-h, --help             show this help and exit" },
+  { test: (a) => a === "-h" || a === "--help",     apply: () => { printHelp(); process.exit(0); },  help: "-h, --help             show this help and exit (with --dev: includes the dev flags)" },
+  // Dev-only flags (require --dev; `--dev -h` lists them):
+  { dev: true, test: (a) => a === "-t", help: "-t                     every action/craft/meditation timer runs at 3s",
+    apply: () => { DEV_FLAGS.fastTimers = true; devFlagsUsed.push("-t"); } },
+  { dev: true, test: (a) => a === "-s", help: "-s                     stealth admins: hidden on login, immune to zombie damage/detection",
+    apply: () => { DEV_FLAGS.stealthAdmins = true; devFlagsUsed.push("-s"); } },
+  { dev: true, test: (a) => a === "-d", help: "-d                     shorthand for --verbose --debug-level=INFO",
+    apply: () => { game_config.verbose = true; game_config.debugLevel = "INFO"; devFlagsUsed.push("-d"); } },
+  { dev: true, test: (a) => a === "-a", help: "-a                     every new registration is created as an admin",
+    apply: () => { DEV_FLAGS.adminRegs = true; devFlagsUsed.push("-a"); } },
+  { dev: true, test: (a) => a === "-H", help: "-H                     refill the horde to z_horde whenever it drops below (keeps a hunt rolling)",
+    apply: () => { DEV_FLAGS.hordeRefill = true; devFlagsUsed.push("-H"); } },
+  { dev: true, test: (a) => a === "-r", help: "-r                     refill the horde to z_raid whenever it drops below (keeps a raid rolling)",
+    apply: () => { DEV_FLAGS.raidRefill = true; devFlagsUsed.push("-r"); } },
+  { dev: true, takesValue: true, test: (a) => a === "-z" || a.startsWith("-z="),
+    help: "-z N                   hard zombie cap: tick spawns/call-zombie/refills never push the horde above N",
+    apply: (_a, v) => {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 1) { console.error(`ERROR: -z needs a positive whole number (got '${v ?? ""}')`); process.exit(1); }
+      DEV_FLAGS.zombieCap = n;
+      devFlagsUsed.push("-z");
+    } },
 ];
 
 function printHelp() {
   console.log(`zboe2 ${app_version}`);
   console.log("Usage: node server.js [options]\n\nOptions:");
-  for (const opt of CLI_OPTIONS) console.log("  " + opt.help);
+  for (const opt of CLI_OPTIONS.filter((o) => !o.dev)) console.log("  " + opt.help);
   console.log("  --set group.key=value  override a config value for this run (repeatable)");
   console.log("  --group.key=value      shorthand for --set (also accepts a bare --key=value)\n");
   console.log("Config groups: " + Object.keys(CONFIG_GROUPS).join(", "));
+  if (game_config.dev) {
+    console.log("\nDev-only flags (usable because --dev):");
+    for (const opt of CLI_OPTIONS.filter((o) => o.dev)) console.log("  " + opt.help);
+  } else {
+    console.log("\nDev-only flags exist — run 'node server.js --dev -h' to list them.");
+  }
 }
 
 const argv = process.argv.slice(2);
@@ -169,7 +224,13 @@ for (let i = 0; i < argv.length; i++) {
   const arg = argv[i];
 
   const known = CLI_OPTIONS.find((o) => o.test(arg));
-  if (known) { known.apply(arg); continue; }
+  if (known) {
+    const value = known.takesValue
+      ? (arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : argv[++i])
+      : undefined;
+    known.apply(arg, value);
+    continue;
+  }
 
   // --set key=value   (or  --set key value)
   if (arg === "--set") {
@@ -195,6 +256,16 @@ for (let i = 0; i < argv.length; i++) {
 
 if (game_config.dev && game_config.production) {
   console.error("ERROR: --dev and --production cannot be used together.");
+  process.exit(1);
+}
+
+// Dev flags are refused outright without --dev (same early-CLI exit style as
+// the check above — log() isn't initialized this early).
+if (devFlagsUsed.length && !game_config.dev) {
+  const flags = [...new Set(devFlagsUsed)].join(", ");
+  console.error(paint(["bold", "red"],
+    `FATAL: ${flags} ${devFlagsUsed.length === 1 ? "is a dev-only flag" : "are dev-only flags"} — add --dev to use ${devFlagsUsed.length === 1 ? "it" : "them"}. Run 'node server.js --dev -h' to see all dev flags.`,
+    process.stderr));
   process.exit(1);
 }
 
@@ -556,7 +627,11 @@ app.post("/register", (req, res) => {
     const info = insertUser(username, salt, hash, Date.now());
 	insertPlayer(info.lastInsertRowid, Date.now());
     log("FULL", `User ${username} registered successfully with id=${info.lastInsertRowid}`, game_config);
-
+    // Dev -a: every registration is an admin.
+    if (DEV_FLAGS.adminRegs) {
+      setUserAdmin(info.lastInsertRowid, true);
+      log("INFO", `[dev -a] ${username} registered as admin`, game_config);
+    }
   } catch (e) {
     // If a race condition happens (two requests same username), UNIQUE constraint will throw.
     log("ERROR", `Error inserting user ${username}: ${e.message}`, game_config);
@@ -638,6 +713,11 @@ app.post("/login", (req, res) => {
   updateLastLogin(rec.id);
   touchPlayerSeen(rec.id);
   increasePlayerCount(rec.id);
+  // Dev -s: admins come in hidden — the tick also skips them entirely.
+  if (DEV_FLAGS.stealthAdmins && rec.is_admin) {
+    updatePlayerHidden(rec.id, 1);
+    log("INFO", `[dev -s] ${username} logged in stealthed`, game_config);
+  }
   return res.redirect("/game");
 });
 
@@ -702,6 +782,58 @@ app.get("/api/ban-status", (req, res) => {
   return res.json({ ok: false });
 });
 
+// Human-readable label for one quest objective, for the Quest Info UI.
+function questObjectiveLabel(obj) {
+  switch (obj.type) {
+    case "learn_spell": return `Learn ${MAGIC_SPELLS[obj.spell]?.name ?? obj.spell}`;
+    case "acquire_item": return `Acquire ${obj.qty}× ${ITEMS[obj.item]?.name ?? obj.item}`;
+    case "action": {
+      const label = Object.values(LOCATION_ACTIONS).flat().find((a) => a.key === obj.action)?.label;
+      return label ?? obj.action;
+    }
+    case "recipe": {
+      const r = RECIPES.find((rr) => rr.key === obj.recipe);
+      return r ? `Craft ${r.label}` : obj.recipe;
+    }
+    case "use_item": return `Use ${ITEMS[obj.item]?.name ?? obj.item}`;
+    case "break_horde": return "Break a zombie horde";
+    case "clear_raid": return "Clear a zombie raid";
+    default: return obj.type;
+  }
+}
+
+// Shapes the player's quest_active/quest_started/quest_completed/
+// quest_objectives columns (db.js) into a UI-friendly payload for the game
+// page's Quest Info box + completed-quests modal.
+function questsPayloadFor(player) {
+  const started = player.quest_started ? player.quest_started.split(",").filter(Boolean) : [];
+  const completed = player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : [];
+  const activeKey = player.quest_active;
+  const progress = player.quest_objectives ? JSON.parse(player.quest_objectives) : {};
+
+  const active = activeKey !== "NONE" && QUESTS[activeKey] ? {
+    key: activeKey,
+    name: QUESTS[activeKey].name,
+    desc: QUESTS[activeKey].desc,
+    objectives: QUESTS[activeKey].objectives.map((obj, i) => ({
+      label: questObjectiveLabel(obj),
+      have: progress[i] ?? 0,
+      need: obj.qty,
+      done: (progress[i] ?? 0) >= obj.qty,
+    })),
+    reward: QUESTS[activeKey].reward,
+  } : null;
+
+  const started_other = started
+    .filter((k) => k !== activeKey && !completed.includes(k) && QUESTS[k])
+    .map((k) => ({ key: k, name: QUESTS[k].name, desc: QUESTS[k].desc }));
+
+  const completedList = completed.filter((k) => QUESTS[k])
+    .map((k) => ({ key: k, name: QUESTS[k].name, reward: QUESTS[k].reward }));
+
+  return { active, started: started_other, completed: completedList };
+}
+
 app.get("/api/game-state", requireAuth, (req, res) => {
   log("FULL", `API request for game state by user ${req.user}`, game_config);
   touchPlayerSeen(req.userId);
@@ -744,6 +876,7 @@ app.get("/api/game-state", requireAuth, (req, res) => {
       sentryActive: gameState.sentry_until > Date.now(),
     },
     nuke: baseDestroyed ? nukeVoteStatus() : null,
+    huntVote: huntVoteStatus(req.userId, actives),
     zombies,
     tickSeconds: zombie_config.z_tic,
     online,
@@ -761,14 +894,16 @@ app.get("/api/game-state", requireAuth, (req, res) => {
       maxHealth: player.max_health,
       shield: player.shield,
       maxShield: player.max_shield,
+      mana: player.mana,
+      maxMana: player.mana_max,
       ammo: gun.ammo,
       maxAmmo: gun.maxAmmo,
       clips: gun.clips,
       maxClips: gun.maxClips,
       acc: player.accuracy,
       cond: gun.condition,
-      gold: player.gold,
-      tokens: player.horde_tokens,
+      gold: player.c_gold,
+      tokens: player.c_tokens,
       goldenShots: player.golden_shots,
       equippedGun: player.golden_shots > 0 ? "Golden Gun" : equippedGunName(player),
       // Gun switcher: which of the guns are owned / currently equipped.
@@ -785,8 +920,10 @@ app.get("/api/game-state", requireAuth, (req, res) => {
       campfireUntil: campfireUntilOf(req.userId),
       forgeFired: Boolean(player.forge_fired),   // the Mountains forge (persistent)
       beaconFired: Boolean(player.beacon_fired), // live Bunker supply beacon
-      armor: equippedArmorOf(player),          // equipped armor name (null = none)
+      armor: Object.fromEntries(ARMOR_PIECES.map((slot) => [slot, player[`a_${slot}`] || null])), // per-slot equipped item name (null = empty)
       armorAp: armorApOf(player),
+      arcaneTableActive: arcaneTableActiveOf(player),
+      arcaneTableExpiresAt: player.arcane_table ? player.arcane_table_activated_at + ARCANE_TABLE_WINDOW_MS : 0,
       skills: SKILLS.map((s) => ({
         key: s,
         name: SKILL_NAMES[s],
@@ -805,8 +942,30 @@ app.get("/api/game-state", requireAuth, (req, res) => {
     },
     // This location's actions, annotated with lvlOk/toolOk for this player.
     actions: actionsFor(player, locKey),
+    quests: questsPayloadFor(player),
     events: recentEvents,
   });
+});
+
+// Switch which started-but-incomplete quest is the tracked/active one (see
+// setActiveQuest in db.js — objective progress is freshly re-seeded on
+// activation, not restored from an earlier stint as active).
+app.post("/api/quest/activate", requireAuth, (req, res) => {
+  const key = String(req.body.key || "");
+  const quest = QUESTS[key];
+  if (!quest) return res.status(404).json({ ok: false, message: "Unknown quest." });
+
+  const r = setActiveQuest(req.userId, key);
+  if (!r.ok) {
+    const message =
+      r.reason === "not_started" ? `You haven't started ${quest.name} yet.` :
+      r.reason === "already_completed" ? `You've already completed ${quest.name}.` :
+      "Couldn't switch quests.";
+    return res.status(409).json({ ok: false, message });
+  }
+  if (r.reason === "already_active") return res.json({ ok: true, message: `Already tracking ${quest.name}.` });
+  log("INFO", `${req.user} switched active quest to ${key}`, game_config);
+  return res.json({ ok: true, message: `Now tracking: ${quest.name}` });
 });
 
 const XP_PER_KILL = 10;
@@ -852,6 +1011,59 @@ function nukeVoteStatus() {
   return { active: activeIds.size, votes, needed };
 }
 
+// ----- Hunt vote -----
+// A player-triggered alternative to the admin's direct hunt toggle: any
+// online player can call a 30s Yes/No poll to flip hunt_enabled. One vote
+// globally at a time (the hunt is a single world toggle) — in-memory only,
+// same convention as ACTION_BUSY/CAMPFIRES/SPELL_ARMOR_BUFFS, so a restart
+// just drops whatever was in progress.
+let HUNT_VOTE = null; // { toggleTo, startedBy, expiresAt, ballots: Map<userId,'yes'|'no'>, timer }
+const HUNT_VOTE_SECONDS = 30;
+
+// Cancel any in-progress hunt vote (e.g. an admin overrode it directly via
+// /api/hunt/toggle) — clears the timer too, so the stale resolve is a no-op
+// (resolveHuntVote checks HUNT_VOTE === voteRef before acting).
+function cancelHuntVote() {
+  if (!HUNT_VOTE) return;
+  clearTimeout(HUNT_VOTE.timer);
+  HUNT_VOTE = null;
+}
+
+function resolveHuntVote(voteRef) {
+  if (HUNT_VOTE !== voteRef) return; // superseded/cancelled — ignore this stale timer
+  let yes = 0, no = 0;
+  for (const v of voteRef.ballots.values()) v === "yes" ? yes++ : no++;
+  // Passes with at least one Yes, and either no dissent or Yes outnumbers No.
+  const passed = yes >= 1 && (no === 0 || yes > no);
+  if (passed) {
+    setHuntEnabled(voteRef.toggleTo);
+    insertEvent("system", `The hunt vote passed (${yes}-${no}) — the hunt is now ${voteRef.toggleTo ? "enabled" : "disabled"}.`, "public", "global");
+    log("INFO", `Hunt vote passed ${yes}-${no} -> hunt_enabled=${voteRef.toggleTo}`, game_config);
+  } else {
+    insertEvent("system", "The vote was majority no.", "public", "global");
+    log("INFO", `Hunt vote failed ${yes}-${no}`, game_config);
+  }
+  HUNT_VOTE = null;
+}
+
+// The hunt-vote status for GET /api/game-state — reuses the caller's already
+// -queried active-player list (no extra DB round trip).
+function huntVoteStatus(userId, actives) {
+  if (!HUNT_VOTE) return null;
+  let yes = 0, no = 0;
+  for (const v of HUNT_VOTE.ballots.values()) v === "yes" ? yes++ : no++;
+  return {
+    active: true,
+    toggleTo: HUNT_VOTE.toggleTo,
+    secondsLeft: Math.max(0, Math.ceil((HUNT_VOTE.expiresAt - Date.now()) / 1000)),
+    yes, no,
+    myVote: HUNT_VOTE.ballots.get(userId) ?? null,
+    // Only meaningful to an admin viewer (drives the client's confirm-before-
+    // voting nudge when there are enough non-admins online to decide alone).
+    onlineNonAdminCount: actives.filter((p) => !isUserAdmin(p.user_id)).length,
+  };
+}
+
 // Pick up to n random distinct elements from arr.
 function sampleUpTo(arr, n) {
   if (arr.length <= n) return arr.slice();
@@ -882,12 +1094,26 @@ const BASE_AP_MAX_BLOCK = 0.9;
 const ARMORS = Object.fromEntries(
   Object.entries(ITEMS).filter(([, item]) => item.type === "armor")
 );
-function equippedArmorOf(player) {
-  return ARMORS[player.equipped_armor] ? player.equipped_armor : null;
+// True if itemName is equipped in ANY of the 6 paperdoll slots.
+function isArmorEquippedAnywhere(player, itemName) {
+  return ARMOR_PIECES.some((slot) => player[`a_${slot}`] === itemName);
 }
+// Sums AP across all 6 slots. A slot contributes 0 if its item is gone
+// (e.g. admin force-removed it) or BROKEN (condition 0) — condition gates AP
+// fully off rather than scaling it, matching the binary BROKEN convention
+// already shown in the Armor tab UI.
 function armorApOf(player) {
-  const name = equippedArmorOf(player);
-  return name ? ARMORS[name].ap : 0;
+  const owned = new Map(getInventory(player.user_id).map((i) => [i.item_name, i]));
+  const gearAp = ARMOR_PIECES.reduce((sum, slot) => {
+    const name = player[`a_${slot}`];
+    if (!name || !ARMORS[name]) return sum;
+    const row = owned.get(name);
+    if (!row || row.quantity <= 0 || row.condition <= 0) return sum;
+    return sum + ARMORS[name].ap;
+  }, 0);
+  // Gear + temporary spell buff + innate "Base AP" (players.ap_level, bought
+  // via the AP Base upgrade) — one total for the hit calc and Base AP pooling.
+  return gearAp + spellApOf(player.user_id) + (player.ap_level || 0);
 }
 // Damage deflected by an AP rating (never more than the damage itself).
 function apBlocked(damage, ap) {
@@ -947,9 +1173,13 @@ function campfireUntilOf(userId) {
   return t > Date.now() ? t : 0;
 }
 
-// Meditation: a safe-zone timed action granting magic XP (no item, no roll).
-const MEDITATE_SECONDS = 20;
-const MEDITATE_XP = 8;
+// The Town Arcane Table auto-expires ARCANE_TABLE_WINDOW_MS after activation
+// (unlike forge/beacon's persistent on/off toggle) — "active" means both the
+// flag is set AND the window hasn't elapsed.
+const ARCANE_TABLE_WINDOW_MS = 5 * 60 * 1000;
+function arcaneTableActiveOf(player) {
+  return Boolean(player.arcane_table) && (Date.now() - player.arcane_table_activated_at) < ARCANE_TABLE_WINDOW_MS;
+}
 
 // Can this player use a crafting station right now? Gates both RECIPES and
 // LOCATION_ACTIONS that carry a `station`. The forge is the player's own, up
@@ -960,12 +1190,14 @@ function stationOk(player, locKey, station) {
   if (station === "campfire") return campfireUntilOf(player.user_id) > 0;
   if (station === "forge") return locKey === "mountains" && Boolean(player.forge_fired);
   if (station === "beacon") return locKey === "bunker" && Boolean(player.beacon_fired);
+  if (station === "arcane_table") return locKey === "town" && arcaneTableActiveOf(player);
   return false;
 }
 const STATION_MESSAGES = {
   campfire: "You need a campfire burning — build one first.",
   forge: "The forge is cold — get it going at the Mountains first.",
   beacon: "The beacon is not activated — activate it at the Bunker first.",
+  arcane_table: "The Arcane Table isn't active — activate it in Town first.",
 };
 
 // Antenna/amplifier are passive base_items: OWNING them boosts the supply
@@ -996,10 +1228,13 @@ function actionsFor(player, locKey) {
   const ownedQty = Object.fromEntries(getInventory(player.user_id).map((i) => [i.item_name, i.quantity]));
   const has = (name) => (ownedQty[name] ?? 0) > 0;
   return defs.map((a) => {
+    // Pure UI button rows (Magic Table) — always visible at their location,
+    // no gating; the page opens the matching modal instead of posting a Do.
+    if (a.button) return { key: a.key, button: true, label: a.label };
     if (a.recipe) {
       const r = RECIPES.find((x) => x.key === a.recipe); // existence boot-validated
       return {
-        key: r.key, recipe: r.key, label: r.label, timer: r.timer,
+        key: r.key, recipe: r.key, label: r.label, timer: devTimerOf(r.timer),
         skill: r.skill, skillName: SKILL_NAMES[r.skill], skillLevel: r.level,
         successRate: 100, grants: fmtOutput(r), xp: r.xp,
         requires: r.requires ?? null, uses: null, inputs: r.inputs,
@@ -1014,13 +1249,14 @@ function actionsFor(player, locKey) {
     return {
       key: a.key,
       label: a.label,
-      timer: a.timer,
+      timer: devTimerOf(a.timer),
       skill: a.skill,
       skillName: SKILL_NAMES[a.skill],
       skillLevel: a.skillLevel,
       // Beacon activation shows the antenna/amplifier-boosted odds.
       successRate: a.activates === "beacon" ? Math.min(100, a.successRate + beaconBoost(has)) : a.successRate,
       grants: a.grants ?? null,
+      trainOnly: Boolean(a.trainOnly),
       xp: a.xp,
       requires: a.requires ?? null,
       uses: a.uses ?? null,
@@ -1029,7 +1265,9 @@ function actionsFor(player, locKey) {
       activates: a.activates ?? null,
       lvlOk: player[`s_${a.skill}_lvl`] >= a.skillLevel,
       toolOk: !a.requires || has(a.requires),
-      useOk: !a.uses || has(a.uses),
+      // uses accepts a single item name (qty 1, implicit) or a { item: qty }
+      // map (multi-item fuel, e.g. activate_arcane_table's firewood + mana shard).
+      useOk: !a.uses ? true : typeof a.uses === "string" ? has(a.uses) : Object.entries(a.uses).every(([item, qty]) => (ownedQty[item] ?? 0) >= qty),
       inputsOk: true,
       stationOk: stationOk(player, locKey, a.station),
     };
@@ -1038,9 +1276,11 @@ function actionsFor(player, locKey) {
   // locked ones (skill/tool/materials/station, or an already-lit station)
   // stay hidden until unlocked. The do-handler still enforces every gate.
   .filter((x) =>
-    x.lvlOk && x.toolOk && x.useOk && x.inputsOk && x.stationOk &&
-    !(x.activates === "forge" && player.forge_fired) &&
-    !(x.activates === "beacon" && player.beacon_fired)
+    x.button ||
+    (x.lvlOk && x.toolOk && x.useOk && x.inputsOk && x.stationOk &&
+      !(x.activates === "forge" && player.forge_fired) &&
+      !(x.activates === "beacon" && player.beacon_fired) &&
+      !(x.activates === "arcane_table" && arcaneTableActiveOf(player)))
   );
 }
 
@@ -1108,6 +1348,11 @@ function censorText(text) {
 // 'stat'/'instant' apply immediately; 'consumable'/'gun' drop into inventory.
 const STATIC_UPGRADES = [
   { key: "extended_mag", label: "Extended Magazine", desc: "+2 max ammo (equipped gun)",  cost: 150, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxAmmo(uid, gun, 2) },
+  // Mana-priced + material inputs + Defense-gated, and repeatable (no owned
+  // flag): each buy permanently raises players.ap_level (see armorApOf).
+  { key: "ap_base", label: "AP Base", desc: "+10 Base AP (permanent, stacks)", cost: 25, currency: "mana", type: "instant", category: "upgrade",
+    inputs: { "firewood": 10, "copper ore": 5, "glowcap": 3 }, defense: 2,
+    apply: (uid) => setPlayerStat(uid, "ap_level", (getPlayerByUserId(uid).ap_level || 0) + 10) },
   { key: "clip_holster", label: "Clip Holster",      desc: "+1 max clips (equipped gun)", cost: 120, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxClips(uid, gun, 1) },
   { key: "laser_sight",  label: "Accuracy Potion",   desc: "+5% accuracy",                cost: 200, type: "stat", category: "upgrade", apply: (uid) => updatePlayerAccuracy(uid, 5) },
   { key: "spare_clip",   label: "Spare Clip",        desc: "+1 clip (equipped gun)",      cost: 5,   type: "stat", category: "item", apply: (uid, gun) => updateGunAmmo(uid, gun, 0, 1) },
@@ -1133,6 +1378,7 @@ const STATIC_UPGRADES = [
 const EFFECT_VERBS = {
   heal:         (uid, n) => { healPlayer(uid, n);            return `+${n} health`; },
   shield:       (uid, n) => { addShield(uid, n);             return `+${n} shield`; },
+  mana:         (uid, n) => { addMana(uid, n);                return `+${n} mana`; },
   maxShield:    (uid, n) => { increaseMaxShield(uid, n);     return `+${n} max shield`; },
   gunCondition: (uid, n) => { adjustGunCondition(uid, equippedType(getPlayerByUserId(uid)), n); return `+${n} equipped gun condition`; },
   gold:         (uid, n) => { updatePlayerGold(uid, n);      return `+${n} gold`; },
@@ -1164,16 +1410,27 @@ function applyItemEffects(userId, use) {
   const bad = [];
   for (const [key, item] of Object.entries(ITEMS)) {
     if (!ITEM_TYPES.includes(item.type)) bad.push(`ITEMS["${key}"] has invalid type "${item.type}"`);
+    if (!item.section) bad.push(`ITEMS["${key}"] has no section (used by the admin panel's Item Registry tabs)`);
     for (const verb of Object.keys(item.use || {}))
       if (!EFFECT_VERBS[verb]) bad.push(`ITEMS["${key}"] uses unknown effect verb "${verb}"`);
     if (item.type === "gun" && !item.gunType) bad.push(`ITEMS["${key}"] is a gun with no gunType`);
     if (item.type === "armor" && !(Number.isFinite(item.ap) && item.ap >= 1 && item.ap <= 500))
       bad.push(`ITEMS["${key}"] is an armor with no valid ap (1-500)`);
     if (item.ap !== undefined && item.type !== "armor") bad.push(`ITEMS["${key}"] has ap but isn't an armor`);
+    if (item.type === "armor" && !(Number.isInteger(item.defense) && item.defense >= 1))
+      bad.push(`ITEMS["${key}"] is an armor with no valid defense level (int >= 1)`);
+    if (item.type === "armor" && !ARMOR_PIECES.includes(item.piece))
+      bad.push(`ITEMS["${key}"] is an armor with invalid/missing piece "${item.piece}" (${ARMOR_PIECES.join("/")})`);
   }
   const check = (name, where) => { if (name && !ITEMS[name]) bad.push(`${where} references unknown item "${name}"`); };
   for (const [loc, actions] of Object.entries(LOCATION_ACTIONS))
     for (const a of actions) {
+      if (a.button) {
+        // A pure UI button row (e.g. the Magic Table) — nothing to cross-check
+        // against the registry beyond its own shape.
+        if (!a.key || !a.label) bad.push(`LOCATION_ACTIONS.${loc} has a button row missing key/label`);
+        continue;
+      }
       if (a.recipe) {
         // A recipe pointer: everything else comes from the (separately
         // validated) recipe, so only the reference itself can be wrong.
@@ -1184,13 +1441,26 @@ function applyItemEffects(userId, use) {
       if (!SKILLS.includes(a.skill)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} trains unknown skill "${a.skill}"`);
       check(a.grants, `LOCATION_ACTIONS.${loc}.${a.key}.grants`);
       check(a.requires, `LOCATION_ACTIONS.${loc}.${a.key}.requires`);
-      if (a.uses !== undefined && typeof a.uses !== "string") bad.push(`LOCATION_ACTIONS.${loc}.${a.key}.uses must be a single item name — use a { recipe } pointer for multi-input crafts`);
-      else check(a.uses, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
-      if (a.station && !["campfire", "forge", "beacon"].includes(a.station)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} has unknown station "${a.station}"`);
-      if (a.activates && !["forge", "beacon"].includes(a.activates)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} activates unknown station "${a.activates}"`);
-      if (!a.grants && !a.activates) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} neither grants nor activates anything`);
+      // uses: a single item name (qty 1, implicit), or a { item: qty } map
+      // (multi-item fuel consumed atomically up front, committed even on a
+      // failed roll) — extended from the single-item-only form to support
+      // activate_arcane_table's firewood + mana shard cost.
+      if (a.uses !== undefined) {
+        if (typeof a.uses === "string") check(a.uses, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
+        else if (a.uses && typeof a.uses === "object" && !Array.isArray(a.uses)) {
+          for (const item of Object.keys(a.uses)) check(item, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
+        } else bad.push(`LOCATION_ACTIONS.${loc}.${a.key}.uses must be a single item name or a { item: qty } map`);
+      }
+      if (a.station && !["campfire", "forge", "beacon", "arcane_table"].includes(a.station)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} has unknown station "${a.station}"`);
+      if (a.activates && !["forge", "beacon", "arcane_table"].includes(a.activates)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} activates unknown station "${a.activates}"`);
+      // trainOnly rows award only skill XP — no grant/activate required (but xp is).
+      if (a.trainOnly && !(Number.isFinite(a.xp) && a.xp > 0)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} is trainOnly with no xp`);
+      if (!a.grants && !a.activates && !a.trainOnly) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} neither grants nor activates anything`);
     }
-  const FORGE_SECTIONS = ["Ingredients", "Tools", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
+  const FORGE_SECTIONS = ["Ingredients", "Guns", "Tools", "Bronze", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
+  // Admin-panel Recipes tabs (see RECIPE_CATEGORIES/RECIPE_METAL_TYPES below).
+  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc"];
+  const RECIPE_METAL_TYPES = ["armor", "crafting", "tools"];
   for (const r of RECIPES) {
     // output: a single item name, or an { item: qty } bundle.
     if (typeof r.output === "string") check(r.output, `RECIPES.${r.key}.output`);
@@ -1198,19 +1468,123 @@ function applyItemEffects(userId, use) {
     check(r.requires, `RECIPES.${r.key}.requires`);
     for (const input of Object.keys(r.inputs || {})) check(input, `RECIPES.${r.key}.inputs`);
     if (!SKILLS.includes(r.skill)) bad.push(`RECIPES.${r.key} trains unknown skill "${r.skill}"`);
-    if (r.station && !["campfire", "forge", "beacon"].includes(r.station)) bad.push(`RECIPES.${r.key} has unknown station "${r.station}"`);
+    if (r.station && !["campfire", "forge", "beacon", "arcane_table"].includes(r.station)) bad.push(`RECIPES.${r.key} has unknown station "${r.station}"`);
     if (r.station === "forge" && !FORGE_SECTIONS.includes(r.section)) bad.push(`RECIPES.${r.key} is a forge recipe with no valid section (${FORGE_SECTIONS.join("/")})`);
     if (r.roll && r.roll !== "supply") bad.push(`RECIPES.${r.key} has unknown roll table "${r.roll}"`);
+    if (!RECIPE_CATEGORIES.includes(r.category)) bad.push(`RECIPES.${r.key} has unknown category "${r.category}" (${RECIPE_CATEGORIES.join("/")})`);
+    if (r.category === "metal") {
+      if (!SMELT_TYPES.includes(r.metal)) bad.push(`RECIPES.${r.key} has category "metal" but invalid metal "${r.metal}" (${SMELT_TYPES.join("/")})`);
+      if (!RECIPE_METAL_TYPES.includes(r.metalType)) bad.push(`RECIPES.${r.key} has category "metal" but invalid metalType "${r.metalType}" (${RECIPE_METAL_TYPES.join("/")})`);
+    } else if (r.metal || r.metalType) {
+      bad.push(`RECIPES.${r.key} has metal/metalType but category isn't "metal"`);
+    }
   }
   // The supply-drop table references existing registry items only.
   for (const d of SUPPLY_DROP_ROLL) check(d.key, "SUPPLY_DROP_ROLL");
-  for (const u of STATIC_UPGRADES) check(u.item, `STATIC_UPGRADES.${u.key}.item`);
+  for (const u of STATIC_UPGRADES) {
+    check(u.item, `STATIC_UPGRADES.${u.key}.item`);
+    for (const input of Object.keys(u.inputs || {})) check(input, `STATIC_UPGRADES.${u.key}.inputs`);
+  }
   if (bad.length) {
     // Printed ungated (like the sessionSecret halt) so it's visible even
     // without --verbose, then FATAL-logged (which exits).
     console.error(paint(["bold", "red"], `FATAL: item registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
     log("FATAL", `Item registry validation failed: ${bad.join("; ")}`, game_config);
   }
+}
+
+// ----- Magic spell registry sanity (boot-time) -----
+// magic.js is data plus its own helpers (see "Magic Backbone" in that file)
+// — a typo here dies at boot, not mid-cast.
+{
+  const bad = validateMagicSpells(LOCATION_NAMES, ITEMS);
+  if (bad.length) {
+    console.error(paint(["bold", "red"], `FATAL: magic spell registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
+    log("FATAL", `Magic spell registry validation failed: ${bad.join("; ")}`, game_config);
+  }
+}
+
+// ----- Quest registry sanity (boot-time) -----
+// quest_backbone.js is data-only, no imports of its own — every reference it
+// makes into the real registries (items/actions/recipes/spells/locations/
+// other quests) is checked here, same "typos die at boot" convention as the
+// item/magic blocks above.
+{
+  const bad = [];
+  const allActionKeys = new Set(Object.values(LOCATION_ACTIONS).flatMap((rows) => rows.map((r) => r.key).filter(Boolean)));
+  const recipeKeys = new Set(RECIPES.map((r) => r.key));
+  for (const [key, quest] of Object.entries(QUESTS)) {
+    const s = quest.starter;
+    if (!s) bad.push(`QUESTS["${key}"] has no starter trigger`);
+    else if (s.starter !== true && !s.enter_location && !s.quest && !(s.type === "action" && s.action)) {
+      bad.push(`QUESTS["${key}"].starter is an unrecognized shape: ${JSON.stringify(s)}`);
+    } else {
+      if (s.enter_location && !LOCATION_NAMES[s.enter_location]) bad.push(`QUESTS["${key}"].starter references unknown location "${s.enter_location}"`);
+      if (s.type === "action" && !allActionKeys.has(s.action)) bad.push(`QUESTS["${key}"].starter references unknown action "${s.action}"`);
+      if (s.quest && !QUESTS[s.quest]) bad.push(`QUESTS["${key}"].starter references unknown quest "${s.quest}"`);
+    }
+    if (!Array.isArray(quest.objectives) || !quest.objectives.length) bad.push(`QUESTS["${key}"] has no objectives`);
+    for (const [i, obj] of (quest.objectives || []).entries()) {
+      const where = `QUESTS["${key}"].objectives[${i}]`;
+      if (!QUEST_OBJECTIVE_TYPES.includes(obj.type)) { bad.push(`${where} has unknown type "${obj.type}"`); continue; }
+      if (!(Number.isFinite(obj.qty) && obj.qty > 0)) bad.push(`${where} (${obj.type}) has no valid qty`);
+      if (obj.type === "acquire_item" || obj.type === "use_item") { if (!ITEMS[obj.item]) bad.push(`${where} (${obj.type}) references unknown item "${obj.item}"`); }
+      else if (obj.type === "action") { if (!allActionKeys.has(obj.action)) bad.push(`${where} references unknown action "${obj.action}"`); }
+      else if (obj.type === "recipe") { if (!recipeKeys.has(obj.recipe)) bad.push(`${where} references unknown recipe "${obj.recipe}"`); }
+      else if (obj.type === "learn_spell") { if (!MAGIC_SPELLS[obj.spell]) bad.push(`${where} references unknown spell "${obj.spell}"`); }
+    }
+    if (!Number.isFinite(quest.reward?.gold) && !Number.isFinite(quest.reward?.xp)) bad.push(`QUESTS["${key}"] has no gold/xp reward`);
+  }
+  if (bad.length) {
+    console.error(paint(["bold", "red"], `FATAL: quest registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
+    log("FATAL", `Quest registry validation failed: ${bad.join("; ")}`, game_config);
+  }
+}
+
+// Zombie Bits kill drop: a chance per kill EVENT (not per zombie in a
+// multi-kill shot) to drop one random crafting material from the Zombie Bits
+// pool (item_backbone.js) — the raw material for the zombie-tier armor recipes.
+const ZOMBIE_BITS = Object.keys(ITEMS).filter((k) => ITEMS[k].section === "Zombie Bits");
+const ZOMBIE_BIT_DROP_CHANCE = 15; // % — tunable
+
+// Shared kill resolution — XP/gold award, horde decrement, the public "kill"
+// event, and the horde/raid-break token bonus. Used by both the shoot handler
+// (gun kills) and spell casting (attack-type spells). `sourceLabel` is the
+// human text for "dropped N zombies with <sourceLabel>" (e.g. "the Rifle —
+// the round went clean through", or a spell's name). Returns the bonus note
+// text ("" if no token was awarded) to fold into the caller's response message.
+function resolveKill(userId, username, killed, gameState, sourceLabel) {
+  const hordeBefore = gameState.horde_size;
+  const hordeAfter = hordeBefore - killed;
+  const wasRaiding = gameState.raid_enabled === "true";
+
+  updatePlayerStats(userId, XP_PER_KILL * killed, killed);
+  updatePlayerGold(userId, GOLD_PER_KILL * killed);
+  adjustHordeSize(-killed);
+
+  let bitNote = "";
+  if (Math.random() * 100 < ZOMBIE_BIT_DROP_CHANCE) {
+    const bit = ZOMBIE_BITS[Math.floor(Math.random() * ZOMBIE_BITS.length)];
+    giveInventoryItem(userId, bit, 1);
+    bitNote = ` …a ${ITEMS[bit].name} drops from the pile.`;
+  }
+  const noun = killed === 1 ? "a zombie" : `${killed} zombies`;
+  insertEvent("kill", `${username} dropped ${noun} with ${sourceLabel} (+${XP_PER_KILL * killed} XP, +${GOLD_PER_KILL * killed} gold)${bitNote}`, "public", "global");
+
+  let bonus = bitNote;
+  if (wasRaiding && hordeAfter <= 0) {
+    addTokens(userId, 3);
+    setRaidEnabled(false);
+    insertEvent("system", `${username} ended the raid! (+3 tokens)`, "public", "global");
+    bonus += " Raid ended — +3 tokens!";
+    recordQuestProgress(userId, "clear_raid", null, 1);
+  } else if (!wasRaiding && hordeBefore >= zombie_config.z_horde && hordeAfter < zombie_config.z_horde) {
+    addTokens(userId, 1);
+    insertEvent("system", `${username} broke the horde (+1 token)`, "public", "global");
+    bonus += " Horde broken — +1 token!";
+    recordQuestProgress(userId, "break_horde", null, 1);
+  }
+  return bonus;
 }
 
 app.post("/api/action/shoot", requireAuth, (req, res) => {
@@ -1278,30 +1652,9 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
     killed = Math.min(targets, gameState.horde_size);
   }
 
-  // ---- Kill resolution (shared) ----
-  const hordeBefore = gameState.horde_size;
-  const hordeAfter = hordeBefore - killed;
-  const wasRaiding = gameState.raid_enabled === "true";
-
-  updatePlayerStats(req.userId, XP_PER_KILL * killed, killed);
-  updatePlayerGold(req.userId, GOLD_PER_KILL * killed);
-  adjustHordeSize(-killed);
-  const noun = killed === 1 ? "a zombie" : `${killed} zombies`;
+  // ---- Kill resolution (shared with spell casting — see resolveKill) ----
   const pierceTag = pierced ? " — the round went clean through" : "";
-  insertEvent("kill", `${req.user} dropped ${noun} with the ${gunLabel}${pierceTag} (+${XP_PER_KILL * killed} XP, +${GOLD_PER_KILL * killed} gold)`, "public", "global");
-
-  // ---- Tokens for stopping a horde/raid (raid takes precedence) ----
-  let bonus = "";
-  if (wasRaiding && hordeAfter <= 0) {
-    addTokens(req.userId, 3);
-    setRaidEnabled(false);
-    insertEvent("system", `${req.user} ended the raid! (+3 tokens)`, "public", "global");
-    bonus = " Raid ended — +3 tokens!";
-  } else if (!wasRaiding && hordeBefore >= zombie_config.z_horde && hordeAfter < zombie_config.z_horde) {
-    addTokens(req.userId, 1);
-    insertEvent("system", `${req.user} broke the horde (+1 token)`, "public", "global");
-    bonus = " Horde broken — +1 token!";
-  }
+  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${gunLabel}${pierceTag}`);
 
   // ---- Golden Gun depletion ----
   let goldenNote = "";
@@ -1365,8 +1718,36 @@ app.post("/api/hunt/toggle", requireAuth, requireAdmin, (req, res) => {
   const gameState = getGameState();
   const enabled = gameState.hunt_enabled !== "true";
   setHuntEnabled(enabled);
+  cancelHuntVote(); // a direct admin override supersedes any in-progress vote
   log("INFO", `${req.user} toggled hunt_enabled -> ${enabled}`, game_config);
   return res.json({ ok: true, huntActive: enabled, message: enabled ? "Hunt enabled." : "Hunt disabled." });
+});
+
+// Start a 30s Yes/No poll to flip the hunt — the non-admin alternative to the
+// direct toggle above. Vote direction always mirrors that button's semantics
+// (flip whatever the current state is). One vote globally at a time.
+app.post("/api/hunt/vote/start", requireAuth, (req, res) => {
+  if (HUNT_VOTE) return res.status(409).json({ ok: false, message: "A hunt vote is already in progress." });
+  const toggleTo = getGameState().hunt_enabled !== "true";
+  const voteRef = { toggleTo, startedBy: req.user, expiresAt: Date.now() + HUNT_VOTE_SECONDS * 1000, ballots: new Map(), timer: null };
+  voteRef.timer = setTimeout(() => resolveHuntVote(voteRef), HUNT_VOTE_SECONDS * 1000);
+  HUNT_VOTE = voteRef;
+  log("INFO", `${req.user} started a hunt vote (target: ${toggleTo ? "enable" : "disable"})`, game_config);
+  return res.json({ ok: true, message: `Vote started — ${HUNT_VOTE_SECONDS}s to ${toggleTo ? "enable" : "disable"} the hunt.` });
+});
+
+// Cast (or change) a ballot on the in-progress hunt vote. Admin votes are
+// publicly announced — everyone else's are silent, tallied but not broadcast.
+app.post("/api/hunt/vote/cast", requireAuth, (req, res) => {
+  if (!HUNT_VOTE) return res.status(409).json({ ok: false, message: "No hunt vote in progress." });
+  const vote = String(req.body.vote || "");
+  if (vote !== "yes" && vote !== "no") return res.status(400).json({ ok: false, message: "Vote must be yes or no." });
+  HUNT_VOTE.ballots.set(req.userId, vote);
+  if (isUserAdmin(req.userId)) {
+    insertEvent("system", `[Admin] ${req.user} voted ${vote.toUpperCase()} on the hunt vote.`, "public", "global");
+  }
+  log("INFO", `${req.user} voted ${vote} on the hunt vote`, game_config);
+  return res.json({ ok: true, message: `Voted ${vote}.` });
 });
 
 // The shop catalogue (read-only for players; managed via the Admin CLI).
@@ -1414,12 +1795,22 @@ app.post("/api/shop/buy", requireAuth, (req, res) => {
 // Static upgrades catalogue (hardcoded stat items, consumables, and one-time
 // gun unlocks). 'gun' upgrades carry an `owned` flag so the UI can mark them.
 app.get("/api/shop/upgrades", requireAuth, (req, res) => {
-  const owned = new Set(getInventory(req.userId).filter((i) => i.quantity > 0).map((i) => i.item_name));
-  res.json(STATIC_UPGRADES.map(({ key, label, desc, cost, type, item, currency, category }) => ({
+  const player = ensurePlayer(req.userId);
+  const inv = getInventory(req.userId);
+  const ownedQty = Object.fromEntries(inv.map((i) => [i.item_name, i.quantity]));
+  const owned = new Set(inv.filter((i) => i.quantity > 0).map((i) => i.item_name));
+  res.json(STATIC_UPGRADES.map(({ key, label, desc, cost, type, item, currency, category, inputs, defense }) => ({
     key, label, desc, cost, type,
     currency: currency || "gold",
     category: category || "upgrade",
     owned: type === "gun" ? owned.has(item) : false,
+    inputs: inputs ?? null,
+    defense: defense ?? null,
+    // Server-side affordability for entries with costs the client can't see
+    // from state alone (material inputs / Defense gate). Currency itself is
+    // still the client's call (it knows gold/tokens/mana live).
+    affordable: (!inputs || Object.entries(inputs).every(([n, q]) => (ownedQty[n] ?? 0) >= q))
+      && (!defense || player.s_defense_lvl >= defense),
   })));
 });
 
@@ -1436,16 +1827,31 @@ app.post("/api/shop/upgrades/buy", requireAuth, (req, res) => {
     if (alreadyOwned) return res.status(409).json({ ok: false, message: `You already own the ${upgrade.item}.` });
   }
 
-  // Charge the right currency (gold or horde tokens).
-  if (currency === "token") {
-    if (player.horde_tokens < upgrade.cost)
-      return res.status(409).json({ ok: false, message: `Not enough tokens — need ${upgrade.cost}, you have ${player.horde_tokens}.` });
-    addTokens(req.userId, -upgrade.cost);
-  } else {
-    if (player.gold < upgrade.cost)
-      return res.status(409).json({ ok: false, message: `Not enough gold — need ${upgrade.cost}, you have ${player.gold}.` });
-    updatePlayerGold(req.userId, -upgrade.cost);
+  // Skill gate (AP Base needs Defense) — checked before anything is spent.
+  if (upgrade.defense && player.s_defense_lvl < upgrade.defense)
+    return res.status(409).json({ ok: false, message: `Requires Defense level ${upgrade.defense}.` });
+
+  // Currency check first (nothing spent yet), then material inputs (atomic
+  // via consumeItems), then the currency — so a missing ingredient never
+  // eats the mana/gold and vice versa.
+  if (currency === "token" && player.c_tokens < upgrade.cost)
+    return res.status(409).json({ ok: false, message: `Not enough tokens — need ${upgrade.cost}, you have ${player.c_tokens}.` });
+  if (currency === "mana" && player.mana < upgrade.cost)
+    return res.status(409).json({ ok: false, message: `Not enough mana — need ${upgrade.cost}, you have ${player.mana}.` });
+  if (currency === "gold" && player.c_gold < upgrade.cost)
+    return res.status(409).json({ ok: false, message: `Not enough gold — need ${upgrade.cost}, you have ${player.c_gold}.` });
+
+  if (upgrade.inputs) {
+    const consumed = consumeItems(req.userId, upgrade.inputs);
+    if (!consumed.ok) {
+      const needs = Object.entries(upgrade.inputs).map(([n, q]) => `${q}× ${n}`).join(", ");
+      return res.status(409).json({ ok: false, message: `You're missing materials — needs ${needs}.` });
+    }
   }
+
+  if (currency === "token") addTokens(req.userId, -upgrade.cost);
+  else if (currency === "mana") addMana(req.userId, -upgrade.cost);
+  else updatePlayerGold(req.userId, -upgrade.cost);
 
   if (upgrade.type === "consumable" || upgrade.type === "gun") giveInventoryItem(req.userId, upgrade.item, 1);
   else upgrade.apply(req.userId, equippedType(player)); // stat/instant upgrades
@@ -1490,19 +1896,25 @@ app.get("/api/inventory", requireAuth, (req, res) => {
     .filter(([name]) => (ownedQty[name] ?? 0) > 0)
     .map(([name, g]) => ({ name, equipped: equippedGunName(player) === name, ...gunAmmoOf(player, g.type) }));
   // Owned armors: AP from the registry, condition from the inventory row —
-  // feeds the Backpack's Armor tab (equip/sell live there).
+  // feeds the Backpack's Armor tab (equip/sell live there), grouped by piece.
   const armors = rawItems
     .filter((i) => ARMORS[i.item_name] && i.quantity > 0)
     .map((i) => ({
       name: i.item_name,
       label: ARMORS[i.item_name].name,
+      piece: ARMORS[i.item_name].piece,
       ap: ARMORS[i.item_name].ap,
       value: ARMORS[i.item_name].value ?? 0,
+      defense: ARMORS[i.item_name].defense,
+      defenseOk: player.s_defense_lvl >= ARMORS[i.item_name].defense,
       condition: i.condition,
       quantity: i.quantity,
-      equipped: equippedArmorOf(player) === i.item_name,
+      equipped: isArmorEquippedAnywhere(player, i.item_name),
     }));
-  res.json({ items, usable, guns, armors, equipped: equippedGunName(player), equippedArmor: equippedArmorOf(player) });
+  res.json({
+    items, usable, guns, armors, equipped: equippedGunName(player),
+    equippedArmor: Object.fromEntries(ARMOR_PIECES.map((slot) => [slot, player[`a_${slot}`] || null])),
+  });
 });
 
 // Read-only profile view for playercard.html's ?p=<user> mode — survival/
@@ -1513,8 +1925,8 @@ app.get("/api/inventory", requireAuth, (req, res) => {
 // your own inventory via the routes above).
 //
 // Publicly viewable — NOT behind requireAuth — but an anonymous request
-// (tryAuth returns null) gets a stripped-down payload: health/shield/level/
-// Kills/Accuracy/skills/leaderboard rank only. Gold, tokens, location,
+// (tryAuth returns null) gets a stripped-down payload: health/shield/mana/
+// level/Kills/Accuracy/skills/leaderboard rank only. Gold, tokens, location,
 // lifetime XP, gun oil count, and every inventory category are held back
 // entirely (not just hidden client-side) until the viewer is logged in —
 // playercard.html swaps its Currency/Location boxes and Main content box for
@@ -1534,6 +1946,7 @@ app.get("/api/playercard", (req, res) => {
     level: player.level,
     health: player.health, maxHealth: player.max_health,
     shield: player.shield, maxShield: player.max_shield,
+    mana: player.mana, maxMana: player.mana_max,
     kills: player.kills, accuracy: player.accuracy,
     rank, totalPlayers: total,
     skills: SKILLS.map((s) => ({
@@ -1553,8 +1966,9 @@ app.get("/api/playercard", (req, res) => {
     const armors = rawItems
       .filter((i) => ARMORS[i.item_name] && i.quantity > 0)
       .map((i) => ({
-        name: i.item_name, label: ARMORS[i.item_name].name, ap: ARMORS[i.item_name].ap,
-        condition: i.condition, quantity: i.quantity, equipped: equippedArmorOf(player) === i.item_name,
+        name: i.item_name, label: ARMORS[i.item_name].name, piece: ARMORS[i.item_name].piece, ap: ARMORS[i.item_name].ap,
+        defense: ARMORS[i.item_name].defense,
+        condition: i.condition, quantity: i.quantity, equipped: isArmorEquippedAnywhere(player, i.item_name),
       }));
     // One helper for the flat (non-gun/armor) categories — same registry
     // lookup shape /api/inventory's `items` array uses, filtered by a
@@ -1572,7 +1986,7 @@ app.get("/api/playercard", (req, res) => {
       xp: player.xp, nextLevelCost: levelCost(nextLevelOf(player.level)),
       lifetimeXp: player.lifetime_xp,
       gunOil: ownedQty["gun oil"] ?? 0,
-      gold: player.gold, tokens: player.horde_tokens,
+      gold: player.c_gold, tokens: player.c_tokens,
       location: locKey, locationName: LOCATION_NAMES[locKey], zombieZone: ZOMBIE_LOCATIONS.has(locKey),
       gunsOwned: GUN_NAMES.filter((g) => ownedQty[g] > 0),
       guns, armors,
@@ -1586,30 +2000,49 @@ app.get("/api/playercard", (req, res) => {
       smeltTypes: SMELT_TYPES, // header-row order for the Materials tab (playercard.html groups by name prefix)
       treasure: byType(["treasure"]),
       base: byType(["base_item"]),
+      // Learned spells (player_magic) — feeds the main panel's Spells tab.
+      spells: getPlayerMagic(uid)
+        .filter((k) => MAGIC_SPELLS[k])
+        .map((k) => {
+          const s = MAGIC_SPELLS[k];
+          return { key: k, name: s.name, type: s.type, level: s.level, cost: s.cost, desc: s.desc };
+        }),
     });
   }
 
   res.json(payload);
 });
 
-// Equip an armor you own (single slot — swaps out whatever is worn).
-// item: "" (or "none") strips armor entirely.
+// Equip an armor you own into one of the 6 paperdoll slots (head/torso/legs/
+// boots/hands/shield — the other 5 slots are untouched). item: "" (or "none")
+// clears that slot. The slot is explicit in the request (not inferred from
+// the item) and validated against the item's registry `piece`, so a
+// slot/item mismatch 400s rather than silently equipping into the wrong slot.
 app.post("/api/armor/equip", requireAuth, (req, res) => {
+  const slot = String(req.body.slot || "").trim();
+  if (!ARMOR_PIECES.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown armor slot." });
   const armorName = String(req.body.item || "").trim();
-  if (!armorName || armorName === "none") {
-    updatePlayerArmor(req.userId, "");
-    insertEvent("item", "You took off your armor", "private", req.userId);
-    log("INFO", `${req.user} unequipped armor`, game_config);
-    return res.json({ ok: true, message: "Armor removed." });
-  }
-  if (!ARMORS[armorName]) return res.status(400).json({ ok: false, message: "That isn't an armor." });
-  const owned = getInventory(req.userId).find((i) => i.item_name === armorName && i.quantity > 0);
-  if (!owned) return res.status(409).json({ ok: false, message: `You don't own a ${ARMORS[armorName].name}.` });
 
-  updatePlayerArmor(req.userId, armorName);
-  insertEvent("item", `You equipped the ${ARMORS[armorName].name} (AP ${ARMORS[armorName].ap})`, "private", req.userId);
-  log("INFO", `${req.user} equipped armor ${armorName}`, game_config);
-  return res.json({ ok: true, message: `Equipped ${ARMORS[armorName].name} — AP ${ARMORS[armorName].ap}.` });
+  if (!armorName || armorName === "none") {
+    equipArmorPiece(req.userId, slot, "");
+    insertEvent("item", `You took off your ${slot} armor`, "private", req.userId);
+    log("INFO", `${req.user} cleared their ${slot} armor slot`, game_config);
+    return res.json({ ok: true, message: `${slot} slot cleared.` });
+  }
+  const item = ARMORS[armorName];
+  if (!item) return res.status(400).json({ ok: false, message: "That isn't an armor." });
+  if (item.piece !== slot) return res.status(400).json({ ok: false, message: `${item.name} doesn't go in the ${slot} slot.` });
+  const owned = getInventory(req.userId).find((i) => i.item_name === armorName && i.quantity > 0);
+  if (!owned) return res.status(409).json({ ok: false, message: `You don't own a ${item.name}.` });
+  // Heavier tiers need the Defense skill to wear (registry `defense` level).
+  const wearer = ensurePlayer(req.userId);
+  if (wearer.s_defense_lvl < item.defense)
+    return res.status(409).json({ ok: false, message: `Requires Defense level ${item.defense} to wear the ${item.name}.` });
+
+  equipArmorPiece(req.userId, slot, armorName);
+  insertEvent("item", `You equipped the ${item.name} (AP ${item.ap}) in your ${slot} slot`, "private", req.userId);
+  log("INFO", `${req.user} equipped ${armorName} in their ${slot} slot`, game_config);
+  return res.json({ ok: true, message: `Equipped ${item.name} — AP ${item.ap}.` });
 });
 
 // Equip a gun you own (an inventory item whose name is a known gun).
@@ -1637,7 +2070,7 @@ app.post("/api/inventory/sell", requireAuth, (req, res) => {
 
   const rawQty = String(req.body.qty || "1").trim().toLowerCase();
   let qty = rawQty === "all" ? Infinity : Math.max(1, Math.round(Number(rawQty)) || 1);
-  if (item.type === "armor" && equippedArmorOf(ensurePlayer(req.userId)) === itemName) {
+  if (item.type === "armor" && isArmorEquippedAnywhere(ensurePlayer(req.userId), itemName)) {
     const ownedQty = getInventory(req.userId).find((i) => i.item_name === itemName)?.quantity ?? 0;
     const sellable = ownedQty - 1; // the worn set stays
     if (sellable <= 0)
@@ -1666,6 +2099,7 @@ app.post("/api/inventory/use", requireAuth, (req, res) => {
   const note = applyItemEffects(req.userId, item.use);
   insertEvent("item", `You used ${item.name} (${note})`, "private", req.userId);
   log("INFO", `${req.user} used ${itemName} (${newQty} left)`, game_config);
+  recordQuestProgress(req.userId, "use_item", itemName, 1);
   return res.json({ ok: true, message: `Used ${item.name} — ${note}.`, quantity: newQty });
 });
 
@@ -1688,6 +2122,8 @@ app.post("/api/hunt/call-zombie", requireAuth, (req, res) => {
     return res.status(409).json({ ok: false, message: "It's quiet here — nothing answers your call." });
   if (getGameState().hunt_enabled !== "true")
     return res.status(409).json({ ok: false, message: "The hunt isn't active." });
+  if (DEV_FLAGS.zombieCap && getGameState().horde_size >= DEV_FLAGS.zombieCap)
+    return res.status(409).json({ ok: false, message: `The horde is capped at ${DEV_FLAGS.zombieCap} (dev -z).` });
   adjustHordeSize(1);
   insertEvent("spawn", `${req.user} called in a zombie`, "public", "global");
   log("INFO", `${req.user} manually called a zombie`, game_config);
@@ -1705,7 +2141,7 @@ app.post("/api/level/up", requireAuth, (req, res) => {
 
   const r = applyLevelUp(req.userId, target, cost);
   const bonusNote = r.bonus ? " (+5 accuracy, +5 max health)" : "";
-  insertEvent("level", `You reached level ${target}!${bonusNote}`, "private", req.userId);
+  insertEvent("level", `${req.user} increased to level ${target}!${bonusNote}`, "public", "global");
   log("INFO", `${req.user} leveled to ${target} for ${cost} xp`, game_config);
   return res.json({ ok: true, message: `Level ${target}!`, level: r.level });
 });
@@ -1722,7 +2158,7 @@ app.post("/api/level/max", requireAuth, (req, res) => {
     gained++;
   }
   if (!gained) return res.status(409).json({ ok: false, message: "Not enough XP for the next level." });
-  insertEvent("level", `You spent XP and reached level ${player.level}!`, "private", req.userId);
+  insertEvent("level", `${req.user} increased to level ${player.level}! (+${gained} level${gained === 1 ? "" : "s"})`, "public", "global");
   return res.json({ ok: true, message: `Reached level ${player.level} (+${gained} levels).`, level: player.level });
 });
 
@@ -1746,8 +2182,13 @@ app.post("/api/travel", requireAuth, (req, res) => {
   updatePlayerLocation(req.userId, to);
   insertEvent("travel", `You traveled to ${LOCATION_NAMES[to]}`, "private", req.userId);
   log("INFO", `${req.user} traveled ${from} -> ${to}`, game_config);
+  checkQuestTriggers(req.userId, { type: "location", location: to });
   return res.json({ ok: true, message: `You arrive at ${LOCATION_NAMES[to]}.` });
 });
+
+// "Bonus Drop" (BONUS_DROPS in item_backbone.js) auto-applies to any action
+// using one of these skills — no per-action flag needed, unlike RANDOM_DROPS.
+const BONUS_DROP_SKILLS = new Set(["foraging", "woodcutting", "magic"]);
 
 // Run a location action. Guards mirror the flags the page shows (skill level,
 // required tool, one action at a time); the result rolls when the timer ends.
@@ -1756,6 +2197,8 @@ app.post("/api/action/do", requireAuth, (req, res) => {
   const locKey = locationOf(player);
   const action = (LOCATION_ACTIONS[locKey] || []).find((a) => (a.key ?? a.recipe) === String(req.body.key || ""));
   if (!action) return res.status(400).json({ ok: false, message: "You can't do that here." });
+  // Button rows are UI-only (they open a modal on the page) — nothing to "do".
+  if (action.button) return res.status(400).json({ ok: false, message: "That opens on the page — it isn't a timed action." });
   // Recipe-pointer rows are crafts wearing an action costume — hand the whole
   // request to the craft flow (its own busy/skill/station/tool/input guards).
   if (action.recipe) {
@@ -1777,11 +2220,15 @@ app.post("/api/action/do", requireAuth, (req, res) => {
     return res.status(409).json({ ok: false, message: "The forge is already going." });
   if (action.activates === "beacon" && player.beacon_fired)
     return res.status(409).json({ ok: false, message: "Your beacon is already live — call in the drop." });
+  if (action.activates === "arcane_table" && arcaneTableActiveOf(player))
+    return res.status(409).json({ ok: false, message: "The Arcane Table is already active." });
   // `uses` is fuel/feedstock: consumed up front, committed once started (like
-  // craft inputs) — a failed roll still burns it.
+  // craft inputs) — a failed roll still burns it. Accepts a single item name
+  // (qty 1) or a { item: qty } map (e.g. activate_arcane_table's firewood + mana shard).
   if (action.uses) {
-    const used = consumeItems(req.userId, { [action.uses]: 1 });
-    if (!used.ok) return res.status(409).json({ ok: false, message: `You need a ${action.uses} for that.` });
+    const usesMap = typeof action.uses === "string" ? { [action.uses]: 1 } : action.uses;
+    const used = consumeItems(req.userId, usesMap);
+    if (!used.ok) return res.status(409).json({ ok: false, message: `You need ${used.missing.join(", ")} for that.` });
   }
 
   // Beacon activation: antenna/amplifier owned at start time boost the roll.
@@ -1791,7 +2238,8 @@ app.post("/api/action/do", requireAuth, (req, res) => {
     successRate = Math.min(100, successRate + beaconBoost((n) => owned.has(n)));
   }
 
-  const until = Date.now() + action.timer * 1000;
+  const timerS = devTimerOf(action.timer); // dev -t: 3s
+  const until = Date.now() + timerS * 1000;
   ACTION_BUSY.set(req.userId, { until, key: action.key });
   const username = req.user;
   const userId = req.userId;
@@ -1799,7 +2247,7 @@ app.post("/api/action/do", requireAuth, (req, res) => {
     ACTION_BUSY.delete(userId);
     const success = Math.random() * 100 < successRate;
     if (success) {
-      // Either grants an item or activates a station — never both.
+      // Grants an item, activates a station, or (trainOnly) pays out XP alone.
       let gainNote;
       if (action.activates === "forge") {
         setForgeFired(userId, true);
@@ -1807,9 +2255,15 @@ app.post("/api/action/do", requireAuth, (req, res) => {
       } else if (action.activates === "beacon") {
         setBeaconFired(userId, true);
         gainNote = "the beacon is live";
+      } else if (action.activates === "arcane_table") {
+        setArcaneTableActive(userId, true);
+        gainNote = "the Arcane Table hums to life";
+      } else if (action.trainOnly) {
+        gainNote = "your training pays off";
       } else {
         giveInventoryItem(userId, action.grants, 1);
         gainNote = `+1 ${action.grants}`;
+        recordQuestProgress(userId, "acquire_item", action.grants, 1);
       }
       const total = addSkillXp(userId, action.skill, action.xp);
       // Foraging/woodcutting bonus: roll the RANDOM_DROPS treasure table
@@ -1823,17 +2277,30 @@ app.post("/api/action/do", requireAuth, (req, res) => {
           log("INFO", `${username} ${action.key} bonus drop: ${drop.key}`, game_config);
         }
       }
+      // "Bonus Drop": a separate, skill-based roll — no action flag needed,
+      // applies to any foraging/woodcutting/magic action, stacks independently
+      // of the RANDOM_DROPS roll above.
+      if (BONUS_DROP_SKILLS.has(action.skill)) {
+        const bonus = BONUS_DROPS.find((d) => Math.random() * 100 < d.chance);
+        if (bonus) {
+          giveInventoryItem(userId, bonus.key, 1);
+          dropNote += ` …and a ${bonus.name} turns up!`;
+          log("INFO", `${username} ${action.key} bonus drop: ${bonus.key}`, game_config);
+        }
+      }
       insertEvent("action", `${action.label}: success! ${gainNote}, +${action.xp} ${SKILL_NAMES[action.skill]} XP${dropNote}`, "private", userId);
       log("INFO", `${username} ${action.key} success (${gainNote}, ${action.skill} xp -> ${total})`, game_config);
+      checkQuestTriggers(userId, { type: "action", action: action.key });
+      recordQuestProgress(userId, "action", action.key, 1);
     } else {
       insertEvent("action", `${action.label}: no luck this time.`, "private", userId);
       log("INFO", `${username} ${action.key} failed the ${successRate}% roll`, game_config);
     }
-  }, action.timer * 1000);
+  }, timerS * 1000);
 
-  insertEvent("action", `You started: ${action.label} (${action.timer}s)`, "private", req.userId);
-  log("INFO", `${username} started action ${action.key} at ${locKey} (${action.timer}s)`, game_config);
-  return res.json({ ok: true, message: `${action.label} — ${action.timer}s…`, busyUntil: until });
+  insertEvent("action", `${action.text ?? `You started: ${action.label}`} (${timerS}s)`, "private", req.userId);
+  log("INFO", `${username} started action ${action.key} at ${locKey} (${timerS}s)`, game_config);
+  return res.json({ ok: true, message: `${action.label} — ${timerS}s…`, busyUntil: until });
 });
 
 // ----- Adventure Panel: campfire, cooking/crafting, meditation -----
@@ -1879,6 +2346,21 @@ app.post("/api/forge/toggle", requireAuth, (req, res) => {
   return res.json({ ok: true, message: "The forge goes cold." });
 });
 
+// The Town Arcane Table toggle — off-only, like the forge above, but the
+// Arcane Table also auto-expires (ARCANE_TABLE_WINDOW_MS after activation),
+// so this just lets a player end the window early.
+app.post("/api/arcane-table/toggle", requireAuth, (req, res) => {
+  const player = ensurePlayer(req.userId);
+  if (locationOf(player) !== "town")
+    return res.status(409).json({ ok: false, message: "The Arcane Table is in Town." });
+  if (!arcaneTableActiveOf(player))
+    return res.status(409).json({ ok: false, message: "The Arcane Table isn't active." });
+  setArcaneTableActive(req.userId, false);
+  insertEvent("action", "You deactivate the Arcane Table.", "private", req.userId);
+  log("INFO", `${req.user} deactivated the Arcane Table`, game_config);
+  return res.json({ ok: true, message: "The Arcane Table powers down." });
+});
+
 // The recipe list, annotated for THIS player: skill/station/inputs readiness.
 app.get("/api/craft", requireAuth, (req, res) => {
   const player = ensurePlayer(req.userId);
@@ -1888,7 +2370,7 @@ app.get("/api/craft", requireAuth, (req, res) => {
     key: r.key, label: r.label, skill: r.skill, skillName: SKILL_NAMES[r.skill],
     level: r.level, station: r.station ?? null, requires: r.requires ?? null,
     section: r.section ?? null,
-    inputs: r.inputs, output: fmtOutput(r), xp: r.xp, timer: r.timer,
+    inputs: r.inputs, output: fmtOutput(r), xp: r.xp, timer: devTimerOf(r.timer),
     lvlOk: player[`s_${r.skill}_lvl`] >= r.level,
     stationOk: stationOk(player, locKey, r.station),
     toolOk: !r.requires || (owned[r.requires] ?? 0) > 0,
@@ -1919,14 +2401,19 @@ function handleCraft(req, res) {
   if (!consumed.ok)
     return res.status(409).json({ ok: false, message: `Missing ingredients: ${consumed.missing.join(", ")}.` });
 
-  const until = Date.now() + recipe.timer * 1000;
+  const timerS = devTimerOf(recipe.timer); // dev -t: 3s
+  const until = Date.now() + timerS * 1000;
   ACTION_BUSY.set(req.userId, { until, key: recipe.key });
   const userId = req.userId, username = req.user;
   // output is a single item name or an { item: qty } bundle — normalize once.
   const outputs = typeof recipe.output === "string" ? { [recipe.output]: 1 } : recipe.output;
   setTimeout(() => {
     ACTION_BUSY.delete(userId);
-    for (const [item, qty] of Object.entries(outputs)) giveInventoryItem(userId, item, qty);
+    for (const [item, qty] of Object.entries(outputs)) {
+      giveInventoryItem(userId, item, qty);
+      recordQuestProgress(userId, "acquire_item", item, qty);
+    }
+    recordQuestProgress(userId, "recipe", recipe.key, 1);
     const outNote = Object.entries(outputs).map(([item, qty]) => `+${qty} ${item}`).join(", ");
     // roll: "supply" — the declarative random-roll picker: walk the
     // SUPPLY_DROP_ROLL table top to bottom, first chance to pass wins.
@@ -1945,11 +2432,11 @@ function handleCraft(req, res) {
     addSkillXp(userId, recipe.skill, recipe.xp);
     insertEvent("action", `${recipe.label}: done! ${outNote}, +${recipe.xp} ${SKILL_NAMES[recipe.skill]} XP${rollNote}`, "private", userId);
     log("INFO", `${username} crafted ${recipe.key} (${outNote})`, game_config);
-  }, recipe.timer * 1000);
+  }, timerS * 1000);
 
-  insertEvent("action", `You started: ${recipe.label} (${recipe.timer}s)`, "private", req.userId);
-  log("INFO", `${username} started craft ${recipe.key} (${recipe.timer}s)`, game_config);
-  return res.json({ ok: true, message: `${recipe.label} — ${recipe.timer}s…`, busyUntil: until });
+  insertEvent("action", `You started: ${recipe.label} (${timerS}s)`, "private", req.userId);
+  log("INFO", `${username} started craft ${recipe.key} (${timerS}s)`, game_config);
+  return res.json({ ok: true, message: `${recipe.label} — ${timerS}s…`, busyUntil: until });
 }
 app.post("/api/craft", requireAuth, handleCraft);
 
@@ -1961,7 +2448,8 @@ app.post("/api/meditate", requireAuth, (req, res) => {
   const busy = busyUntilOf(req.userId);
   if (busy) return res.status(409).json({ ok: false, message: `You're busy for another ${Math.ceil((busy - Date.now()) / 1000)}s.` });
 
-  const until = Date.now() + MEDITATE_SECONDS * 1000;
+  const timerS = devTimerOf(MEDITATE_SECONDS); // dev -t: 3s
+  const until = Date.now() + timerS * 1000;
   ACTION_BUSY.set(req.userId, { until, key: "meditate" });
   const userId = req.userId, username = req.user;
   setTimeout(() => {
@@ -1969,10 +2457,163 @@ app.post("/api/meditate", requireAuth, (req, res) => {
     addSkillXp(userId, "magic", MEDITATE_XP);
     insertEvent("action", `Meditation complete — +${MEDITATE_XP} Magic XP`, "private", userId);
     log("INFO", `${username} meditated (+${MEDITATE_XP} magic xp)`, game_config);
-  }, MEDITATE_SECONDS * 1000);
+  }, timerS * 1000);
 
-  insertEvent("action", `You sit and meditate on magical theory (${MEDITATE_SECONDS}s)`, "private", req.userId);
-  return res.json({ ok: true, message: `Meditating — ${MEDITATE_SECONDS}s…`, busyUntil: until });
+  insertEvent("action", `You sit and meditate on magical theory (${timerS}s)`, "private", req.userId);
+  return res.json({ ok: true, message: `Meditating — ${timerS}s…`, busyUntil: until });
+});
+
+// The spellbook (registry-driven, magic.js), annotated for THIS player:
+// `learned` (player_magic), `lvlOk` (Magic skill), and each learn-map
+// ingredient with need/have counts. Feeds three surfaces — the Spells cast
+// modal (learned only), the Magic Table learn menu (everything, tabbed by
+// `categories`), and the Player Info Spells tab (learned only). Casting goes
+// through POST /api/spell/cast; learning through POST /api/spell/learn.
+app.get("/api/spells", requireAuth, (req, res) => {
+  const player = ensurePlayer(req.userId);
+  const known = new Set(getPlayerMagic(req.userId));
+  const ownedQty = Object.fromEntries(getInventory(req.userId).map((i) => [i.item_name, i.quantity]));
+  res.json({
+    categories: MAGIC_SPELL_CATEGORIES,
+    spells: Object.entries(MAGIC_SPELLS).map(([key, s]) => ({
+      key, name: s.name, type: s.type, level: s.level, desc: s.desc, cost: s.cost, xp: s.xp, effect: s.effect,
+      starter: Boolean(s.starter),
+      learned: known.has(key),
+      lvlOk: player.s_magic_lvl >= s.level,
+      learn: s.learn
+        ? Object.entries(s.learn).map(([item, need]) => ({ item, need, have: ownedQty[item] ?? 0 }))
+        : null,
+    })),
+  });
+});
+
+// Learn a spell at the Magic Table (Town only): consumes the spell's `learn`
+// ingredients (magic.js), requires the Magic level the spell itself needs,
+// and records it in player_magic. Instant — no timer, shop-style.
+app.post("/api/spell/learn", requireAuth, (req, res) => {
+  const key = String(req.body.key || "");
+  const spell = MAGIC_SPELLS[key];
+  if (!spell) return res.status(404).json({ ok: false, message: "Unknown spell." });
+
+  const player = ensurePlayer(req.userId);
+  if (locationOf(player) !== "town")
+    return res.status(409).json({ ok: false, message: "The Magic Table is in Town." });
+  if (knowsSpell(req.userId, key))
+    return res.status(409).json({ ok: false, message: `You already know ${spell.name}.` });
+  if (!spell.learn)
+    return res.status(409).json({ ok: false, message: `${spell.name} can't be learned here.` });
+  if (player.s_magic_lvl < spell.level)
+    return res.status(409).json({ ok: false, message: `Requires Magic level ${spell.level}.` });
+
+  const consumed = consumeItems(req.userId, spell.learn);
+  if (!consumed.ok) {
+    const needs = Object.entries(spell.learn).map(([item, qty]) => `${qty}× ${item}`).join(", ");
+    return res.status(409).json({ ok: false, message: `You're missing ingredients — needs ${needs}.` });
+  }
+
+  learnSpell(req.userId, key);
+  insertEvent("action", `You learned ${spell.name} at the Magic Table!`, "private", req.userId);
+  log("INFO", `${req.user} learned spell ${key}`, game_config);
+  recordQuestProgress(req.userId, "learn_spell", key, 1);
+  return res.json({ ok: true, message: `${spell.name} learned!` });
+});
+
+// Cast a spell: spend mana + gain Magic XP, then resolve its effect. Only
+// spells the player has learned (player_magic) can be cast.
+// - attack: rolls effect.accuracy against the horde (same kill resolution as
+//   a gun shot — see resolveKill); a miss still costs the mana/XP, same as a
+//   missed shot still spends the round.
+// - armor: grants a temporary +effect.ap bonus (on top of equipped armor) for
+//   SPELL_ARMOR_BUFF_SECONDS, folded into armorApOf() for the tick's hit calc.
+// - heal: restores effect.hp health to the caster (clamped to max_health).
+// - aid: restores effect.hp_target health to the caster or, with an optional
+//   {target: username}, another player.
+// - travel: teleports straight to effect.loc, bypassing the travel graph
+//   (same power as the admin teleport).
+app.post("/api/spell/cast", requireAuth, (req, res) => {
+  const key = String(req.body.key || "");
+  const spell = MAGIC_SPELLS[key];
+  if (!spell) return res.status(404).json({ ok: false, message: "Unknown spell." });
+  if (!knowsSpell(req.userId, key))
+    return res.status(409).json({ ok: false, message: `You haven't learned ${spell.name} — visit the Magic Table in Town.` });
+
+  const player = ensurePlayer(req.userId);
+  if (player.s_magic_lvl < spell.level)
+    return res.status(409).json({ ok: false, message: `Requires Magic level ${spell.level}.` });
+  if (player.mana < spell.cost)
+    return res.status(409).json({ ok: false, message: `Not enough mana — ${spell.name} costs ${spell.cost}, you have ${player.mana}.` });
+
+  const gameState = getGameState();
+  if (spell.type === "attack") {
+    if (!ZOMBIE_LOCATIONS.has(locationOf(player)))
+      return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
+    if (gameState.hunt_enabled !== "true")
+      return res.status(409).json({ ok: false, message: "The hunt isn't active." });
+    if (gameState.horde_size <= 0)
+      return res.status(409).json({ ok: false, message: "No zombies to target." });
+  }
+
+  // aid: resolve the optional {target: username} BEFORE spending mana/XP —
+  // a typo'd name shouldn't cost a cast.
+  let aidTargetId = req.userId, aidTargetName = "";
+  if (spell.type === "aid") {
+    aidTargetName = String(req.body.target || "").trim();
+    aidTargetId = aidTargetName ? getUserIdByName(aidTargetName)?.id : req.userId;
+    if (!aidTargetId) return res.status(404).json({ ok: false, message: `No such player "${aidTargetName}".` });
+  }
+
+  addMana(req.userId, -spell.cost);
+  addSkillXp(req.userId, "magic", spell.xp);
+
+  if (spell.type === "attack") {
+    const roll = Math.random() * 100;
+    if (roll >= spell.effect.accuracy) {
+      insertEvent("shoot", `You cast ${spell.name} and it fizzled`, "private", req.userId);
+      log("INFO", `${req.user} cast ${key} -> miss (roll=${roll.toFixed(1)} chance=${spell.effect.accuracy})`, game_config);
+      return res.json({ ok: true, result: "miss", message: `${spell.name} fizzled!` });
+    }
+    const killed = Math.min(spell.effect.targets, gameState.horde_size);
+    const bonus = resolveKill(req.userId, req.user, killed, gameState, spell.name);
+    log("INFO", `${req.user} cast ${key} -> hit x${killed}`, game_config);
+    const base = killed > 1 ? `${spell.name} — ${killed} zombies down!` : `${spell.name} — zombie down!`;
+    return res.json({ ok: true, result: "hit", killed, message: base + bonus });
+  }
+
+  if (spell.type === "armor") {
+    SPELL_ARMOR_BUFFS.set(req.userId, { ap: spell.effect.ap, until: Date.now() + SPELL_ARMOR_BUFF_SECONDS * 1000 });
+    const mins = SPELL_ARMOR_BUFF_SECONDS / 60;
+    insertEvent("item", `You cast ${spell.name} — +${spell.effect.ap} AP for ${mins} minutes`, "private", req.userId);
+    log("INFO", `${req.user} cast ${key} -> +${spell.effect.ap} AP (${mins}m)`, game_config);
+    return res.json({ ok: true, message: `${spell.name} cast — +${spell.effect.ap} AP for ${mins} minutes.` });
+  }
+
+  if (spell.type === "heal") {
+    const health = healPlayer(req.userId, spell.effect.hp);
+    insertEvent("item", `You cast ${spell.name} — +${spell.effect.hp} health`, "private", req.userId);
+    log("INFO", `${req.user} cast ${key} -> heal ${spell.effect.hp} (now ${health})`, game_config);
+    return res.json({ ok: true, message: `${spell.name} cast — +${spell.effect.hp} health.` });
+  }
+
+  if (spell.type === "aid") {
+    const health = healPlayer(aidTargetId, spell.effect.hp_target);
+    if (aidTargetId === req.userId) {
+      insertEvent("item", `You cast ${spell.name} — +${spell.effect.hp_target} health`, "private", req.userId);
+    } else {
+      insertEvent("item", `You cast ${spell.name} on ${aidTargetName} — +${spell.effect.hp_target} health`, "private", req.userId);
+      insertEvent("item", `${req.user} cast ${spell.name} on you — +${spell.effect.hp_target} health`, "private", aidTargetId);
+    }
+    log("INFO", `${req.user} cast ${key} on ${aidTargetName || "self"} -> +${spell.effect.hp_target} hp (now ${health})`, game_config);
+    return res.json({ ok: true, message: `${spell.name} cast — +${spell.effect.hp_target} health${aidTargetId === req.userId ? "" : ` to ${aidTargetName}`}.` });
+  }
+
+  if (spell.type === "travel") {
+    updatePlayerLocation(req.userId, spell.effect.loc);
+    insertEvent("travel", `You cast ${spell.name} and warp to ${LOCATION_NAMES[spell.effect.loc]}`, "private", req.userId);
+    log("INFO", `${req.user} cast ${key} -> travel to ${spell.effect.loc}`, game_config);
+    return res.json({ ok: true, message: `${spell.name} — you arrive at ${LOCATION_NAMES[spell.effect.loc]}.` });
+  }
+
+  return res.status(500).json({ ok: false, message: "Spell has no effect handler." });
 });
 
 // Buy the next level of one skill with MAIN player XP (skills also
@@ -1984,7 +2625,7 @@ app.post("/api/skill/up", requireAuth, (req, res) => {
   const r = buySkillLevel(req.userId, skill);
   if (!r.ok) return res.status(409).json({ ok: false, message: `Not enough XP — the next ${SKILL_NAMES[skill]} level costs ${r.cost ?? "?"}.` });
 
-  insertEvent("level", `Your ${SKILL_NAMES[skill]} reached level ${r.level} (bought for ${r.cost} XP)`, "private", req.userId);
+  insertEvent("level", `${req.user}'s ${SKILL_NAMES[skill]} skill increased to level ${r.level}!`, "public", "global");
   log("INFO", `${req.user} bought ${skill} level ${r.level} for ${r.cost} xp`, game_config);
   return res.json({ ok: true, message: `${SKILL_NAMES[skill]} is now level ${r.level} (−${r.cost} XP).` });
 });
@@ -2020,6 +2661,7 @@ app.post("/api/base/toggle", requireAuth, (req, res) => {
     return res.status(409).json({ ok: false, message: "The base is destroyed — you can't go inside." });
 
   updatePlayerLocation(req.userId, goingInside ? "basecamp_inside" : "basecamp_outside");
+  if (goingInside) checkQuestTriggers(req.userId, { type: "location", location: "basecamp_inside" });
   return res.json({ ok: true, message: goingInside ? "You went inside the base." : "You went outside." });
 });
 
@@ -2220,16 +2862,30 @@ app.get("/api/admin/player", adminReq, (req, res) => {
   const inventory = getInventory(id);
   // `max: 1` marks the boolean (0/1) stats — the panel renders those as a toggle.
   const stats = Object.keys(EDITABLE_STATS).map((f) => ({ field: f, value: player[f], max: EDITABLE_STATS[f].max ?? null }));
+  const skills = SKILLS.map((s) => ({
+    key: s, name: SKILL_NAMES[s],
+    level: player[`s_${s}_lvl`], xp: player[`s_${s}_xp`],
+    nextCost: skillLevelCost(player[`s_${s}_lvl`] + 1),
+  }));
   const guns = GUN_NAMES.map((g) => ({
     name: g,
     owned: inventory.some((i) => i.item_name === g && i.quantity > 0),
     equipped: player.equipped_gun === g,
   }));
+  // One entry per paperdoll slot: the currently-equipped piece plus every
+  // owned item matching that slot — feeds the admin panel's Armor tab.
+  const armors = ARMOR_PIECES.map((slot) => ({
+    slot,
+    equipped: player[`a_${slot}`] || null,
+    owned: inventory
+      .filter((i) => ARMORS[i.item_name]?.piece === slot && i.quantity > 0)
+      .map((i) => ({ name: i.item_name, label: ARMORS[i.item_name].name, ap: ARMORS[i.item_name].ap, defense: ARMORS[i.item_name].defense, condition: i.condition })),
+  }));
   const locKey = locationOf(player);
   res.json({
     ok: true, username: String(req.query.username), level: player.level,
     nextLevelCost: levelCost(nextLevelOf(player.level)),
-    equippedGun: player.equipped_gun, stats, inventory, guns,
+    equippedGun: player.equipped_gun, stats, skills, inventory, guns, armors,
     location: locKey, locationName: LOCATION_NAMES[locKey],
     zombieZone: ZOMBIE_LOCATIONS.has(locKey),
     busyUntil: busyUntilOf(id), campfireUntil: campfireUntilOf(id),
@@ -2414,8 +3070,8 @@ app.post("/api/admin/fun", adminFunReq, (req, res) => {
 
   if (what === "boost") {
     if (player.level < 99) forceLevel(uid, 99 - player.level);
-    setPlayerStat(uid, "gold", 100000);
-    setPlayerStat(uid, "horde_tokens", 100);
+    setPlayerStat(uid, "c_gold", 100000);
+    setPlayerStat(uid, "c_tokens", 100);
     setPlayerStat(uid, "accuracy", 100);
     for (const g of GUN_NAMES) giveInventoryItem(uid, g, 1);
     insertEvent("item", "Player Boost: level 99, 100000 gold, 100 tokens, every gun, max accuracy.", "private", uid);
@@ -2527,14 +3183,42 @@ app.post("/api/admin/player/equip", adminReq, (req, res) => {
   return res.json({ ok: true, message: `Equipped ${gun}${owned ? "" : " (force-granted)"}.` });
 });
 
+// Same shape as the gun-equip route above, but per paperdoll slot. item: ""
+// clears the slot.
+app.post("/api/admin/player/armor/equip", adminReq, (req, res) => {
+  const id = uidOf(req.body.username);
+  if (id === null) return res.status(404).json({ ok: false, message: "No such user." });
+  const slot = String(req.body.slot || "");
+  if (!ARMOR_PIECES.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown armor slot." });
+  const armorName = String(req.body.item || "").trim();
+  if (!armorName || armorName === "none") {
+    equipArmorPiece(id, slot, "");
+    insertEvent("system", `[Admin] ${req.user} cleared ${req.body.username}'s ${slot} armor slot`, "public", "global");
+    log("INFO", `${req.user} cleared ${req.body.username}'s ${slot} armor slot`, game_config);
+    return res.json({ ok: true, message: `${slot} slot cleared.` });
+  }
+  const item = ARMORS[armorName];
+  if (!item) return res.status(400).json({ ok: false, message: "Unknown armor." });
+  if (item.piece !== slot) return res.status(400).json({ ok: false, message: `${item.name} doesn't fit the ${slot} slot.` });
+  const owned = getInventory(id).some((i) => i.item_name === armorName && i.quantity > 0);
+  const force = req.body.force === "true" || req.body.force === "1";
+  if (!owned && !force) return res.status(409).json({ ok: false, message: `${req.body.username} doesn't own a ${item.name} (use force).` });
+  if (!owned) giveInventoryItem(id, armorName, 1);
+  equipArmorPiece(id, slot, armorName);
+  insertEvent("system", `[Admin] ${req.user} equipped ${req.body.username} with the ${item.name} (${slot})`, "public", "global");
+  log("INFO", `${req.user} equipped ${armorName} on ${req.body.username}'s ${slot} slot${owned ? "" : " (forced)"}`, game_config);
+  return res.json({ ok: true, message: `Equipped ${item.name}${owned ? "" : " (force-granted)"}.` });
+});
+
 // --- Item catalogue (read-only) ---
 // Items live in item_backbone.js now, not an admin-editable table — the panel
 // shows the registry + recipes for reference; editing means editing the file.
 app.get("/api/admin/items", adminReq, (_req, res) => {
   res.json({
     types: ITEM_TYPES,
+    smeltTypes: SMELT_TYPES, // metal-tab order for the Recipes box + the Item Registry's crafting side-tabs
     items: Object.entries(ITEMS).map(([key, i]) => ({
-      key, name: i.name, type: i.type, desc: i.desc, value: i.value ?? null,
+      key, name: i.name, type: i.type, section: i.section, desc: i.desc, value: i.value ?? null,
       shop: i.shop ?? null, use: i.use ?? null, gunType: i.gunType ?? null,
     })),
     recipes: RECIPES,
@@ -2544,9 +3228,49 @@ app.get("/api/admin/items", adminReq, (_req, res) => {
 // Code-defined static upgrades (potions, boosters, gun unlocks, Golden Gun).
 // Read-only — these live in server.js, not the DB, so they're shown for reference.
 app.get("/api/admin/upgrades", adminReq, (req, res) => {
-  res.json(STATIC_UPGRADES.map(({ key, label, desc, cost, type, currency, category }) => ({
+  res.json(STATIC_UPGRADES.map(({ key, label, desc, cost, type, currency, category, item }) => ({
     key, label, desc, cost, type, currency: currency || "gold", category: category || "upgrade",
+    item: item ?? null, // concrete inventory item this upgrade grants, if any (admin Give button)
   })));
+});
+
+// Every player's ownership of one item, for the Items tab's bulk "Give"
+// modal — shows online status + current quantity per player before granting.
+app.get("/api/admin/items/owners", adminReq, (req, res) => {
+  const item = String(req.query.item || "").trim();
+  if (!item) return res.status(400).json({ ok: false, message: "Item name required." });
+  const cutoff = Date.now() - game_config.timeout * 1000;
+  const owners = getItemOwners(item).map((p) => ({
+    username: p.username, online: (p.last_seen ?? 0) >= cutoff, quantity: p.quantity,
+  }));
+  res.json({ ok: true, owners });
+});
+
+// Bulk grant: give `qty` of one item to every listed player at once — the
+// Items tab's Give button (used for Item Registry rows, recipe outputs, and
+// static-upgrade items) versus the Player Edit view's one-at-a-time dropdown.
+app.post("/api/admin/items/give", adminReq, (req, res) => {
+  const item = String(req.body.item || "").trim();
+  if (!item) return res.status(400).json({ ok: false, message: "Item name required." });
+  // Comma-joined, not a true array — the admin.html api() helper builds
+  // POST bodies with plain URLSearchParams(body), which stringifies an
+  // array value via Array.prototype.join(",") rather than repeating the key.
+  const usernames = String(req.body.usernames || "").split(",").map((u) => u.trim()).filter(Boolean);
+  if (!usernames.length) return res.status(400).json({ ok: false, message: "Select at least one player." });
+  const qty = Math.max(1, Math.trunc(Number(req.body.qty)) || 1);
+
+  const ids = [];
+  for (const username of usernames) {
+    const id = uidOf(username);
+    if (id === null) return res.status(400).json({ ok: false, message: `No such user: ${username}` });
+    ids.push(id);
+  }
+
+  giveItemToPlayers(ids, item, qty);
+  const roster = usernames.length <= 6 ? usernames.join(", ") : `${usernames.slice(0, 6).join(", ")}, +${usernames.length - 6} more`;
+  insertEvent("system", `[Admin] ${req.user} gave ${qty}x ${item} to ${roster} (${usernames.length} player${usernames.length === 1 ? "" : "s"}).`, "public", "global");
+  log("INFO", `${req.user} bulk-gave ${item} x${qty} to ${usernames.join(", ")}`, game_config);
+  res.json({ ok: true, message: `Gave ${qty}x ${item} to ${usernames.length} player${usernames.length === 1 ? "" : "s"}.` });
 });
 
 // The game tick (every z_tic seconds):
@@ -2557,6 +3281,8 @@ app.get("/api/admin/upgrades", adminReq, (req, res) => {
 //      to 10 players for double damage; persists until the horde is cleared).
 //   Inside players are shielded by the base (2 base damage each, up to 500);
 //   base death kills everyone inside; personal health 0 kills that player.
+const ARMOR_DEGRADE_CHANCE = 15; // % chance per landed hit — tunable
+
 function startZombieTicker() {
   const intervalMs = Math.max(1, zombie_config.z_tic) * 1000;
   const resetMs = game_config.experimentResetHours * 3600 * 1000;
@@ -2572,9 +3298,26 @@ function startZombieTicker() {
       return;
     }
 
-    // 1) Spawn. A raid doubles the spawn chance.
+    // Dev -H/-r: keep the horde topped up to the hunting (-H) or raiding (-r)
+    // threshold. Runs before the spawn/attack phases so the tier logic sees
+    // the restored horde this same tick; -z caps the refill target.
+    if ((DEV_FLAGS.hordeRefill || DEV_FLAGS.raidRefill) && gs.hunt_enabled === "true") {
+      const floor = DEV_FLAGS.raidRefill ? zombie_config.z_raid : zombie_config.z_horde;
+      const target = DEV_FLAGS.zombieCap ? Math.min(floor, DEV_FLAGS.zombieCap) : floor;
+      if (gs.horde_size < target) {
+        adjustHordeSize(target - gs.horde_size);
+        latchRaidIfNeeded();
+        insertEvent("spawn", `The horde swells back to ${target}`, "public", "global");
+        log("INFO", `[dev ${DEV_FLAGS.raidRefill ? "-r" : "-H"}] horde refilled ${gs.horde_size} -> ${target}`, game_config);
+        gs = getGameState();
+      }
+    }
+
+    // 1) Spawn. A raid doubles the spawn chance. Dev -z: never spawn past the cap.
     const spawnChance = gs.raid_enabled === "true" ? zombie_config.z_chance * 2 : zombie_config.z_chance;
-    if (gs.hunt_enabled === "true" && Math.random() * 100 < spawnChance) {
+    if (DEV_FLAGS.zombieCap && gs.horde_size >= DEV_FLAGS.zombieCap) {
+      // capped — skip the spawn roll entirely
+    } else if (gs.hunt_enabled === "true" && Math.random() * 100 < spawnChance) {
       adjustHordeSize(1);
       insertEvent("spawn", "A zombie shambles into the area", "public", "global");
       log("INFO", `tick: spawned a zombie (horde ${gs.horde_size} -> ${gs.horde_size + 1})`, game_config);
@@ -2591,8 +3334,11 @@ function startZombieTicker() {
 
     const cutoff = Date.now() - game_config.timeout * 1000;
     // Zombies only reach players in zombie-pool locations; everyone else is
-    // in a safe area and sits this tick out entirely.
-    const active = getActivePlayers(cutoff).filter((p) => ZOMBIE_LOCATIONS.has(locationOf(p)));
+    // in a safe area and sits this tick out entirely. Dev -s: admins are
+    // invisible to the tick — no damage, no targeting, no base absorption.
+    const active = getActivePlayers(cutoff)
+      .filter((p) => ZOMBIE_LOCATIONS.has(locationOf(p)))
+      .filter((p) => !(DEV_FLAGS.stealthAdmins && isUserAdmin(p.user_id)));
     if (!active.length) return;
 
     // Tally damage per player for this tick based on the tier.
@@ -2631,6 +3377,22 @@ function startZombieTicker() {
         const r = damagePlayer(uid, dealt);
         const armorNote = blocked > 0 ? `, armor blocked ${blocked}` : "";
         insertEvent("attack", `A zombie hit you for ${dealt}${armorNote} (shield ${r.shield}, health ${r.health})`, "private", uid);
+        // Taking a hit trains Defense — scaled from the damage that actually
+        // landed (fully-blocked hits teach nothing): raids grind you tougher
+        // slowly per point, lighter tiers pay better per point of pain.
+        if (dealt > 0) {
+          const defXp = raiding ? Math.max(1, Math.floor(dealt / 10)) : Math.max(1, Math.floor(dealt / 5) * 3);
+          addSkillXp(uid, "defense", defXp);
+          // Chance to strip 1 condition from a random equipped armor piece —
+          // only rolls on damage that actually landed, same gate as Defense XP.
+          const equippedSlots = ARMOR_PIECES.filter((slot) => pl[`a_${slot}`]);
+          if (equippedSlots.length && Math.random() * 100 < ARMOR_DEGRADE_CHANCE) {
+            const slot = equippedSlots[Math.floor(Math.random() * equippedSlots.length)];
+            const itemName = pl[`a_${slot}`];
+            const newCond = adjustArmorCondition(uid, itemName, -1);
+            insertEvent("attack", `Your ${itemName} takes a scratch (condition ${newCond})`, "private", uid);
+          }
+        }
         if (r.health <= 0) deaths.push(pl);
       }
     }
@@ -2701,7 +3463,9 @@ function startZombieTicker() {
 
 const runMode = () => (game_config.dev ? "dev" : game_config.production ? "production" : "stable");
 const startupSummaryLine = () =>
-  `Startup: zboe2 ${app_version} mode=${runMode()} proto=${ssl_config.enabled ? "https" : "http"} debugLevel=${game_config.debugLevel} tick=${zombie_config.z_tic}s timeout=${game_config.timeout}s`;
+  `Startup: zboe2 ${app_version} mode=${runMode()} proto=${ssl_config.enabled ? "https" : "http"} debugLevel=${game_config.debugLevel} tick=${zombie_config.z_tic}s timeout=${game_config.timeout}s`
+  // Active dev cheats belong in the summary — a -t/-s/-H run behaves nothing like a clean one.
+  + (devFlagsUsed.length ? ` devFlags=${[...new Set(devFlagsUsed)].map((f) => (f === "-z" ? `-z=${DEV_FLAGS.zombieCap}` : f)).join(",")}` : "");
 const timeoutWarnLine = () =>
   game_config.timeout > 10
     ? `WARNING: timeout=${game_config.timeout}s may be excessive (10s recommended for a closed/frozen page to drop promptly).`

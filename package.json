@@ -1,11 +1,13 @@
 {
-  "name": "zboe-web",
+  "name": "@rvzm/zboe2",
   "type": "module",
-  "private": true,
+  "private": false,
+  "version": "2.0.27-dev-rc",
   "scripts": {
-    "dev": "node server.js --dev --debug=FULL",
+    "dev": "node server.js --dev -s -t -d",
     "stable": "node server.js",
-    "verbose": "node server.js --verbose"
+    "verbose": "node server.js --verbose",
+    "smoketest": "node _smoketest.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
@@ -18,13 +20,16 @@
     "type": "git",
     "url": "git+https://github.com/rvzm/zboe2.git"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "keywords": [],
   "author": "Connor Angell (rvzm)",
   "license": "GNU General Public License v3.0",
   "bugs": {
     "url": "https://github.com/rvzm/zboe2/issues"
   },
-  "homepage": "https://github.com/rvzm/zboe2#readme",
+  "homepage": "https://zboe.net",
   "allowScripts": {
     "better-sqlite3@12.10.0": true
   }

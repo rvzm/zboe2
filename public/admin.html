@@ -11,7 +11,21 @@
                   radial-gradient(900px 500px at 80% 0%, rgba(13,110,253,.12), transparent 60%),
                   #0b0f14;
     }
+    /* Static page backdrop (public/img/page_admin.png) — a fixed layer
+       behind everything, dimmed under a scrim so panels stay readable.
+       Unconditional, same as playercard.html's #pageBg. */
+    #pageBg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background-image: linear-gradient(rgba(11,15,20,.6), rgba(11,15,20,.88)), url('/img/page_admin.png');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
     .muted-mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.6); font-size: .8rem; }
+    /* Bootstrap has no built-in purple progress-bar variant — Mana needs one. */
+    .bg-mana { background-color: #8b5cf6 !important; }
     .soft-card { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.12); }
     /* Bootstrap cards reset to the dark body color — force the titles bright. */
     .soft-card .card-header {
@@ -24,12 +38,19 @@
       text-shadow: 0 0 8px rgba(255,255,255,.25);
       letter-spacing: .02em;
     }
+    /* Bootstrap's .card-body/.card-footer default to a dark text color
+       regardless of the page's dark theme — override or plain text goes
+       near-invisible on this background. */
+    .soft-card .card-body, .soft-card .card-footer {
+      color: rgba(255,255,255,.9);
+    }
     .table { --bs-table-color: #e9ecef; --bs-table-bg: transparent; --bs-table-border-color: rgba(255,255,255,.12); }
-    .panel { max-height: 60vh; overflow-y: auto; }
+    .panel { max-height: 60vh; overflow-y: auto; overflow-x: hidden; }
     .statval { color: #fff; font-weight: 600; }
   </style>
 </head>
 <body class="text-light">
+  <div id="pageBg"></div>
   <nav class="navbar navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
     <div class="container py-2 d-flex justify-content-between">
       <span class="navbar-brand fw-semibold">🛠️ ZBOE <span class="opacity-75">Admin</span></span>
@@ -337,7 +358,20 @@
                 <span>Stats — <span id="pName"></span></span>
                 <span id="pStatus"></span>
               </div>
-              <div class="card-body p-0 panel"><table class="table table-sm mb-0"><tbody id="statRows"></tbody></table></div>
+              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="statTabs">
+                <button class="btn btn-outline-light active" data-stattab="player" type="button">Player</button>
+                <button class="btn btn-outline-light" data-stattab="currency" type="button">Currency</button>
+                <button class="btn btn-outline-light" data-stattab="guns" type="button">Guns</button>
+                <button class="btn btn-outline-light" data-stattab="armor" type="button">Armor</button>
+                <button class="btn btn-outline-light" data-stattab="skills" type="button">Skills</button>
+              </div>
+              <div class="card-body p-0 panel">
+                <div id="statTabPlayer"><table class="table table-sm mb-0"><tbody></tbody></table></div>
+                <div id="statTabCurrency" class="d-none"><table class="table table-sm mb-0"><tbody></tbody></table></div>
+                <div id="statTabGuns" class="d-none"><table class="table table-sm mb-0"><tbody></tbody></table></div>
+                <div id="statTabArmor" class="d-none p-2"></div>
+                <div id="statTabSkills" class="d-none p-2"></div>
+              </div>
             </div>
           </div>
           <div class="col-lg-5">
@@ -371,6 +405,15 @@
                 </div>
                 <div id="pShieldRows" class="mb-2"></div>
 
+                <!-- Mana bar + its edit rows -->
+                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                  <span>Mana</span><span id="pManaText">— / —</span>
+                </div>
+                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                  <div class="progress-bar bg-mana" id="pManaBar" style="width:0%;"></div>
+                </div>
+                <div id="pManaRows" class="mb-2"></div>
+
                 <!-- XP bar + the level control under it -->
                 <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
                   <span>XP</span><span id="pXpText">— / —</span>
@@ -390,11 +433,6 @@
                   </span>
                 </div>
                 <div class="muted-mono" style="font-size:.7rem;">Level is full-stack: stat + lifetime-XP gains, no XP cost.</div>
-
-                <hr style="border-color: rgba(255,255,255,.2);">
-
-                <!-- Currency -->
-                <div id="pCurrencyRows"></div>
               </div>
             </div>
             <div class="card soft-card mb-3">
@@ -431,19 +469,57 @@
           <span>Item Registry <span class="muted-mono">(item_backbone.js · read-only)</span></span>
           <button class="btn btn-sm btn-outline-light" id="reloadShop">Reload</button>
         </div>
-        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Item</th><th>Type</th><th>Value</th><th>Shop</th><th>Use</th></tr></thead><tbody id="itemRows"></tbody></table></div>
+        <div class="btn-group btn-group-sm w-100 p-2 flex-wrap" role="group" id="itemTypeTabs"></div>
+        <div class="d-flex">
+          <div class="btn-group-vertical btn-group-sm p-2 d-none" role="group" id="itemSideTabs" style="min-width:170px;"></div>
+          <div class="card-body p-0 panel flex-grow-1"><table class="table table-sm mb-0"><thead><tr><th>Item</th><th>Type</th><th>Value</th><th>Shop</th><th>Use</th><th></th></tr></thead><tbody id="itemRows"></tbody></table></div>
+        </div>
       </div>
 
       <div class="card soft-card mb-3">
         <div class="card-header fw-semibold">Recipes <span class="muted-mono">(item_backbone.js · read-only)</span></div>
-        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Recipe</th><th>Skill</th><th>Inputs</th><th>Tool</th><th>Output</th></tr></thead><tbody id="recipeRows"></tbody></table></div>
+        <div class="btn-group btn-group-sm w-100 p-2 flex-wrap" role="group" id="recipeCatTabs"></div>
+        <div class="d-flex">
+          <div class="btn-group-vertical btn-group-sm p-2 d-none" role="group" id="recipeMetalSideTabs" style="min-width:140px;"></div>
+          <div class="card-body p-0 panel flex-grow-1"><table class="table table-sm mb-0"><thead><tr><th>Recipe</th><th>Skill</th><th>Inputs</th><th>Tool</th><th>Output</th><th></th></tr></thead><tbody id="recipeRows"></tbody></table></div>
+        </div>
       </div>
 
       <div class="card soft-card">
         <div class="card-header fw-semibold">Static Upgrades <span class="muted-mono">(code-defined · read-only)</span></div>
-        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Item</th><th>Type</th><th>Cost</th><th>Currency</th></tr></thead><tbody id="upgradeRows"></tbody></table></div>
+        <div class="card-body p-0 panel"><table class="table table-sm mb-0"><thead><tr><th>Item</th><th>Type</th><th>Cost</th><th>Currency</th><th></th></tr></thead><tbody id="upgradeRows"></tbody></table></div>
       </div>
     </section>
+
+    <!-- GIVE modal (bulk-grant one item to one or more players) -->
+    <div class="modal fade" id="modGive" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content" style="background:#0b0f14; color:#fff; border:1px solid rgba(255,255,255,.15);">
+          <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+            <h5 class="modal-title">Give <span id="giveItemName" class="text-warning"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <button class="btn btn-sm btn-outline-secondary" data-giveqty="1" type="button">+1</button>
+              <button class="btn btn-sm btn-outline-secondary" data-giveqty="5" type="button">+5</button>
+              <button class="btn btn-sm btn-outline-secondary" data-giveqty="10" type="button">+10</button>
+              <input type="number" min="1" class="form-control form-control-sm" id="giveQty" value="1" style="max-width:90px;">
+            </div>
+            <div class="panel" style="max-height:40vh;">
+              <table class="table table-sm mb-0">
+                <thead><tr><th style="width:36px"></th><th>Player</th><th class="text-end">Owns</th></tr></thead>
+                <tbody id="giveRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer" style="border-color: rgba(255,255,255,.12);">
+            <button class="btn btn-outline-light" data-bs-dismiss="modal" type="button">Cancel</button>
+            <button class="btn btn-success" id="giveSubmit" type="button">Give</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <div id="toast" class="position-fixed bottom-0 end-0 m-3 px-3 py-2 rounded text-light"
@@ -876,12 +952,16 @@
       loadPlayerList();
     };
 
-    let currentPlayer = null;
+    let currentPlayer = null, statTab = "player", currentPlayerData = null;
+    $("statTabs").querySelectorAll("[data-stattab]").forEach(b =>
+      b.addEventListener("click", () => { statTab = b.dataset.stattab; renderStatTabs(); }));
+
     async function loadPlayer(name){
       loadItemSelect(); // populate the grant dropdown once
       const data = await api("/api/admin/player?username=" + encodeURIComponent(name));
       if (!data || !data.ok){ flash(data?.message || "Not found."); $("playerPanel").classList.add("d-none"); return; }
       currentPlayer = data.username;
+      currentPlayerData = data;
       $("playerListCard").classList.add("d-none");
       $("playerPanel").classList.remove("d-none");
       $("pName").textContent = data.username;
@@ -895,20 +975,22 @@
       $("pHealthBar").style.width = barPct(sv.health, sv.max_health) + "%";
       $("pShieldText").textContent = `${sv.shield} / ${sv.max_shield}`;
       $("pShieldBar").style.width = barPct(sv.shield, sv.max_shield) + "%";
+      $("pManaText").textContent = `${sv.mana} / ${sv.mana_max}`;
+      $("pManaBar").style.width = barPct(sv.mana, sv.mana_max) + "%";
       $("pXpText").textContent = `${sv.xp} / ${data.nextLevelCost}`;
       $("pXpBar").style.width = Math.min(100, barPct(sv.xp, data.nextLevelCost)) + "%";
 
-      // Quick-edit rows, rendered under their matching bar (currency below the
-      // separator). [field, label, refill-source, container]
+      // Quick-edit rows, rendered under their matching bar. [field, label,
+      // refill-source, container]
       const quick = [
         ["health",       "Health",     "max_health", "pHealthRows"],
         ["max_health",   "Health Max", null,         "pHealthRows"],
         ["shield",       "Shield",     "max_shield", "pShieldRows"],
         ["max_shield",   "Shield Max", null,         "pShieldRows"],
-        ["gold",         "Gold",       null,         "pCurrencyRows"],
-        ["horde_tokens", "Tokens",     null,         "pCurrencyRows"],
+        ["mana",         "Mana",       "mana_max",   "pManaRows"],
+        ["mana_max",     "Mana Max",   null,         "pManaRows"],
       ];
-      ["pHealthRows", "pShieldRows", "pCurrencyRows"].forEach(id => $(id).innerHTML = "");
+      ["pHealthRows", "pShieldRows", "pManaRows"].forEach(id => $(id).innerHTML = "");
       quick.forEach(([field, label, refillFrom, container]) => {
         const row = document.createElement("div");
         row.className = "d-flex justify-content-between align-items-center mb-1";
@@ -941,53 +1023,8 @@
       data.locations.forEach(l => loc.insertAdjacentHTML("beforeend",
         `<option value="${esc(l.key)}"${l.key === data.location ? " selected" : ""}>${esc(l.name)}</option>`));
 
-      // Stats, grouped: Core, then per-gun blocks, then Skills. The fields
-      // living in the Player Card's quick rows are left out of the table.
-      const QUICK_FIELDS = new Set(quick.map(([f]) => f));
-      const groupOf = (f) =>
-        f.startsWith("handgun_")    ? "Handgun" :
-        f.startsWith("rifle_")      ? "Rifle" :
-        f.startsWith("shotgun_")    ? "Shotgun" :
-        f.startsWith("burstrifle_") ? "Burst Rifle" :
-        f.startsWith("s_")          ? "Skills" : "Core";
-      const groups = {};
-      data.stats.filter(s => !QUICK_FIELDS.has(s.field)).forEach(s => (groups[groupOf(s.field)] ||= []).push(s));
-
-      const st = $("statRows"); st.innerHTML = "";
-      ["Core", "Handgun", "Rifle", "Shotgun", "Burst Rifle", "Skills"].forEach(g => {
-        if (!groups[g]) return;
-        st.insertAdjacentHTML("beforeend",
-          `<tr><td colspan="3" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
-        groups[g].forEach(s => {
-          // Strip the group prefix for readability (handgun_ammo → ammo, s_magic_lvl → magic lvl).
-          const label = g === "Skills" ? s.field.slice(2).replace(/_/g, " ")
-            : g === "Core" ? s.field : s.field.replace(/^(handgun|rifle|shotgun|burstrifle)_/, "");
-          const tr = document.createElement("tr");
-          if (s.max === 1) {
-            // Boolean (0/1) stat: one toggle instead of the ± spread.
-            const on = Number(s.value) === 1;
-            tr.innerHTML = `
-              <td class="muted-mono align-middle">${esc(label)}</td>
-              <td class="align-middle" style="width:70px">${on ? '<span class="badge text-bg-danger">ON</span>' : '<span class="badge text-bg-secondary">off</span>'}</td>
-              <td class="text-end">
-                <button class="btn btn-sm ${on ? "btn-outline-secondary" : "btn-outline-warning"} py-0 px-2" data-toggle>Toggle</button>
-              </td>`;
-            tr.querySelector("[data-toggle]").onclick = () => setStat(s.field, on ? 0 : 1);
-            st.appendChild(tr);
-            return;
-          }
-          tr.innerHTML = `
-            <td class="muted-mono align-middle">${esc(label)}</td>
-            <td class="statval align-middle" style="width:70px">${s.value}</td>
-            <td class="text-end">
-              ${[-10,-5,-1,1,5,10].map(d => `<button class="btn btn-sm btn-outline-secondary py-0 px-1" data-d="${d}">${d>0?"+":""}${d}</button>`).join(" ")}
-              <button class="btn btn-sm btn-outline-info py-0 px-2" data-set>set</button>
-            </td>`;
-          tr.querySelectorAll("[data-d]").forEach(btn => btn.onclick = () => setStat(s.field, s.value + Number(btn.dataset.d)));
-          tr.querySelector("[data-set]").onclick = () => { const v = prompt(`Set ${s.field} to:`, s.value); if (v !== null && v !== "") setStat(s.field, v); };
-          st.appendChild(tr);
-        });
-      });
+      // Stats table (Player/Currency/Guns tabs) + skill boxes (Skills tab).
+      renderStatTabs();
 
       const gb = $("gunButtons"); gb.innerHTML = "";
       data.guns.forEach(g => {
@@ -1012,6 +1049,166 @@
         iv.appendChild(tr);
       });
     }
+
+    // One <tr> for a stat: boolean (max===1) renders a toggle, everything
+    // else the ±10/-5/-1/+1/+5/+10 spread + set. Shared by the Player,
+    // Currency and Guns tabs.
+    function statRowEl(field, label, value, max){
+      const tr = document.createElement("tr");
+      if (max === 1) {
+        const on = Number(value) === 1;
+        tr.innerHTML = `
+          <td class="muted-mono align-middle">${esc(label)}</td>
+          <td class="align-middle" style="width:70px">${on ? '<span class="badge text-bg-danger">ON</span>' : '<span class="badge text-bg-secondary">off</span>'}</td>
+          <td class="text-end">
+            <button class="btn btn-sm ${on ? "btn-outline-secondary" : "btn-outline-warning"} py-0 px-2" data-toggle>Toggle</button>
+          </td>`;
+        tr.querySelector("[data-toggle]").onclick = () => setStat(field, on ? 0 : 1);
+        return tr;
+      }
+      tr.innerHTML = `
+        <td class="muted-mono align-middle">${esc(label)}</td>
+        <td class="statval align-middle" style="width:70px">${value}</td>
+        <td class="text-end">
+          ${[-10,-5,-1,1,5,10].map(d => `<button class="btn btn-sm btn-outline-secondary py-0 px-1" data-d="${d}">${d>0?"+":""}${d}</button>`).join(" ")}
+          <button class="btn btn-sm btn-outline-info py-0 px-2" data-set>set</button>
+        </td>`;
+      tr.querySelectorAll("[data-d]").forEach(btn => btn.onclick = () => setStat(field, value + Number(btn.dataset.d)));
+      tr.querySelector("[data-set]").onclick = () => { const v = prompt(`Set ${label} to:`, value); if (v !== null && v !== "") setStat(field, v); };
+      return tr;
+    }
+
+    const CURRENCY_LABELS = { c_gold: "Gold", c_tokens: "Tokens" };
+    // Player-card quick-edit fields (health/shield/mana) are shown via the
+    // bars on the right, not duplicated in the Player tab table.
+    const CARD_QUICK_FIELDS = new Set(["health", "max_health", "shield", "max_shield", "mana", "mana_max"]);
+    const groupOf = (f) =>
+      f.startsWith("handgun_")    ? "Handgun" :
+      f.startsWith("rifle_")      ? "Rifle" :
+      f.startsWith("shotgun_")    ? "Shotgun" :
+      f.startsWith("burstrifle_") ? "Burst Rifle" :
+      f.startsWith("s_")          ? null : // Skills tab renders these as boxes instead
+      CURRENCY_LABELS[f]          ? "Currency" :
+      CARD_QUICK_FIELDS.has(f)    ? null :
+      "Player";
+
+    // Renders whichever stat tab is active from the cached currentPlayerData
+    // — switching tabs never refetches.
+    function renderStatTabs(){
+      const data = currentPlayerData;
+      if (!data) return;
+      $("statTabs").querySelectorAll("[data-stattab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.stattab === statTab));
+      $("statTabPlayer").classList.toggle("d-none", statTab !== "player");
+      $("statTabCurrency").classList.toggle("d-none", statTab !== "currency");
+      $("statTabGuns").classList.toggle("d-none", statTab !== "guns");
+      $("statTabArmor").classList.toggle("d-none", statTab !== "armor");
+      $("statTabSkills").classList.toggle("d-none", statTab !== "skills");
+
+      const groups = {};
+      data.stats.forEach(s => { const g = groupOf(s.field); if (g) (groups[g] ||= []).push(s); });
+
+      if (statTab === "player") {
+        const tb = $("statTabPlayer").querySelector("tbody"); tb.innerHTML = "";
+        (groups["Player"] || []).forEach(s => tb.appendChild(statRowEl(s.field, s.field, s.value, s.max)));
+      } else if (statTab === "currency") {
+        const tb = $("statTabCurrency").querySelector("tbody"); tb.innerHTML = "";
+        (groups["Currency"] || []).forEach(s => tb.appendChild(statRowEl(s.field, CURRENCY_LABELS[s.field], s.value, s.max)));
+      } else if (statTab === "guns") {
+        const tb = $("statTabGuns").querySelector("tbody"); tb.innerHTML = "";
+        ["Handgun", "Rifle", "Shotgun", "Burst Rifle"].forEach(g => {
+          if (!groups[g]) return;
+          tb.insertAdjacentHTML("beforeend",
+            `<tr><td colspan="3" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
+          groups[g].forEach(s => {
+            const label = s.field.replace(/^(handgun|rifle|shotgun|burstrifle)_/, "");
+            tb.appendChild(statRowEl(s.field, label, s.value, s.max));
+          });
+        });
+      } else if (statTab === "armor") {
+        renderArmorTab(data);
+      } else if (statTab === "skills") {
+        renderSkillBoxes(data);
+      }
+    }
+
+    // Armor tab: one row per paperdoll slot — the equipped piece (if any)
+    // plus a button per owned item matching that slot, mirroring the
+    // Equipped Gun card's owned/equipped/force-equip button pattern.
+    function renderArmorTab(data){
+      const wrap = $("statTabArmor"); wrap.innerHTML = "";
+      (data.armors || []).forEach(({ slot, equipped, owned }) => {
+        const row = document.createElement("div");
+        row.className = "mb-3";
+        row.innerHTML = `<div class="fw-semibold muted-mono mb-1">${esc(slot)}${equipped ? ` — ${esc(equipped)}` : ""}</div>`;
+        owned.forEach(o => {
+          const b = document.createElement("button");
+          b.className = "btn btn-sm me-2 mb-2 " + (o.name === equipped ? "btn-primary" : "btn-outline-primary");
+          b.textContent = o.name === equipped ? `${o.label} ✓ (c${o.condition})` : `${o.label} (c${o.condition})`;
+          b.disabled = o.name === equipped;
+          b.onclick = () => api("/api/admin/player/armor/equip", { username: currentPlayer, slot, item: o.name })
+            .then(r => r.ok && loadPlayer(currentPlayer));
+          row.appendChild(b);
+        });
+        if (equipped) {
+          const clear = document.createElement("button");
+          clear.className = "btn btn-sm btn-outline-secondary mb-2";
+          clear.textContent = "Clear slot";
+          clear.onclick = () => api("/api/admin/player/armor/equip", { username: currentPlayer, slot, item: "" })
+            .then(r => r.ok && loadPlayer(currentPlayer));
+          row.appendChild(clear);
+        }
+        if (!owned.length && !equipped) row.insertAdjacentHTML("beforeend", `<div class="muted-mono">(none owned)</div>`);
+        wrap.appendChild(row);
+      });
+    }
+
+    // Skills tab: one boxed card per skill — an XP progress bar (server-
+    // computed nextCost, same skillLevelCost formula the game/playercard
+    // pages use) plus compact Level/XP edit rows, both driven by setStat.
+    function renderSkillBoxes(data){
+      const wrap = $("statTabSkills"); wrap.innerHTML = "";
+      const row = document.createElement("div");
+      row.className = "row g-2";
+      data.skills.forEach(s => {
+        const pct = s.nextCost > 0 ? Math.max(0, Math.min(100, (s.xp / s.nextCost) * 100)) : 0;
+        const lvlField = `s_${s.key}_lvl`, xpField = `s_${s.key}_xp`;
+        const col = document.createElement("div");
+        col.className = "col-6 col-xl-4";
+        col.innerHTML = `
+          <div class="card soft-card h-100">
+            <div class="card-body p-2">
+              <div class="fw-semibold mb-1">${esc(s.name)}</div>
+              <div class="progress mb-2" style="height:8px; background: rgba(255,255,255,.08);">
+                <div class="progress-bar bg-info" style="width:${pct}%;"></div>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="muted-mono">Lv <span class="statval">${s.level}</span></span>
+                <span>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-lvl-d="-1">-1</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-lvl-d="1">+1</button>
+                  <button class="btn btn-sm btn-outline-info py-0 px-1" data-lvl-set>set</button>
+                </span>
+              </div>
+              <div class="d-flex justify-content-between align-items-center">
+                <span class="muted-mono">XP <span class="statval">${s.xp} / ${s.nextCost}</span></span>
+                <span>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-xp-d="-10">-10</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-xp-d="10">+10</button>
+                  <button class="btn btn-sm btn-outline-info py-0 px-1" data-xp-set>set</button>
+                </span>
+              </div>
+            </div>
+          </div>`;
+        col.querySelectorAll("[data-lvl-d]").forEach(btn => btn.onclick = () => setStat(lvlField, s.level + Number(btn.dataset.lvlD)));
+        col.querySelector("[data-lvl-set]").onclick = () => { const v = prompt(`Set ${s.name} level to:`, s.level); if (v !== null && v !== "") setStat(lvlField, v); };
+        col.querySelectorAll("[data-xp-d]").forEach(btn => btn.onclick = () => setStat(xpField, s.xp + Number(btn.dataset.xpD)));
+        col.querySelector("[data-xp-set]").onclick = () => { const v = prompt(`Set ${s.name} XP to:`, s.xp); if (v !== null && v !== "") setStat(xpField, v); };
+        row.appendChild(col);
+      });
+      wrap.appendChild(row);
+    }
+
     async function setStat(field, value){
       const r = await api("/api/admin/player/stat", { username: currentPlayer, field, value });
       if (r.ok) loadPlayer(currentPlayer);
@@ -1052,52 +1249,226 @@
     }
 
     // ---- Item catalogue (read-only; items are code in item_backbone.js) ----
-    async function loadShop(){
-      const data = await api("/api/admin/items") || { items: [], recipes: [] };
+    // Cached from the last fetch — every tab/side-tab click below just
+    // re-renders from these, same "no re-fetch on tab switch" convention as
+    // renderStatTabs() in the Players panel.
+    let shopData = null, upgradesData = null;
+    let itemType = null, itemSideTab = null;
+    let recipeTab = null, recipeMetalSubTab = null;
 
+    const titleCase = (s) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+    // Distinct .section values among the active type's items, in the order
+    // they first appear in the registry — purely data-driven off the real
+    // ITEMS.section field now (item_backbone.js), no name-matching heuristic.
+    function itemSectionsForType(type){
+      const seen = [];
+      (shopData.items || []).forEach((i) => { if (i.type === type && !seen.includes(i.section)) seen.push(i.section); });
+      return seen;
+    }
+
+    function renderItemTypeTabs(){
+      const bar = $("itemTypeTabs"); bar.innerHTML = "";
+      (shopData.types || []).forEach((t) => {
+        const b = document.createElement("button");
+        b.className = "btn btn-outline-light" + (t === itemType ? " active" : "");
+        b.textContent = titleCase(t);
+        b.type = "button";
+        b.onclick = () => { itemType = t; itemSideTab = null; renderShop(); };
+        bar.appendChild(b);
+      });
+    }
+
+    function renderItemSideTabs(sections){
+      const bar = $("itemSideTabs");
+      bar.innerHTML = sections.map((s) =>
+        `<button class="btn btn-outline-light${s === itemSideTab ? " active" : ""}" type="button" data-itemsub="${esc(s)}">${esc(s)}</button>`
+      ).join("");
+      bar.querySelectorAll("[data-itemsub]").forEach((b) =>
+        b.onclick = () => { itemSideTab = b.dataset.itemsub; renderShop(); });
+    }
+
+    function renderItemRegistry(){
+      renderItemTypeTabs();
+      let items = (shopData.items || []).filter((i) => i.type === itemType);
+      // Side-tabs only when this type actually has more than one distinct
+      // section — a single-section type (e.g. gun/tool/trade) renders flat.
+      const sections = itemSectionsForType(itemType);
+      const showSideTabs = sections.length > 1;
+      $("itemSideTabs").classList.toggle("d-none", !showSideTabs);
+      if (showSideTabs){
+        if (itemSideTab === null || !sections.includes(itemSideTab)) itemSideTab = sections[0];
+        renderItemSideTabs(sections);
+        items = items.filter((i) => i.section === itemSideTab);
+      }
       const rows = $("itemRows"); rows.innerHTML = "";
-      data.items.forEach(it => {
+      if (!items.length) rows.innerHTML = `<tr><td class="muted-mono" colspan="6">(none)</td></tr>`;
+      items.forEach((it) => {
         const shop = it.shop ? `${it.shop.cost} ${it.shop.currency === "token" ? "tokens" : "gold"}` : "—";
         const use = it.use ? Object.entries(it.use).map(([k, v]) => `${k} ${v}`).join(", ") : "—";
         rows.insertAdjacentHTML("beforeend", `
           <tr><td>${esc(it.name)}<div class="muted-mono">${esc(it.desc || "")}</div></td>
           <td><span class="badge text-bg-secondary">${esc(it.type)}</span></td>
-          <td class="statval">${it.value ?? "—"}</td><td class="muted-mono">${esc(shop)}</td><td class="muted-mono">${esc(use)}</td></tr>`);
+          <td class="statval">${it.value ?? "—"}</td><td class="muted-mono">${esc(shop)}</td><td class="muted-mono">${esc(use)}</td>
+          <td class="text-end"><button class="btn btn-sm btn-outline-success py-0 px-2" type="button" data-give="${esc(it.key)}">Give</button></td></tr>`);
       });
+      rows.querySelectorAll("[data-give]").forEach((b) => b.onclick = () => openGive(b.dataset.give));
+    }
+
+    // Top-level Recipes tabs, generated from the categories actually present
+    // (Part 2) — Food/Potions/Base Items, one per SMELT_TYPES metal that has
+    // >=1 recipe, then Magic/Misc. Order mirrors the user's requested list.
+    function recipeTopTabs(){
+      const recipes = shopData.recipes || [];
+      const present = new Set(recipes.map((r) => r.category));
+      const tabs = [];
+      if (present.has("food")) tabs.push({ key: "food", label: "Food" });
+      if (present.has("potion")) tabs.push({ key: "potion", label: "Potions" });
+      if (present.has("base")) tabs.push({ key: "base", label: "Base Items" });
+      (shopData.smeltTypes || []).forEach((m) => {
+        if (recipes.some((r) => r.category === "metal" && r.metal === m))
+          tabs.push({ key: "metal:" + m, label: titleCase(m) });
+      });
+      if (present.has("magic")) tabs.push({ key: "magic", label: "Magic" });
+      if (present.has("misc")) tabs.push({ key: "misc", label: "Misc" });
+      return tabs;
+    }
+
+    const METAL_TYPE_LABELS = { armor: "Armor", crafting: "Crafting", tools: "Tools" };
+    function renderRecipeTabs(tabs){
+      const bar = $("recipeCatTabs"); bar.innerHTML = "";
+      tabs.forEach((t) => {
+        const b = document.createElement("button");
+        b.className = "btn btn-outline-light" + (t.key === recipeTab ? " active" : "");
+        b.textContent = t.label;
+        b.type = "button";
+        b.onclick = () => { recipeTab = t.key; recipeMetalSubTab = null; renderShop(); };
+        bar.appendChild(b);
+      });
+    }
+
+    // Within a metal tab, side-tabs split Armor/Crafting/Tools — only the
+    // sub-types that metal actually has a recipe for are shown.
+    function renderRecipeMetalSideTabs(metal){
+      const recipes = (shopData.recipes || []).filter((r) => r.category === "metal" && r.metal === metal);
+      const types = ["armor", "crafting", "tools"].filter((t) => recipes.some((r) => r.metalType === t));
+      if (recipeMetalSubTab === null || !types.includes(recipeMetalSubTab)) recipeMetalSubTab = types[0] ?? null;
+      const bar = $("recipeMetalSideTabs");
+      bar.innerHTML = types.map((t) =>
+        `<button class="btn btn-outline-light${t === recipeMetalSubTab ? " active" : ""}" type="button" data-metalsub="${esc(t)}">${esc(METAL_TYPE_LABELS[t])}</button>`
+      ).join("");
+      bar.querySelectorAll("[data-metalsub]").forEach((b) =>
+        b.onclick = () => { recipeMetalSubTab = b.dataset.metalsub; renderShop(); });
+    }
+
+    function renderRecipes(){
+      const tabs = recipeTopTabs();
+      if (recipeTab === null || !tabs.some((t) => t.key === recipeTab)) recipeTab = tabs[0]?.key ?? null;
+      renderRecipeTabs(tabs);
+
+      let recipes = shopData.recipes || [];
+      const isMetal = recipeTab && recipeTab.startsWith("metal:");
+      $("recipeMetalSideTabs").classList.toggle("d-none", !isMetal);
+      if (isMetal){
+        const metal = recipeTab.slice("metal:".length);
+        renderRecipeMetalSideTabs(metal);
+        recipes = recipes.filter((r) => r.category === "metal" && r.metal === metal && r.metalType === recipeMetalSubTab);
+      } else {
+        recipes = recipes.filter((r) => r.category === recipeTab);
+      }
 
       const rr = $("recipeRows"); rr.innerHTML = "";
-      if (!data.recipes.length) rr.innerHTML = `<tr><td class="muted-mono" colspan="5">(no recipes yet)</td></tr>`;
-      data.recipes.forEach(r => {
+      if (!recipes.length) rr.innerHTML = `<tr><td class="muted-mono" colspan="6">(none)</td></tr>`;
+      recipes.forEach((r) => {
         const inputs = Object.entries(r.inputs || {}).map(([k, v]) => `${v}× ${k}`).join(", ");
+        const outputs = typeof r.output === "string" ? [r.output] : Object.keys(r.output || {});
+        const giveBtns = outputs.map((o) =>
+          `<button class="btn btn-sm btn-outline-success py-0 px-2 me-1" type="button" data-give="${esc(o)}">Give${outputs.length > 1 ? ` ${esc(o)}` : ""}</button>`
+        ).join("");
         rr.insertAdjacentHTML("beforeend", `
           <tr><td>${esc(r.label)}<div class="muted-mono">${r.timer}s · ${r.xp} XP</div></td>
           <td class="muted-mono">${esc(r.skill)} ${r.level}</td><td class="muted-mono">${esc(inputs)}</td>
-          <td class="muted-mono">${esc(r.requires || "—")}</td><td>${esc(r.output)}</td></tr>`);
+          <td class="muted-mono">${esc(r.requires || "—")}</td><td>${esc(outputs.join(", "))}</td>
+          <td class="text-end">${giveBtns}</td></tr>`);
       });
+      rr.querySelectorAll("[data-give]").forEach((b) => b.onclick = () => openGive(b.dataset.give));
+    }
 
-      // Read-only static upgrades (code-defined), grouped by kind.
-      const upgrades = await api("/api/admin/upgrades") || [];
+    // Read-only static upgrades (code-defined), grouped by kind — unchanged
+    // from before except a Give button on rows that carry a concrete item.
+    function renderUpgrades(){
+      const upgrades = upgradesData || [];
       const groupOf = (u) =>
         u.currency === "token" ? "Token Purchases" :
         u.type === "gun"       ? "Guns" :
         u.category === "upgrade" ? "Upgrades" : "Items";
       const order = ["Items", "Guns", "Upgrades", "Token Purchases"];
       const groups = {};
-      upgrades.forEach(u => (groups[groupOf(u)] ||= []).push(u));
+      upgrades.forEach((u) => (groups[groupOf(u)] ||= []).push(u));
 
       const ur = $("upgradeRows"); ur.innerHTML = "";
-      order.forEach(g => {
+      order.forEach((g) => {
         if (!groups[g]) return;
         ur.insertAdjacentHTML("beforeend",
-          `<tr><td colspan="4" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
-        groups[g].forEach(u => {
+          `<tr><td colspan="5" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
+        groups[g].forEach((u) => {
           const cur = u.currency === "token" ? '<span class="badge text-bg-warning text-dark">token</span>' : '<span class="badge text-bg-secondary">gold</span>';
+          const giveBtn = u.item ? `<button class="btn btn-sm btn-outline-success py-0 px-2" type="button" data-give="${esc(u.item)}">Give</button>` : "";
           ur.insertAdjacentHTML("beforeend",
-            `<tr><td>${esc(u.label)}<div class="muted-mono">${esc(u.desc)}</div></td><td class="muted-mono">${esc(u.type)}</td><td class="statval">${u.cost}</td><td>${cur}</td></tr>`);
+            `<tr><td>${esc(u.label)}<div class="muted-mono">${esc(u.desc)}</div></td><td class="muted-mono">${esc(u.type)}</td><td class="statval">${u.cost}</td><td>${cur}</td><td class="text-end">${giveBtn}</td></tr>`);
         });
       });
+      ur.querySelectorAll("[data-give]").forEach((b) => b.onclick = () => openGive(b.dataset.give));
+    }
+
+    // Renders whichever tabs/sub-tabs are active from cached shopData/
+    // upgradesData — switching tabs never refetches.
+    function renderShop(){
+      if (!shopData) return;
+      renderItemRegistry();
+      renderRecipes();
+      renderUpgrades();
+    }
+
+    async function loadShop(){
+      shopData = await api("/api/admin/items") || { types: [], smeltTypes: [], items: [], recipes: [] };
+      upgradesData = await api("/api/admin/upgrades") || [];
+      if (itemType === null || !shopData.types.includes(itemType)) itemType = shopData.types[0] ?? null;
+      renderShop();
     }
     $("reloadShop").onclick = loadShop;
+
+    // ---- Give modal (bulk grant one item to one or more players) ----
+    let giveModal = null, giveItem = null;
+    async function openGive(itemName){
+      giveItem = itemName;
+      $("giveItemName").textContent = itemName;
+      $("giveQty").value = "1";
+      const rows = $("giveRows"); rows.innerHTML = `<tr><td colspan="3" class="muted-mono">Loading…</td></tr>`;
+      if (!giveModal) giveModal = new bootstrap.Modal($("modGive"));
+      giveModal.show();
+      const data = await api("/api/admin/items/owners?item=" + encodeURIComponent(itemName));
+      rows.innerHTML = "";
+      (data?.owners || []).forEach((o) => {
+        const tr = document.createElement("tr");
+        const dot = o.online ? '<span class="badge text-bg-success">●</span>' : '<span class="badge text-bg-secondary">●</span>';
+        tr.innerHTML = `
+          <td><input type="checkbox" class="form-check-input" data-giveuser="${esc(o.username)}"></td>
+          <td>${dot} ${esc(o.username)}</td>
+          <td class="text-end muted-mono">${o.quantity}</td>`;
+        rows.appendChild(tr);
+      });
+    }
+    document.querySelectorAll("#modGive [data-giveqty]").forEach((b) => b.onclick = () => {
+      $("giveQty").value = Math.max(1, (Number($("giveQty").value) || 1) + Number(b.dataset.giveqty));
+    });
+    $("giveSubmit").onclick = async () => {
+      const usernames = Array.from($("giveRows").querySelectorAll("[data-giveuser]:checked")).map((cb) => cb.dataset.giveuser);
+      if (!usernames.length){ flash("Select at least one player."); return; }
+      const qty = Math.max(1, Number($("giveQty").value) || 1);
+      const r = await api("/api/admin/items/give", { item: giveItem, qty, usernames: usernames.join(",") });
+      if (r.ok){ giveModal.hide(); }
+    };
 
     // ---- Live updating ----
     // World state (and the destroyed-base banner) refreshes every 3s no matter

@@ -10,6 +10,7 @@
       min-height: 100vh;
       background: radial-gradient(1000px 500px at 20% 0%, rgba(13,110,253,.15), transparent 60%),
                   radial-gradient(900px 500px at 80% 0%, rgba(25,135,84,.12), transparent 60%),
+                  radial-gradient(1100px 600px at 50% 100%, rgba(13,110,253,.08), transparent 65%),
                   #0b0f14;
     }
     .soft-card{
@@ -19,6 +20,13 @@
     .soft-card .card-header{
       background: rgba(255,255,255,.04);
       border-color: rgba(255,255,255,.12);
+      color: #ffffff;
+    }
+    /* Bootstrap's .card-body/.card-footer default to a dark text color
+       regardless of the page's dark theme — override or plain text (and
+       form labels) go near-invisible on this background. */
+    .soft-card .card-body, .soft-card .card-footer {
+      color: rgba(255,255,255,.9);
     }
     .muted-mono{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;

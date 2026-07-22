@@ -19,6 +19,11 @@
       color: rgba(255,255,255,.65);
       font-size: .85rem;
     }
+    /* Bootstrap has no built-in gold/purple pill — Currency box needs both. */
+    .badge-gold { background: #d4af37; color: #1a1a1a; }
+    .badge-purple { background: #8b5cf6; color: #fff; }
+    /* Bootstrap has no built-in purple progress-bar variant — Mana needs one. */
+    .bg-mana { background-color: #8b5cf6 !important; }
     .event-feed {
       max-height: 360px;
       overflow: auto;
@@ -55,15 +60,18 @@
       text-shadow: 0 0 8px rgba(255,255,255,.25);
       letter-spacing: .02em;
     }
+    /* Bootstrap's .card-body/.card-footer default to a dark text color
+       regardless of the page's dark theme — override or plain text goes
+       near-invisible on this background. (Supersedes the old narrower
+       .fs-4/.fs-5/.fs-6-only patch.) */
+    .soft-card .card-body, .soft-card .card-footer {
+      color: rgba(255,255,255,.9);
+    }
     .badge-soft {
       background: rgba(13,110,253,.15);
       border: 1px solid rgba(13,110,253,.35);
       color: #cfe2ff;
     }
-    /* Brighter stat values in the sidebars */
-    .soft-card .fs-4,
-    .soft-card .fs-5,
-    .soft-card .fs-6 { color: #ffffff; }
 
     /* Shiny player name — color tier set by JS from the player's level.
        Used by the HUD name and the Players-list usernames. */
@@ -88,17 +96,110 @@
     @media (prefers-reduced-motion: reduce) {
       .shiny-name { animation: none; }
     }
+
+    /* Level circle — ring color tier set by JS, same thresholds/palette as
+       the shiny-name gradients above (nameClassForLevel). */
+    .level-circle {
+      transition: border-color .3s, box-shadow .3s;
+    }
+    .level-circle.name-green { border-color: #4caf50 !important; box-shadow: 0 0 10px rgba(76,175,80,.45); }
+    .level-circle.name-blue  { border-color: #3b82f6 !important; box-shadow: 0 0 10px rgba(59,130,246,.45); }
+    .level-circle.name-red   { border-color: #e04747 !important; box-shadow: 0 0 10px rgba(224,71,71,.45); }
+    .level-circle.name-gold  { border-color: #d4af37 !important; box-shadow: 0 0 12px rgba(212,175,55,.55); }
+
+    /* Per-location background art (public/img/<location>.png) — a fixed
+       layer behind everything, dimmed under a scrim so panels stay readable.
+       Hidden (falls back to body's plain gradient) when a location has no
+       art — see LOCATION_BG in the script below. */
+    #locationBg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0;
+      transition: opacity .6s ease;
+    }
+    #locationBg.visible { opacity: 1; }
+
+    /* The 3-column dashboard is independently-scrolling panes on desktop
+       (each column pinned to viewport height); below `lg` the columns stack,
+       so the fixed heights/overflow have to relax or you get three
+       near-full-screen scrollboxes instead of one normal page. */
+    .dash-row { height: calc(100vh - 90px); }
+    .dash-col-side { overflow-y: auto; overflow-x: hidden; max-height: 100%; }
+    .dash-col-mid { min-height: 0; max-height: 100%; }
+
+    /* Left column: Loadout and Quest Info both keep their natural height —
+       the column's own dash-col-side overflow (above) handles anything that
+       doesn't fit rather than either card growing/clipping internally. */
+    #loadoutCol { display: flex; flex-direction: column; }
+    #loadoutCol > .card { flex: 0 0 auto; }
+
+    /* Skill rows (Player Info modal, recipe/action requirement badges): the
+       name + "Lv N" pill sized up — the default badge-inside-muted-mono combo
+       rendered near-unreadably small. */
+    .skill-label { font-size: .95rem; color: rgba(255,255,255,.9); }
+    .skill-lv { font-size: .8rem; }
+
+    /* Sidebar (Hunt Info/Actions, Base, Players) accordion chevron — a real
+       element (not ::after) so `margin-left:auto` docks it flush right
+       regardless of how many siblings a given header already has. Rotated
+       via CSS class, not content-swapped, so no JS glyph logic is needed.
+       Lives outside the media query since it's already d-lg-none. */
+    .acc-chevron {
+      margin-left: auto;
+      padding-left: .5rem;
+      opacity: .6;
+      display: inline-block;
+      transition: transform .2s;
+    }
+    #sidebarCol .acc-section:not(.acc-open) .acc-chevron { transform: rotate(-90deg); }
+
+    @media (max-width: 991.98px) {
+      .dash-row { height: auto; }
+      .dash-col-side, .dash-col-mid { max-height: none; overflow-y: visible; }
+
+      /* Reorder the 3 columns: Loadout -> sidebar accordion -> event feed
+         (at the very bottom), regardless of DOM order. */
+      #loadoutCol { order: 1; }
+      #sidebarCol { order: 2; }
+      #eventCol   { order: 3; }
+
+      /* Sidebar accordion — one section open at a time; see initSidebarAccordion(). */
+      #sidebarCol .card-header { cursor: pointer; user-select: none; }
+      #sidebarCol .card-body { display: none; }
+      #sidebarCol .acc-section.acc-open .card-body { display: block; }
+
+      /* Combined event feed: ~5 rows visible, scrollable for older ones —
+         it's meant to be glanced at, not scrolled through, since new items
+         also surface via the top toast when you're not down here to see them. */
+      #eventFeed { max-height: 220px; }
+
+      /* Your Loadout: compact mode so it doesn't dominate the page above the
+         fold on a phone. */
+      #loadoutCol .card-body { padding: .65rem .75rem; }
+      #loadoutCol .mb-3 { margin-bottom: .5rem !important; }
+      #loadoutCol .d-grid.gap-2 { gap: .4rem !important; }
+      #meLevelCircle { width: 44px !important; height: 44px !important; }
+      #meLevelCircle .fs-4 { font-size: 1.05rem !important; }
+      #loadoutCol .progress { height: 8px !important; }
+      #gunStats .p-2 { padding: .35rem !important; }
+      #gunStats .fs-5 { font-size: .95rem !important; }
+    }
   </style>
 </head>
 
 <body class="text-light">
+  <div id="locationBg"></div>
   <nav class="navbar navbar-expand-lg navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
     <div class="container py-2">
       <a class="navbar-brand fw-semibold" href="#">
         🧟 ZBOE <span class="opacity-75">Global Hunt</span> <small id="verBadge"></small>
       </a>
 
-      <div class="d-flex align-items-center gap-2">
+      <div class="d-flex align-items-center flex-wrap gap-2 py-1">
         <span class="badge rounded-pill text-bg-success" id="huntBadge">HUNT ACTIVE</span>
         <span class="badge rounded-pill text-bg-warning text-dark" id="hordeBadge">HORDE: NO</span>
         <span class="badge rounded-pill badge-soft" id="zombieBadge">ZOMBIES: 1</span>
@@ -114,9 +215,9 @@
   </nav>
 
   <main class="container-fluid my-3">
-    <div class="row g-3" style="height: calc(100vh - 90px);">
+    <div class="row g-3 dash-row">
       <!-- Left: player loadout -->
-      <div class="col-lg-3" style="overflow-y: auto; max-height: 100%;">
+      <div class="col-lg-3 dash-col-side" id="loadoutCol">
         <!-- Player card -->
         <div class="card soft-card mb-3">
           <div class="card-header d-flex align-items-center justify-content-between">
@@ -129,14 +230,17 @@
             </div>
           </div>
           <div class="card-body">
-            <!-- Player HUD: level circle + name + health (red) / shield (blue) bars -->
+            <!-- Player HUD: level circle + name + health (red) / shield (blue) / mana (purple) bars -->
             <div class="d-flex align-items-center gap-3 mb-3">
-              <div class="d-flex align-items-center justify-content-center flex-shrink-0"
+              <div class="d-flex align-items-center justify-content-center flex-shrink-0 level-circle" id="meLevelCircle"
                    style="width:56px; height:56px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05);">
                 <span class="fs-4 fw-semibold" id="meLevel">1</span>
               </div>
               <div class="flex-grow-1" style="min-width:0;">
-                <div class="fw-semibold text-truncate mb-1 shiny-name" id="meHudName">player</div>
+                <div class="d-flex align-items-center gap-2 mb-1">
+                  <div class="fw-semibold text-truncate shiny-name" id="meHudName">player</div>
+                  <span class="badge rounded-pill text-bg-info" id="meApPill" title="Armor Points — equipped gear + spell buffs + Base AP">AP 0</span>
+                </div>
                 <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
                   <span>Health</span><span id="meHealthText">100 / 100</span>
                 </div>
@@ -148,6 +252,12 @@
                 </div>
                 <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
                   <div class="progress-bar bg-primary" id="meShieldBar" role="progressbar" style="width:0%;"></div>
+                </div>
+                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                  <span>Mana</span><span id="meManaText">0 / 100</span>
+                </div>
+                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                  <div class="progress-bar bg-mana" id="meManaBar" role="progressbar" style="width:0%;"></div>
                 </div>
                 <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
                   <span>XP</span><span id="meXpText">0 / 100</span>
@@ -193,6 +303,7 @@
                 <button class="btn btn-outline-primary w-50" id="btnShop">Shop</button>
                 <button class="btn btn-outline-info w-50" id="btnInventory">Inventory</button>
               </div>
+              <button class="btn btn-outline-secondary" id="btnSpells" style="border-color: #8b5cf6 !important; color: #c4b5fd;">Spells</button>
               <!-- Adventure Panel (safe zones): campfire, cooking, meditation -->
               <div class="d-grid gap-2 d-none" id="adventurePanel">
                 <div class="p-2 border rounded muted-mono d-none" id="campfireStatus" style="border-color: rgba(255,140,0,.4) !important;">🔥 Campfire burning</div>
@@ -209,29 +320,48 @@
                     <button class="btn btn-outline-secondary w-50 d-none" id="btnForgeOut">Put Out Forge</button>
                   </div>
                 </div>
+                <!-- The Town Arcane Table — time-boxed (5min from activation)
+                     unlike the forge's persistent toggle, so it shows a live
+                     countdown alongside a manual Deactivate button. -->
+                <div class="d-grid gap-2 d-none" id="arcanePanel">
+                  <div class="p-2 border rounded muted-mono d-none" id="arcaneStatus" style="border-color: rgba(139,92,246,.5) !important;">🔮 Arcane Table active — <span id="arcaneCountdown">--</span></div>
+                  <div class="d-flex gap-2">
+                    <button class="btn btn-outline-info w-50" id="btnArcaneTable">Craft at the Arcane Table</button>
+                    <button class="btn btn-outline-secondary w-50 d-none" id="btnArcaneDeactivate">Deactivate</button>
+                  </div>
+                </div>
                 <button class="btn btn-outline-info" id="btnMeditate">Meditate on Magical Theory</button>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Personal activity feed (your own reload/fire/shop/etc.) -->
-        <div class="card soft-card">
+        <!-- Personal activity feed (your own reload/fire/shop/etc.) — folded
+             now folded into the single World Feed (#eventCol) instead. -->
+        <div class="card soft-card" id="questInfoCard">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="fw-semibold">Your Activity</div>
-            <div class="muted-mono">personal</div>
+            <div class="fw-semibold">Quest Info</div>
+            <button class="btn btn-sm btn-outline-light py-0 px-2" id="questCompletedPill" type="button" style="font-size:.72rem;">0 completed</button>
           </div>
-          <div class="list-group list-group-flush" id="personalFeed" style="max-height: 260px; overflow-y: auto;">
-            <!-- personal events inserted here -->
+          <div class="card-body" id="questInfoBody">
+            <!-- active quest + objectives, other started quests — rendered by renderQuestInfo() -->
           </div>
         </div>
       </div>
 
       <!-- Middle: controls + full-height chat -->
-      <div class="col-lg-6 d-flex flex-column" style="min-height: 0; max-height: 100%;">
+      <div class="col-lg-6 d-flex flex-column dash-col-mid" id="eventCol">
         <div class="card soft-card mb-3">
           <div class="card-body d-flex flex-wrap align-items-center gap-2 py-2">
             <button class="btn btn-sm btn-outline-success" id="btnHuntToggle">Enable Hunt</button>
+            <!-- Non-admin alternative to the direct toggle above: starts a 30s
+                 Yes/No poll (see #huntVotePanel) instead of flipping it outright. -->
+            <button class="btn btn-sm btn-outline-success d-none" id="btnHuntVoteStart">Vote to Enable Hunt</button>
+            <div class="d-none align-items-center gap-2" id="huntVotePanel">
+              <span class="badge text-bg-warning text-dark" id="huntVoteBadge">Vote: Enable Hunt — 30s</span>
+              <button class="btn btn-sm btn-success" id="btnHuntVoteYes">Yes (<span id="huntVoteYesCount">0</span>)</button>
+              <button class="btn btn-sm btn-danger" id="btnHuntVoteNo">No (<span id="huntVoteNoCount">0</span>)</button>
+            </div>
             <button class="btn btn-sm btn-outline-warning" id="btnCallZombie">Call Zombie</button>
             <span class="badge text-bg-primary" id="timeBadge">Tick: every 5 min</span>
             <span class="badge text-bg-info text-dark" id="onlineCountBadge">Online: 4</span>
@@ -243,7 +373,7 @@
             <div class="fw-semibold">Events &amp; World Chat</div>
             <div class="muted-mono">live feed</div>
           </div>
-          <div class="list-group list-group-flush flex-grow-1" id="eventFeed" style="overflow-y: auto; min-height: 0;">
+          <div class="list-group list-group-flush flex-grow-1" id="eventFeed" style="overflow-y: auto; overflow-x: hidden; min-height: 0;">
             <!-- events inserted here -->
           </div>
           <div class="card-footer">
@@ -257,12 +387,18 @@
         </div>
       </div>
 
-      <!-- Right: hunt info + leaderboard + online -->
-      <div class="col-lg-3" style="overflow-y: auto; max-height: 100%;">
+      <!-- Right: hunt info + leaderboard + online. On mobile this becomes a
+           collapsible accordion (see initSidebarAccordion()) — one section
+           open at a time, positioned right under Your Loadout. Desktop is
+           unaffected: the accordion CSS/JS only has visual effect below `lg`. -->
+      <div class="col-lg-3 dash-col-side" id="sidebarCol">
         <!-- Hunt Info card. In safe (no-zombie) locations it becomes "Actions":
              the hunt stats hide and the location box stays. -->
         <div class="card soft-card mb-3">
-          <div class="card-header fw-semibold" id="huntInfoTitle">Hunt Info</div>
+          <div class="card-header fw-semibold d-flex align-items-center" id="huntInfoTitle">
+            <span id="huntInfoTitleText">Hunt Info</span>
+            <span class="acc-chevron d-lg-none">▾</span>
+          </div>
           <div class="card-body">
             <div class="row g-2" id="huntStats">
               <div class="col-6">
@@ -318,6 +454,7 @@
               <button class="btn btn-sm btn-outline-success d-none" id="btnRepair">Use Repair Kit</button>
               <button class="btn btn-sm btn-outline-info" id="btnInsideOutside">Go Inside</button>
             </div>
+            <span class="acc-chevron d-lg-none">▾</span>
           </div>
           <div class="card-body">
             <div class="d-flex justify-content-between muted-mono mb-1">
@@ -339,10 +476,11 @@
 
         <!-- Players card: XP leaderboard + online status, combined. Rank badge
              background = online (green) / offline (grey). -->
-        <div class="card soft-card">
+        <div class="card soft-card" id="playersSidebarCard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="fw-semibold">Players</div>
             <div class="muted-mono"><span class="text-success">●</span> online: <span id="onlineCount">0</span></div>
+            <span class="acc-chevron d-lg-none">▾</span>
           </div>
           <div class="card-body p-0">
             <div class="list-group list-group-flush leaderboard" id="playerList">
@@ -358,6 +496,13 @@
   <div id="toast" class="position-fixed bottom-0 end-0 m-3 px-3 py-2 rounded text-light"
        style="background: rgba(0,0,0,.8); border: 1px solid rgba(255,255,255,.2); display: none; z-index: 1080;"></div>
 
+  <!-- New-event notifications (mobile only) — pops up when a fresh world/personal
+       event arrives while you're scrolled away from the event feed at the
+       bottom of the page. Kept separate from #toast (action feedback) so the
+       two never fight over the same element/timer. -->
+  <div id="eventToast" class="position-fixed top-0 start-50 translate-middle-x mt-2 px-3 py-2 rounded text-light d-none"
+       style="background: rgba(0,0,0,.88); border: 1px solid rgba(255,255,255,.2); z-index: 1085; max-width: 90vw;"></div>
+
   <!-- Player Info modal -->
   <div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -368,34 +513,38 @@
         </div>
         <div class="modal-body">
           <div class="row g-2">
-            <div class="col-6">
+            <div class="col-12">
               <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono">XP</div>
-                <div class="fs-4 fw-semibold" id="meXp">0</div>
+                <div class="muted-mono mb-1">Survival</div>
+                <div class="d-flex justify-content-between text-center">
+                  <div class="flex-fill">
+                    <div class="muted-mono">Kills</div>
+                    <div class="fs-4 fw-semibold" id="meKills">0</div>
+                  </div>
+                  <div class="flex-fill">
+                    <div class="muted-mono">XP</div>
+                    <div class="fs-4 fw-semibold" id="meXp">0</div>
+                  </div>
+                  <div class="flex-fill">
+                    <div class="muted-mono">Accuracy</div>
+                    <div class="fs-4 fw-semibold" id="meAcc">35</div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="col-6">
+            <div class="col-12">
               <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono">Kills</div>
-                <div class="fs-4 fw-semibold" id="meKills">0</div>
-              </div>
-            </div>
-            <div class="col-6">
-              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono">Accuracy</div>
-                <div class="fs-4 fw-semibold" id="meAcc">35</div>
-              </div>
-            </div>
-            <div class="col-6">
-              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono">Gold</div>
-                <div class="fs-4 fw-semibold" id="meGold">0</div>
-              </div>
-            </div>
-            <div class="col-6">
-              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono">Tokens</div>
-                <div class="fs-4 fw-semibold" id="meTokens">0</div>
+                <div class="muted-mono mb-1">Currency</div>
+                <div class="d-flex justify-content-center align-items-center gap-4">
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="muted-mono">Gold</span>
+                    <span class="badge rounded-pill badge-gold" id="meGold">0</span>
+                  </div>
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="muted-mono">Tokens</span>
+                    <span class="badge rounded-pill badge-purple" id="meTokens">0</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -409,11 +558,70 @@
             </div>
           </div>
 
-          <!-- Skills: level + XP progress toward the next level (spend to level) -->
+          <!-- Skills / Spells tabs: skill levels + XP progress (spend to
+               level), or the spells this player has learned (player_magic). -->
           <div class="mt-3">
-            <div class="muted-mono mb-1">Skills</div>
+            <div class="btn-group btn-group-sm w-100 mb-2" role="group" id="infoTabs">
+              <button class="btn btn-outline-light active" data-infotab="skills" type="button">Skills</button>
+              <button class="btn btn-outline-light" data-infotab="spells" type="button">Spells</button>
+              <button class="btn btn-outline-light" data-infotab="paperdoll" type="button">Paperdoll</button>
+            </div>
             <div id="skillList"></div>
+            <div id="knownSpellList" class="d-none"></div>
+            <div id="paperdollList" class="d-none"></div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Armor picker modal: stacks on top of the Player Info modal (same
+       non-hiding pattern the Sell modal uses over the Backpack modal) —
+       lists owned items for one paperdoll slot, equip drops back to Paperdoll. -->
+  <div class="modal fade" id="armorPickerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Choose <span id="armorPickerSlot">—</span></h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="armorPickerList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spells modal (magic.js MAGIC_SPELLS, cast via POST /api/spell/cast) -->
+  <div class="modal fade" id="spellsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Spells</h5>
+          <span class="badge rounded-pill badge-purple ms-2" id="spellsMana">Mana: 0/0</span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="spellsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Magic Table modal (Town): learn spells from magic ingredients —
+       categories from magic.js MAGIC_SPELL_CATEGORIES, via GET /api/spells +
+       POST /api/spell/learn -->
+  <div class="modal fade" id="magicModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">🪄 The Magic Table</h5>
+          <span class="badge rounded-pill badge-purple ms-2" id="magicLevelBadge">Magic Lv 1</span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="btn-group btn-group-sm w-100 px-2 pt-2 pb-2 flex-wrap" role="group" id="magicCatTabs"></div>
+          <div class="list-group list-group-flush" id="magicList"></div>
         </div>
       </div>
     </div>
@@ -575,6 +783,38 @@
     </div>
   </div>
 
+  <!-- Arcane Table modal (Town): arcane_table-station recipes, active only
+       within the 5min window after activate_arcane_table -->
+  <div class="modal fade" id="arcaneModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">🔮 The Arcane Table</h5>
+          <span class="badge ms-2" id="arcaneHeat" style="background:#8b5cf6;"></span>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="arcaneList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Completed quests: name + reward received, opened via the Quest Info pill -->
+  <div class="modal fade" id="questsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">📜 Completed Quests</h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="questsCompletedList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -591,6 +831,7 @@
       tickSeconds: 15,
       base: { health: 10000, max: 10000, destroyed: false, ap: 0, repairKits: 0, sentryActive: false },
       nuke: null,
+      huntVote: null,
       online: [],
       leaderboard: [],
       me: {
@@ -614,6 +855,7 @@
         maxClips: 0,
         acc: 0,
         cond: 0,
+        armorAp: 0,
         equippedGun: "Handgun",
         guns: [],
         location: null,
@@ -625,6 +867,8 @@
         campfireUntil: 0,
         forgeFired: false,
         beaconFired: false,
+        arcaneTableActive: false,
+        arcaneTableExpiresAt: 0,
         skills: [],
         map: [],
         isAdmin: false,
@@ -632,6 +876,7 @@
         jammed: false
       },
       actions: [],
+      quests: { active: null, started: [], completed: [] },
       events: []
     };
 
@@ -698,11 +943,27 @@
 
       $("zombieBadge").textContent = `ZOMBIES: ${state.zombies}`;
 
-      // Only admins can toggle the hunt — hide the button for everyone else.
+      // Only admins can toggle the hunt directly — hide the button for
+      // everyone else (they get the vote-to-toggle button/panel instead).
       const huntBtn = $("btnHuntToggle");
       huntBtn.textContent = state.huntActive ? "Disable Hunt" : "Enable Hunt";
       huntBtn.className = "btn btn-sm " + (state.huntActive ? "btn-danger" : "btn-outline-success") + (state.me.isAdmin ? "" : " d-none");
       huntBtn.disabled = false; // always clickable; postAction briefly disables mid-request
+
+      // Vote-to-toggle: the start button (non-admins only, hidden mid-vote)
+      // and the live Yes/No panel (everyone, only while a vote is running).
+      const vote = state.huntVote;
+      const voteStartBtn = $("btnHuntVoteStart");
+      voteStartBtn.textContent = state.huntActive ? "Vote to Disable Hunt" : "Vote to Enable Hunt";
+      voteStartBtn.classList.toggle("d-none", state.me.isAdmin || Boolean(vote?.active));
+      $("huntVotePanel").classList.toggle("d-none", !vote?.active);
+      if (vote?.active) {
+        $("huntVoteBadge").textContent = `Vote: ${vote.toggleTo ? "Enable" : "Disable"} Hunt — ${vote.secondsLeft}s`;
+        $("huntVoteYesCount").textContent = vote.yes;
+        $("huntVoteNoCount").textContent = vote.no;
+        $("btnHuntVoteYes").className = "btn btn-sm " + (vote.myVote === "yes" ? "btn-success" : "btn-outline-success");
+        $("btnHuntVoteNo").className = "btn btn-sm " + (vote.myVote === "no" ? "btn-danger" : "btn-outline-danger");
+      }
 
       // Calling in a zombie only works while the hunt is active.
       $("btnCallZombie").disabled = !state.huntActive;
@@ -718,17 +979,25 @@
       hud.classList.remove("name-green", "name-blue", "name-red", "name-gold");
       const tier = nameClassForLevel(state.me.level);
       if (tier) hud.classList.add(tier);
+      $("meLevelCircle").classList.remove("name-green", "name-blue", "name-red", "name-gold");
+      if (tier) $("meLevelCircle").classList.add(tier);
+      // AP pill: gear + spell buffs + Base AP (server's armorApOf total).
+      $("meApPill").textContent = `AP ${state.me.armorAp}`;
+      $("meApPill").className = "badge rounded-pill " + (state.me.armorAp > 0 ? "text-bg-info" : "text-bg-secondary");
       $("meXp").textContent = state.me.xp;
       $("meLevel").textContent = state.me.level;
       $("meKills").textContent = state.me.kills;
 
-      // Health (red) + Shield (blue) bars — base-bar look.
+      // Health (red) + Shield (blue) + Mana (purple) bars — base-bar look.
       const hpPct = state.me.maxHealth > 0 ? (state.me.health / state.me.maxHealth) * 100 : 0;
       $("meHealthText").textContent = `${state.me.health} / ${state.me.maxHealth}`;
       $("meHealthBar").style.width = Math.max(0, Math.min(100, hpPct)) + "%";
       const shieldPct = state.me.maxShield > 0 ? (state.me.shield / state.me.maxShield) * 100 : 0;
       $("meShieldText").textContent = `${state.me.shield} / ${state.me.maxShield}`;
       $("meShieldBar").style.width = Math.max(0, Math.min(100, shieldPct)) + "%";
+      const manaPct = state.me.maxMana > 0 ? (state.me.mana / state.me.maxMana) * 100 : 0;
+      $("meManaText").textContent = `${state.me.mana} / ${state.me.maxMana}`;
+      $("meManaBar").style.width = Math.max(0, Math.min(100, manaPct)) + "%";
 
       // XP bar: progress toward the next level's cost (caps at full).
       const xpPct = state.me.nextLevelCost > 0 ? Math.min(100, (state.me.xp / state.me.nextLevelCost) * 100) : 0;
@@ -749,7 +1018,7 @@
 
       // Safe (no-zombie) location: Hunt Info becomes Actions — hunt stats out,
       // placeholder in, hunt buttons dead until you travel back to the action.
-      $("huntInfoTitle").textContent = state.me.zombieZone ? "Hunt Info" : "Actions";
+      $("huntInfoTitleText").textContent = state.me.zombieZone ? "Hunt Info" : "Actions";
       $("huntStats").classList.toggle("d-none", !state.me.zombieZone);
       $("safeActions").classList.toggle("d-none", state.me.zombieZone);
       if (!state.me.zombieZone) $("btnCallZombie").disabled = true; // renderTop set it from huntActive
@@ -785,6 +1054,15 @@
           $("forgeStatus").classList.toggle("d-none", !state.me.forgeFired);
           $("btnForge").disabled = !state.me.forgeFired;
           $("btnForgeOut").classList.toggle("d-none", !state.me.forgeFired);
+        }
+        // The Arcane Table lives in Town only; activating it is the
+        // "Activate the Arcane Table" action in the Actions card below.
+        const atArcane = state.me.location === "town";
+        $("arcanePanel").classList.toggle("d-none", !atArcane);
+        if (atArcane) {
+          $("arcaneStatus").classList.toggle("d-none", !state.me.arcaneTableActive);
+          $("btnArcaneTable").disabled = !state.me.arcaneTableActive;
+          $("btnArcaneDeactivate").classList.toggle("d-none", !state.me.arcaneTableActive);
         }
       }
 
@@ -855,10 +1133,6 @@
       $("btnBaseReset").classList.toggle("d-none", !(b.destroyed && state.me.isAdmin));
     }
 
-    // Event types that belong in the personal (left) feed; everything else is
-    // world/global and goes to the middle World Feed.
-    const PERSONAL_TYPES = new Set(["shoot", "reload", "shop", "item", "level", "travel", "action"]);
-
     function eventRow(e){
       const item = document.createElement("div");
       item.className = "list-group-item bg-transparent text-light border-secondary-subtle";
@@ -873,35 +1147,97 @@
       return item;
     }
 
+    // Below `lg` the sidebar collapses to an accordion and the layout reorders
+    // (see the media query above) — matches that same breakpoint exactly.
+    function isMobileLayout(){ return window.innerWidth < 992; }
+
     function renderEvents(){
       const world = $("eventFeed");
-      const personal = $("personalFeed");
       world.innerHTML = "";
-      personal.innerHTML = "";
 
-      // Only show global events and events targeted at us (server already filters
-      // this way; client-side safety net). Split by type into the two feeds.
+      // Only show global events and events targeted at us (server already
+      // filters this way; client-side safety net). Personal and world events
+      // render together in one feed (previously split into a separate "Your
+      // Activity" sidebar card — merged back per the same layout mobile
+      // already used).
       const myId = String(state.me.id);
       const visible = state.events
         .filter(e => e.target === "global" || e.target === myId)
         .slice(-120);
 
-      const worldEvents = visible.filter(e => !PERSONAL_TYPES.has(e.type)).slice(-80);
-      const personalEvents = visible.filter(e => PERSONAL_TYPES.has(e.type)).slice(-60);
+      const feedEvents = visible.slice(-80);
 
-      if (!worldEvents.length) {
-        world.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle">No world events yet.</div>`;
+      if (!feedEvents.length) {
+        world.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle">No events yet.</div>`;
       } else {
-        worldEvents.forEach(e => world.appendChild(eventRow(e)));
+        feedEvents.forEach(e => world.appendChild(eventRow(e)));
         world.scrollTop = world.scrollHeight;
       }
 
-      if (!personalEvents.length) {
-        personal.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle muted-mono">No activity yet.</div>`;
-      } else {
-        personalEvents.forEach(e => personal.appendChild(eventRow(e)));
-        personal.scrollTop = personal.scrollHeight;
+      notifyNewEvents(visible);
+    }
+
+    // ---- Mobile "new event" toast ----
+    // The combined feed lives at the very bottom of the page on mobile; if
+    // you're scrolled away from it (reading your loadout, the accordion,
+    // etc.) a toast surfaces each new event so nothing gets missed.
+    let lastSeenEventTs = null;
+    function isNearPageBottom(){
+      const doc = document.documentElement;
+      return window.scrollY + window.innerHeight >= doc.scrollHeight - 48;
+    }
+    function notifyNewEvents(visible){
+      if (!isMobileLayout()) { lastSeenEventTs = visible.length ? visible[visible.length - 1].ts : lastSeenEventTs; return; }
+      if (lastSeenEventTs === null) {
+        // First render — just set the baseline, don't toast pre-existing history.
+        lastSeenEventTs = visible.length ? visible[visible.length - 1].ts : new Date(0);
+        return;
       }
+      const fresh = visible.filter(e => e.ts > lastSeenEventTs);
+      if (!fresh.length) return;
+      lastSeenEventTs = fresh[fresh.length - 1].ts;
+      if (!isNearPageBottom()) fresh.forEach(e => queueEventToast(e.msg));
+    }
+
+    let eventToastQueue = [];
+    let eventToastBusy = false;
+    function queueEventToast(msg){
+      eventToastQueue.push(msg);
+      if (eventToastQueue.length > 4) eventToastQueue = eventToastQueue.slice(-4); // avoid pileup during a busy tick
+      pumpEventToastQueue();
+    }
+    function pumpEventToastQueue(){
+      if (eventToastBusy || !eventToastQueue.length) return;
+      eventToastBusy = true;
+      const t = $("eventToast");
+      t.textContent = eventToastQueue.shift();
+      t.classList.remove("d-none");
+      setTimeout(() => {
+        t.classList.add("d-none");
+        eventToastBusy = false;
+        setTimeout(pumpEventToastQueue, 150);
+      }, 1800);
+    }
+
+    // ---- Sidebar accordion (mobile only — see #sidebarCol's media query) ----
+    // Clicking a card-header opens that section and closes the others.
+    // Harmless on desktop: the CSS that would hide a closed .card-body only
+    // exists below the `lg` breakpoint, so toggling .acc-open here has no
+    // visible effect there, and the listener is attached unconditionally
+    // rather than gated on viewport width.
+    function initSidebarAccordion(){
+      const sections = Array.from(document.querySelectorAll("#sidebarCol > .card"));
+      sections.forEach((card, i) => {
+        card.classList.add("acc-section");
+        if (i === 0) card.classList.add("acc-open"); // Hunt Info/Actions open by default
+        const header = card.querySelector(".card-header");
+        header.addEventListener("click", (e) => {
+          if (e.target.closest("button, a, input")) return; // don't hijack the header's own buttons
+          const wasOpen = card.classList.contains("acc-open");
+          sections.forEach(c => c.classList.remove("acc-open"));
+          if (!wasOpen) card.classList.add("acc-open");
+        });
+      });
     }
 
     // Skills list in the Player Info modal. The bar is auto-level progress
@@ -916,9 +1252,9 @@
         const row = document.createElement("div");
         row.className = "mb-2";
         row.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center muted-mono mb-1">
-            <span>${escapeHtml(s.name)} <span class="badge text-bg-dark border">Lv ${s.level}</span></span>
-            <span>${s.xp} / ${s.nextCost} XP
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="skill-label">${escapeHtml(s.name)} <span class="badge text-bg-dark border skill-lv">Lv ${s.level}</span></span>
+            <span class="muted-mono">${s.xp} / ${s.nextCost} XP
               <button class="btn btn-sm btn-outline-warning py-0 px-2 ms-1" data-skillup="${s.key}"
                 style="font-size:.7rem;" ${canBuy ? "" : "disabled"} title="Spend player XP on the next level">
                 Buy (${s.nextCost} XP)
@@ -935,6 +1271,69 @@
         btn.addEventListener("click", (e) => postAndRefresh("/api/skill/up", { skill: e.currentTarget.dataset.skillup })));
     }
 
+    // Quest Info card (left sidebar, replacing the old "Your Activity" feed):
+    // the active/tracked quest with live objective progress, other started-
+    // but-not-yet-active quests (name only — only one quest is ever
+    // progress-tracked at a time, see db.js's quest_active), and a
+    // completed-count pill that opens the completed-quests modal.
+    function renderQuestInfo(){
+      const q = state.quests;
+      $("questCompletedPill").textContent = `${q.completed.length} completed`;
+
+      const parts = [];
+      if (q.active) {
+        const objectivesHtml = q.active.objectives.map((o) => `
+          <div class="d-flex justify-content-between align-items-center muted-mono" style="font-size:.78rem;">
+            <span>${o.done ? "✅" : "⬜"} ${escapeHtml(o.label)}</span>
+            <span>${o.have}/${o.need}</span>
+          </div>`).join("");
+        parts.push(`
+          <div class="mb-2">
+            <div class="fw-semibold">${escapeHtml(q.active.name)}</div>
+            <div class="muted-mono mb-1" style="font-size:.78rem;">${escapeHtml(q.active.desc)}</div>
+            ${objectivesHtml}
+          </div>`);
+      } else {
+        parts.push(`<div class="muted-mono">No active quest.</div>`);
+      }
+
+      if (q.started.length) {
+        parts.push(`<div class="muted-mono mt-2 mb-1" style="font-size:.7rem;">OTHER QUESTS</div>`);
+        q.started.forEach((s) => parts.push(`
+          <div class="d-flex justify-content-between align-items-center mb-1" title="${escapeHtml(s.desc)}">
+            <span class="muted-mono" style="font-size:.78rem;">${escapeHtml(s.name)}</span>
+            <button class="btn btn-sm btn-outline-light py-0 px-2" style="font-size:.68rem;" type="button" data-activate-quest="${escapeHtml(s.key)}">Track</button>
+          </div>`));
+      }
+
+      $("questInfoBody").innerHTML = parts.join("");
+      $("questInfoBody").querySelectorAll("[data-activate-quest]").forEach((btn) =>
+        btn.addEventListener("click", () => postAndRefresh("/api/quest/activate", { key: btn.dataset.activateQuest })));
+    }
+
+    let questsModal = null;
+    function renderQuestsModal(){
+      const list = $("questsCompletedList");
+      const completed = state.quests.completed;
+      if (!completed.length) {
+        list.innerHTML = `<div class="list-group-item bg-transparent text-light border-secondary-subtle muted-mono">No quests completed yet.</div>`;
+        return;
+      }
+      list.innerHTML = completed.map((c) => {
+        const rewardBits = [];
+        if (c.reward?.gold) rewardBits.push(`+${c.reward.gold} gold`);
+        if (c.reward?.xp) rewardBits.push(`+${c.reward.xp} XP`);
+        return `<div class="list-group-item bg-transparent text-light border-secondary-subtle d-flex justify-content-between align-items-center">
+          <span>${escapeHtml(c.name)}</span><span class="muted-mono">${escapeHtml(rewardBits.join(", "))}</span>
+        </div>`;
+      }).join("");
+    }
+    $("questCompletedPill").addEventListener("click", () => {
+      renderQuestsModal();
+      if (!questsModal) questsModal = new bootstrap.Modal($("questsModal"));
+      questsModal.show();
+    });
+
     // This location's actions (Hunt Info / Actions card). Each row shows the
     // requirements line; the Do button turns into a countdown while busy.
     function renderActions(){
@@ -949,18 +1348,33 @@
       const busyLeft = Math.max(0, Math.ceil((state.me.busyUntil - Date.now()) / 1000));
 
       state.actions.forEach(a => {
+        // Button rows (a.button): the whole "action" is one button — no Do
+        // button, no meta line. Clicking opens the matching modal.
+        if (a.button) {
+          const row = document.createElement("div");
+          row.className = "d-grid mb-2";
+          row.innerHTML = `<button class="btn btn-outline-info" data-actionbtn="${escapeHtml(a.key)}" type="button">${escapeHtml(a.label)}</button>`;
+          list.appendChild(row);
+          return;
+        }
         // Recipe-pointer rows (a.recipe) surface an item_backbone recipe:
         // multi-item inputs, no success roll — the meta line shows the trade.
+        // `uses` may be a single item name (qty 1, implicit) or a { item: qty }
+        // map (e.g. activate_arcane_table's firewood + mana shard).
+        const usesTxt = !a.uses ? null : typeof a.uses === "string" ? `1 ${a.uses}` : Object.entries(a.uses).map(([k, v]) => `${v}× ${k}`).join(", ");
         const inputsTxt = a.inputs ? Object.entries(a.inputs).map(([k, v]) => `${v}× ${k}`).join(", ") : null;
         const blocked = !a.lvlOk ? `${a.skillName} ${a.skillLevel} required`
           : !a.toolOk ? `needs ${a.requires}`
-          : !a.useOk ? `needs ${a.uses}`
+          : !a.useOk ? `needs ${usesTxt}`
           : (a.activates === "forge" && state.me.forgeFired) ? "forge is going"
           : (a.activates === "beacon" && state.me.beaconFired) ? "beacon is live"
-          : !a.stationOk ? (a.station === "forge" ? "forge is cold" : a.station === "beacon" ? "no live beacon" : "campfire needed")
+          : (a.activates === "arcane_table" && state.me.arcaneTableActive) ? "table is active"
+          : !a.stationOk ? (a.station === "forge" ? "forge is cold" : a.station === "beacon" ? "no live beacon" : a.station === "arcane_table" ? "table is inactive" : "campfire needed")
           : !a.inputsOk ? `needs ${inputsTxt}` : null;
         const gain = a.activates === "forge" ? "fires the forge"
           : a.activates === "beacon" ? "lights the beacon"
+          : a.activates === "arcane_table" ? "activates the table"
+          : a.trainOnly ? `trains ${escapeHtml(a.skillName)}`
           : inputsTxt ? `${escapeHtml(inputsTxt)} → ${escapeHtml(a.grants)}`
           : `+1 ${escapeHtml(a.grants)}`;
         const row = document.createElement("div");
@@ -969,7 +1383,7 @@
         row.innerHTML = `
           <div>
             <div class="fw-semibold">${escapeHtml(a.label)}</div>
-            <div class="muted-mono">${escapeHtml(a.skillName)} ${a.skillLevel} · ${a.timer}s${a.recipe ? "" : ` · ${a.successRate}%`} · ${gain}${a.requires ? ` · needs ${escapeHtml(a.requires)}` : ""}${a.uses ? ` · uses 1 ${escapeHtml(a.uses)}` : ""}</div>
+            <div class="muted-mono">${escapeHtml(a.skillName)} ${a.skillLevel} · ${a.timer}s${a.recipe ? "" : ` · ${a.successRate}%`} · ${gain}${a.requires ? ` · needs ${escapeHtml(a.requires)}` : ""}${usesTxt ? ` · uses ${escapeHtml(usesTxt)}` : ""}</div>
           </div>
           ${blocked ? `<span class="muted-mono text-nowrap">${escapeHtml(blocked)}</span>`
             : `<button class="btn btn-sm btn-outline-success" data-action="${a.key}" ${busyLeft ? "disabled" : ""}>${busyLeft ? `${busyLeft}s…` : "Do"}</button>`}
@@ -979,6 +1393,15 @@
 
       list.querySelectorAll("[data-action]").forEach(btn =>
         btn.addEventListener("click", (e) => postAndRefresh("/api/action/do", { key: e.currentTarget.dataset.action })));
+      list.querySelectorAll("[data-actionbtn]").forEach(btn =>
+        btn.addEventListener("click", (e) => {
+          if (e.currentTarget.dataset.actionbtn === "magic_table") openMagicTable();
+          else if (e.currentTarget.dataset.actionbtn === "craft_arcane_table") {
+            if (!arcaneModal) arcaneModal = new bootstrap.Modal($("arcaneModal"));
+            renderArcane();
+            arcaneModal.show();
+          }
+        }));
     }
 
     // One row of the combined Players list. The rank badge doubles as the
@@ -1016,6 +1439,10 @@
         .forEach(u => list.appendChild(playerRow({ user: u }, null, true)));
     }
 
+    // The 6 paperdoll slots, in display order — mirrors item_backbone.js's ARMOR_PIECES.
+    const ARMOR_PIECES = ["head", "torso", "legs", "boots", "hands", "shield"];
+    const ARMOR_SLOT_LABELS = { head: "Head", torso: "Torso", legs: "Legs", boots: "Boots", hands: "Hands", shield: "Shield" };
+
     // Condition → pill color tier: green 100-85, blue 84-61, yellow 60-41,
     // red 40-21, white ≤20. Shared by the loadout gun pill and the Backpack's
     // armor condition pills.
@@ -1035,6 +1462,29 @@
         .replaceAll("'","&#039;");
     }
 
+    // Per-location background art — public/img/<location>.png. Every
+    // location has art now; LOCATION_BG stays a set (rather than assuming
+    // every LOCATION_NAMES key has a file) so a future location without art
+    // yet still falls back to body's plain gradient.
+    const LOCATION_BG = new Set([
+      "basecamp_outside", "basecamp_inside", "bunker",
+      "forest", "lake", "mountains", "river",
+      "swamp", "cave", "town",
+    ]);
+    let bgLocation = undefined; // undefined so the first render always applies
+    function renderLocationBackground(){
+      const loc = state.me.location;
+      if (loc === bgLocation) return;
+      bgLocation = loc;
+      const el = $("locationBg");
+      if (LOCATION_BG.has(loc)) {
+        el.style.backgroundImage = `linear-gradient(rgba(11,15,20,.55), rgba(11,15,20,.85)), url('/img/${loc}.png')`;
+        el.classList.add("visible");
+      } else {
+        el.classList.remove("visible");
+      }
+    }
+
     function renderAll(){
       renderTop();
       renderMe();
@@ -1042,7 +1492,9 @@
       renderEvents();
       renderPlayers();
       renderSkills();
+      renderQuestInfo();
       renderActions();
+      renderLocationBackground();
     }
 
     async function loadState(){
@@ -1095,6 +1547,15 @@
           sentryActive: Boolean(data?.base?.sentryActive)
         },
         nuke: data?.nuke ?? null,
+        huntVote: data?.huntVote ? {
+          active: true,
+          toggleTo: Boolean(data.huntVote.toggleTo),
+          secondsLeft: Number(data.huntVote.secondsLeft ?? 0),
+          yes: Number(data.huntVote.yes ?? 0),
+          no: Number(data.huntVote.no ?? 0),
+          myVote: data.huntVote.myVote ?? null,
+          onlineNonAdminCount: Number(data.huntVote.onlineNonAdminCount ?? 0),
+        } : null,
         online: Array.isArray(data?.online) ? data.online : [],
         leaderboard: Array.isArray(data?.leaderboard) ? data.leaderboard : [],
         me: {
@@ -1109,12 +1570,15 @@
           maxHealth: Number(data?.me?.maxHealth ?? 100),
           shield: Number(data?.me?.shield ?? 0),
           maxShield: Number(data?.me?.maxShield ?? 100),
+          mana: Number(data?.me?.mana ?? 0),
+          maxMana: Number(data?.me?.maxMana ?? 100),
           ammo: Number(data?.me?.ammo ?? 0),
           maxAmmo: Number(data?.me?.maxAmmo ?? 0),
           clips: Number(data?.me?.clips ?? 0),
           maxClips: Number(data?.me?.maxClips ?? 0),
           acc: Number(data?.me?.acc ?? 0),
           cond: Number(data?.me?.cond ?? 0),
+          armorAp: Number(data?.me?.armorAp ?? 0),
           gold: Number(data?.me?.gold ?? 0),
           tokens: Number(data?.me?.tokens ?? 0),
           goldenShots: Number(data?.me?.goldenShots ?? 0),
@@ -1129,6 +1593,8 @@
           campfireUntil: Number(data?.me?.campfireUntil ?? 0),
           forgeFired: Boolean(data?.me?.forgeFired),
           beaconFired: Boolean(data?.me?.beaconFired),
+          arcaneTableActive: Boolean(data?.me?.arcaneTableActive),
+          arcaneTableExpiresAt: Number(data?.me?.arcaneTableExpiresAt ?? 0),
           skills: Array.isArray(data?.me?.skills) ? data.me.skills : [],
           map: Array.isArray(data?.me?.map) ? data.me.map : [],
           isAdmin: Boolean(data?.me?.isAdmin),
@@ -1136,6 +1602,11 @@
           jammed: Boolean(data?.me?.jammed)
         },
         actions: Array.isArray(data?.actions) ? data.actions : [],
+        quests: {
+          active: data?.quests?.active ?? null,
+          started: Array.isArray(data?.quests?.started) ? data.quests.started : [],
+          completed: Array.isArray(data?.quests?.completed) ? data.quests.completed : [],
+        },
         events
       };
     }
@@ -1181,6 +1652,19 @@
     $("btnShoot").addEventListener("click", (e) => postAction("/api/action/shoot", e.currentTarget));
     $("btnReload").addEventListener("click", (e) => postAction("/api/action/reload", e.currentTarget));
     $("btnHuntToggle").addEventListener("click", (e) => postAction("/api/hunt/toggle", e.currentTarget));
+    $("btnHuntVoteStart").addEventListener("click", (e) => postAction("/api/hunt/vote/start", e.currentTarget));
+
+    // Yes/No casts. Admins CAN vote, but get a courtesy confirm first once
+    // there are enough non-admins online to decide it themselves.
+    function castHuntVote(vote){
+      if (state.me.isAdmin && (state.huntVote?.onlineNonAdminCount ?? 0) > 5) {
+        if (!confirm("There are enough players to decide on their own, are you sure?")) return;
+      }
+      postAndRefresh("/api/hunt/vote/cast", { vote });
+    }
+    $("btnHuntVoteYes").addEventListener("click", () => castHuntVote("yes"));
+    $("btnHuntVoteNo").addEventListener("click", () => castHuntVote("no"));
+
     $("btnCallZombie").addEventListener("click", (e) => postAction("/api/hunt/call-zombie", e.currentTarget));
     $("btnShop").addEventListener("click", () => openShop("items"));
     $("btnInventory").addEventListener("click", () => openInventory());
@@ -1259,7 +1743,7 @@
           : !r.inputsOk ? `needs ${inputsTxt}`
           : busy ? `busy ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : null;
         list.appendChild(actionRow({
-          title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border">${escapeHtml(r.skillName)} ${r.level}</span>`,
+          title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border skill-lv">${escapeHtml(r.skillName)} ${r.level}</span>`,
           sub: `${inputsTxt} → ${escapeHtml(r.output)} · ${r.timer}s · +${r.xp} ${escapeHtml(r.skillName)} XP`,
           btnLabel: blocked ? blocked : "Cook",
           btnClass: "btn-success",
@@ -1308,7 +1792,7 @@
       b.addEventListener("click", () => { forgeTab = b.dataset.forgetab; renderForge(); }));
 
     // Section order within a forge tab (recipes carry `section` from the registry).
-    const FORGE_SECTIONS = ["Ingredients", "Tools", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
+    const FORGE_SECTIONS = ["Ingredients", "Tools", "Bronze", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
 
     async function renderForge(){
       $("forgeTabs").querySelectorAll("[data-forgetab]").forEach(b =>
@@ -1342,7 +1826,7 @@
             : !r.inputsOk ? `needs ${inputsTxt}`
             : busy ? `busy ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : null;
           list.appendChild(actionRow({
-            title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border">${escapeHtml(r.skillName)} ${r.level}</span>`,
+            title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border skill-lv">${escapeHtml(r.skillName)} ${r.level}</span>`,
             sub: `${inputsTxt} → ${escapeHtml(r.output)} · ${r.timer}s · +${r.xp} ${escapeHtml(r.skillName)} XP${r.requires ? ` · needs ${escapeHtml(r.requires)}` : ""}`,
             btnLabel: blocked ? blocked : forgeTab === "smelting" ? "Smelt" : "Smith",
             btnClass: "btn-warning",
@@ -1352,6 +1836,50 @@
         });
       });
     }
+
+    // ----- The Town Arcane Table: flat recipe list + activate/deactivate -----
+    $("btnArcaneDeactivate").addEventListener("click", (e) => postAction("/api/arcane-table/toggle", e.currentTarget));
+
+    let arcaneModal = null;
+    $("btnArcaneTable").addEventListener("click", () => {
+      if (!arcaneModal) arcaneModal = new bootstrap.Modal($("arcaneModal"));
+      renderArcane();
+      arcaneModal.show();
+    });
+
+    async function renderArcane(){
+      const list = $("arcaneList");
+      list.innerHTML = loadingRow();
+      const recipes = (await fetchJson("/api/craft", [])).filter(r => r.station === "arcane_table");
+      $("arcaneHeat").textContent = state.me.arcaneTableActive ? "table is active" : "table is inactive";
+      list.innerHTML = "";
+      if (!recipes.length) { list.innerHTML = emptyRow("Nothing craftable here yet."); return; }
+      const busy = state.me.busyUntil > Date.now();
+      recipes.forEach(r => {
+        const inputsTxt = Object.entries(r.inputs).map(([k, v]) => `${v}× ${k}`).join(", ");
+        const blocked = !r.stationOk ? "activate the table first"
+          : !r.lvlOk ? `${r.skillName} ${r.level} required`
+          : !r.toolOk ? `needs ${r.requires}`
+          : !r.inputsOk ? `needs ${inputsTxt}`
+          : busy ? `busy ${Math.ceil((state.me.busyUntil - Date.now()) / 1000)}s` : null;
+        list.appendChild(actionRow({
+          title: `${escapeHtml(r.label)} <span class="badge text-bg-dark border skill-lv">${escapeHtml(r.skillName)} ${r.level}</span>`,
+          sub: `${inputsTxt} → ${escapeHtml(r.output)} · ${r.timer}s · +${r.xp} ${escapeHtml(r.skillName)} XP${r.requires ? ` · needs ${escapeHtml(r.requires)}` : ""}`,
+          btnLabel: blocked ? blocked : "Craft",
+          btnClass: "btn-info",
+          disabled: Boolean(blocked),
+          onClick: async () => { await postAndRefresh("/api/craft", { key: r.key }); renderArcane(); }
+        }));
+      });
+    }
+
+    // Live countdown while the Arcane Table is active — recomputed every
+    // second from the already-cached state.me.arcaneTableExpiresAt, no extra fetch.
+    setInterval(() => {
+      if (!state.me.arcaneTableActive) return;
+      const left = Math.max(0, Math.ceil((state.me.arcaneTableExpiresAt - Date.now()) / 1000));
+      $("arcaneCountdown").textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    }, 1000);
 
     let mapModal = null;
     $("btnMap").addEventListener("click", () => {
@@ -1366,6 +1894,207 @@
       if (!statsModal) statsModal = new bootstrap.Modal($("statsModal"));
       statsModal.show();
     });
+
+    // -------------------------
+    // Spells modal (magic.js MAGIC_SPELLS, via GET /api/spells + POST /api/spell/cast)
+    // -------------------------
+    let spellsModal = null;
+    $("btnSpells").addEventListener("click", () => {
+      if (!spellsModal) spellsModal = new bootstrap.Modal($("spellsModal"));
+      renderSpells();
+      spellsModal.show();
+    });
+
+    // Human line for a spell's effect, shared by the cast modal, the Magic
+    // Table, and the Player Info Spells tab.
+    function spellDetailOf(s){
+      return s.type === "attack" ? `${s.effect.accuracy}% acc · up to ${s.effect.targets} target${s.effect.targets === 1 ? "" : "s"}` :
+        s.type === "armor"  ? `+${s.effect.ap} AP (temporary)` :
+        s.type === "heal"   ? `+${s.effect.hp} health` :
+        s.type === "aid"    ? `+${s.effect.hp_target} health (you or another player)` :
+        s.type === "travel" ? `warps to a fixed location` : "";
+    }
+
+    async function renderSpells(){
+      $("spellsMana").textContent = `Mana: ${state.me.mana}/${state.me.maxMana}`;
+      const list = $("spellsList");
+      list.innerHTML = loadingRow();
+      const data = await fetchJson("/api/spells", { spells: [] });
+      const spells = (data.spells || []).filter(s => s.learned); // only learned spells are castable
+      list.innerHTML = "";
+      if (!spells.length) { list.innerHTML = emptyRow("No spells learned — visit the Magic Table in Town."); return; }
+      const magicLevel = state.me.skills.find(s => s.key === "magic")?.level ?? 1;
+      spells.forEach(s => {
+        const locked = magicLevel < s.level;
+        const afford = state.me.mana >= s.cost;
+        const detail = spellDetailOf(s);
+        list.appendChild(actionRow({
+          title: `${escapeHtml(s.name)} <span class="badge text-bg-secondary">${escapeHtml(s.type)}</span>`,
+          sub: `${s.cost} mana · Lv ${s.level} · ${escapeHtml(s.desc)}${detail ? ` · ${detail}` : ""}${locked ? ` · requires Magic ${s.level}` : ""}`,
+          btnLabel: "Cast",
+          btnClass: "btn-outline-info",
+          disabled: locked || !afford,
+          onClick: () => postAndRefresh("/api/spell/cast", { key: s.key }).then(renderSpells)
+        }));
+      });
+    }
+
+    // -------------------------
+    // Magic Table modal (Town): learn spells for ingredients. Categories are
+    // magic.js MAGIC_SPELL_CATEGORIES (sent by /api/spells); spells land in
+    // the tab matching their type.
+    // -------------------------
+    let magicModal = null, magicCat = "attack", magicData = null;
+    function openMagicTable(){
+      if (!magicModal) magicModal = new bootstrap.Modal($("magicModal"));
+      renderMagicTable();
+      magicModal.show();
+    }
+
+    async function renderMagicTable(){
+      const list = $("magicList");
+      list.innerHTML = loadingRow();
+      magicData = await fetchJson("/api/spells", { categories: {}, spells: [] });
+      const cats = Object.keys(magicData.categories);
+      if (!cats.includes(magicCat)) magicCat = cats[0];
+      const magicLevel = state.me.skills.find(s => s.key === "magic")?.level ?? 1;
+      $("magicLevelBadge").textContent = `Magic Lv ${magicLevel}`;
+      const tabs = $("magicCatTabs");
+      tabs.innerHTML = cats.map(c =>
+        `<button class="btn btn-outline-info" data-magiccat="${escapeHtml(c)}" type="button">${escapeHtml(magicData.categories[c].name.replace(/ Spells$/, ""))}</button>`).join("");
+      tabs.querySelectorAll("[data-magiccat]").forEach(b =>
+        b.addEventListener("click", () => { magicCat = b.dataset.magiccat; renderMagicCat(); }));
+      renderMagicCat();
+    }
+
+    function renderMagicCat(){
+      $("magicCatTabs").querySelectorAll("[data-magiccat]").forEach(b =>
+        b.classList.toggle("active", b.dataset.magiccat === magicCat));
+      const list = $("magicList");
+      list.innerHTML = "";
+      const rows = magicData.spells.filter(s => s.type === magicCat);
+      if (!rows.length) { list.innerHTML = emptyRow(`${magicData.categories[magicCat]?.desc || ""} None are known to exist yet.`); return; }
+      rows.forEach(s => {
+        const ingTxt = s.learn ? s.learn.map(i => `${i.have}/${i.need}× ${i.item}`).join(", ") : null;
+        const ingOk = !s.learn || s.learn.every(i => i.have >= i.need);
+        const detail = spellDetailOf(s);
+        const blocked = s.learned ? "Known"
+          : !s.learn ? "Starter"
+          : !s.lvlOk ? `Magic ${s.level} required`
+          : !ingOk ? "Missing ingredients" : null;
+        list.appendChild(actionRow({
+          title: `${escapeHtml(s.name)} <span class="badge text-bg-secondary">${escapeHtml(s.type)}</span>${s.learned ? ' <span class="badge badge-purple">known</span>' : ""}`,
+          sub: `Magic Lv ${s.level} · ${s.cost} mana to cast · ${escapeHtml(s.desc)}${detail ? ` · ${detail}` : ""}${ingTxt ? ` · needs ${escapeHtml(ingTxt)}` : ""}`,
+          btnLabel: blocked || "Learn",
+          btnClass: "btn-outline-info",
+          disabled: Boolean(blocked),
+          onClick: async () => { await postAndRefresh("/api/spell/learn", { key: s.key }); renderMagicTable(); }
+        }));
+      });
+    }
+
+    // ----- Player Info modal: Skills / Spells / Paperdoll tabs -----
+    let infoTab = "skills";
+    $("infoTabs").querySelectorAll("[data-infotab]").forEach(b =>
+      b.addEventListener("click", () => {
+        infoTab = b.dataset.infotab;
+        $("infoTabs").querySelectorAll("[data-infotab]").forEach(x => x.classList.toggle("active", x.dataset.infotab === infoTab));
+        $("skillList").classList.toggle("d-none", infoTab !== "skills");
+        $("knownSpellList").classList.toggle("d-none", infoTab !== "spells");
+        $("paperdollList").classList.toggle("d-none", infoTab !== "paperdoll");
+        if (infoTab === "spells") renderKnownSpells();
+        if (infoTab === "paperdoll") renderPaperdoll();
+      }));
+
+    // ----- Paperdoll tab: one line per slot, click the equipped item to swap
+    // over to a picker modal (Player Info hides while it's open — stacking a
+    // second Bootstrap modal on top left the page's modal/backdrop state
+    // corrupted, silently breaking every modal after it). Closing the picker
+    // (any way — selection, X, backdrop, Escape) reopens Player Info on the
+    // Paperdoll tab. -----
+    let armorPickerModal = null;
+    async function renderPaperdoll(){
+      const wrap = $("paperdollList");
+      wrap.innerHTML = `<div class="muted-mono">Loading…</div>`;
+      await loadInventory();
+      wrap.innerHTML = ARMOR_PIECES.map((slot) => {
+        const equippedName = invData.equippedArmor?.[slot];
+        const item = equippedName ? (invData.armors || []).find(a => a.name === equippedName) : null;
+        return `
+          <div class="d-flex justify-content-between align-items-center mb-2 p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
+            <span class="muted-mono">${escapeHtml(ARMOR_SLOT_LABELS[slot])}</span>
+            <button class="btn btn-sm btn-outline-light py-0" data-paperdollslot="${slot}" type="button">
+              ${item
+                ? `${escapeHtml(item.label)} <span class="badge rounded-pill ${condTierOf(item.condition)} ms-1">${item.condition <= 0 ? "BROKEN" : `${item.condition}%`}</span>`
+                : `<span class="text-muted">None equipped</span>`}
+            </button>
+          </div>`;
+      }).join("");
+      wrap.querySelectorAll("[data-paperdollslot]").forEach(btn =>
+        btn.addEventListener("click", () => openArmorPicker(btn.dataset.paperdollslot)));
+    }
+
+    // Switches away from the Player Info modal to the picker (rather than
+    // stacking a second Bootstrap modal on top of it, which left the page's
+    // modal/backdrop state corrupted — subsequent modals silently failed to
+    // open at all). Reopens Player Info on the Paperdoll tab once the picker
+    // closes, however it closes (selection, X, backdrop click, Escape).
+    let returnToPaperdoll = false;
+    $("armorPickerModal").addEventListener("hidden.bs.modal", async () => {
+      if (!returnToPaperdoll) return;
+      returnToPaperdoll = false;
+      await renderPaperdoll();
+      if (!statsModal) statsModal = new bootstrap.Modal($("statsModal"));
+      statsModal.show();
+    });
+
+    function openArmorPicker(slot){
+      $("armorPickerSlot").textContent = ARMOR_SLOT_LABELS[slot];
+      const options = (invData.armors || []).filter(a => a.piece === slot);
+      const list = $("armorPickerList");
+      list.innerHTML = options.length ? options.map(a => `
+        <div class="list-group-item d-flex justify-content-between align-items-center" style="background:#0b0f14; border-color: rgba(255,255,255,.12);">
+          <div>
+            <div class="fw-semibold">${escapeHtml(a.label)} <span class="badge text-bg-dark border">AP ${a.ap}</span>
+              <span class="badge rounded-pill ${condTierOf(a.condition)}">${a.condition <= 0 ? "BROKEN" : `${a.condition}%`}</span></div>
+            <div class="muted-mono" style="font-size:.75rem;">Def ${a.defense}${a.defenseOk ? "" : " (locked)"} · x${a.quantity}</div>
+          </div>
+          ${a.equipped
+            ? `<button class="btn btn-sm btn-outline-secondary" data-pick="">Unequip</button>`
+            : a.defenseOk
+              ? `<button class="btn btn-sm btn-outline-primary" data-pick="${escapeHtml(a.name)}">Equip</button>`
+              : `<span class="muted-mono text-nowrap" style="font-size:.75rem;">Requires Defense ${a.defense}</span>`}
+        </div>`).join("")
+        : `<div class="list-group-item muted-mono" style="background:#0b0f14;">Nothing owned for this slot yet.</div>`;
+      list.querySelectorAll("[data-pick]").forEach(btn =>
+        btn.addEventListener("click", async (e) => {
+          await postAndRefresh("/api/armor/equip", { item: e.currentTarget.dataset.pick, slot });
+          armorPickerModal.hide();
+        }));
+      returnToPaperdoll = true;
+      if (!armorPickerModal) armorPickerModal = new bootstrap.Modal($("armorPickerModal"));
+      if (statsModal) statsModal.hide();
+      armorPickerModal.show();
+    }
+
+    async function renderKnownSpells(){
+      const wrap = $("knownSpellList");
+      wrap.innerHTML = `<div class="muted-mono">Loading…</div>`;
+      const data = await fetchJson("/api/spells", { spells: [] });
+      const known = (data.spells || []).filter(s => s.learned);
+      wrap.innerHTML = "";
+      if (!known.length) { wrap.innerHTML = `<div class="muted-mono">No spells learned — visit the Magic Table in Town.</div>`; return; }
+      known.forEach(s => {
+        const detail = spellDetailOf(s);
+        const row = document.createElement("div");
+        row.className = "p-2 border rounded mb-2";
+        row.style.cssText = "border-color: rgba(255,255,255,.12) !important;";
+        row.innerHTML = `
+          <div class="fw-semibold">${escapeHtml(s.name)} <span class="badge text-bg-secondary">${escapeHtml(s.type)}</span> <span class="badge badge-purple">${s.cost} mana</span></div>
+          <div class="muted-mono">${escapeHtml(s.desc)}${detail ? ` · ${detail}` : ""} · Magic Lv ${s.level}</div>`;
+        wrap.appendChild(row);
+      });
+    }
     $("btnLevelUp").addEventListener("click", (e) => postAction("/api/level/up", e.currentTarget));
     $("btnLevelMax").addEventListener("click", (e) => postAction("/api/level/max", e.currentTarget));
     $("btnInsideOutside").addEventListener("click", (e) => postAction("/api/base/toggle", e.currentTarget));
@@ -1435,23 +2164,28 @@
     }
 
     function renderActiveTab(){
-      $("shopGold").textContent = `Gold: ${state.me.gold} · Tokens: ${state.me.tokens}`;
+      $("shopGold").textContent = `Gold: ${state.me.gold} · Tokens: ${state.me.tokens} · Mana: ${state.me.mana}`;
       if (activeTab === "items") renderShopItems();
       else renderUpgrades();
     }
 
-    // Currency-aware helpers (gold vs horde tokens).
-    const costLabel = (currency, cost) => `${cost} ${currency === "token" ? "tokens" : "gold"}`;
-    const canAfford = (currency, cost) => currency === "token" ? state.me.tokens >= cost : state.me.gold >= cost;
+    // Currency-aware helpers (gold, horde tokens, or mana).
+    const costLabel = (currency, cost) => `${cost} ${currency === "token" ? "tokens" : currency === "mana" ? "mana" : "gold"}`;
+    const canAfford = (currency, cost) =>
+      currency === "token" ? state.me.tokens >= cost :
+      currency === "mana" ? state.me.mana >= cost : state.me.gold >= cost;
 
-    // Render one static upgrade/item row (shared by the Items and Upgrades tabs).
+    // Render one static upgrade/item row (shared by the Items and Upgrades
+    // tabs). Entries can carry material `inputs` and a Defense gate — the
+    // server's `affordable` flag covers those (items the client can't count).
     function staticRow(u){
+      const inputsTxt = u.inputs ? Object.entries(u.inputs).map(([n, q]) => `${q}× ${n}`).join(", ") : null;
       return actionRow({
         title: escapeHtml(u.label),
-        sub: `${costLabel(u.currency, u.cost)} · ${escapeHtml(u.desc)}`,
+        sub: `${costLabel(u.currency, u.cost)}${inputsTxt ? ` + ${escapeHtml(inputsTxt)}` : ""}${u.defense ? ` · Defense ${u.defense}+` : ""} · ${escapeHtml(u.desc)}`,
         btnLabel: u.owned ? "Owned" : "Buy",
         btnClass: u.type === "gun" ? "btn-primary" : "btn-success",
-        disabled: u.owned || !canAfford(u.currency, u.cost),
+        disabled: u.owned || !canAfford(u.currency, u.cost) || u.affordable === false,
         onClick: () => postAndRefresh("/api/shop/upgrades/buy", { key: u.key })
       });
     }
@@ -1641,32 +2375,40 @@
           }));
 
       } else if (packTab === "armor") {
-        // One armor slot: Equip swaps, the equipped row offers Unequip.
-        // Selling keeps the worn set (server-enforced; the modal max matches).
+        // Grouped by paperdoll slot (ARMOR_PIECES order): Equip swaps that
+        // slot, the equipped row offers Unequip. Selling keeps the worn piece
+        // (server-enforced; the modal max matches).
         const rows = invData.armors || [];
         if (!rows.length) { body.innerHTML = packEmpty("No armor — smith some at the forge."); return; }
-        body.innerHTML = packTable(["Armor", "AP", "Cond", "Qty", "", ""], rows.map((a, idx) => `
+        const bySlot = {};
+        rows.forEach((a, idx) => (bySlot[a.piece] ||= []).push({ ...a, idx }));
+        body.innerHTML = ARMOR_PIECES.filter(s => bySlot[s]).map(slot => `
+          <div class="muted-mono mt-2 mb-1" style="font-size:.7rem;">${escapeHtml(ARMOR_SLOT_LABELS[slot])}</div>
+          ${packTable(["Armor", "AP", "Def", "Cond", "Qty", "", ""], bySlot[slot].map((a) => `
           <tr>
             <td class="fw-semibold">${escapeHtml(a.label)}</td>
             <td><span class="badge text-bg-dark border">AP ${a.ap}</span></td>
+            <td><span class="badge ${a.defenseOk ? "text-bg-dark border" : "text-bg-danger"}" title="Defense level required to wear">Def ${a.defense}</span></td>
             <td><span class="badge rounded-pill ${condTierOf(a.condition)}">${a.condition <= 0 ? "BROKEN" : `${a.condition}%`}</span></td>
             <td>x${a.quantity}</td>
             <td class="text-end">${a.equipped
               ? `<span class="badge text-bg-primary">equipped</span>
-                 <button class="btn btn-sm btn-outline-secondary py-0" data-armor="">Unequip</button>`
-              : `<button class="btn btn-sm btn-outline-primary py-0" data-armor="${escapeHtml(a.name)}">Equip</button>`}</td>
+                 <button class="btn btn-sm btn-outline-secondary py-0" data-armor="" data-armorslot="${slot}">Unequip</button>`
+              : a.defenseOk
+                ? `<button class="btn btn-sm btn-outline-primary py-0" data-armor="${escapeHtml(a.name)}" data-armorslot="${slot}">Equip</button>`
+                : `<span class="muted-mono text-nowrap" style="font-size:.72rem;">Requires Defense ${a.defense}</span>`}</td>
             <td class="text-end">${a.quantity > (a.equipped ? 1 : 0)
-              ? `<button class="btn btn-sm btn-outline-success py-0" data-sellarmor="${idx}">Sell</button>` : ""}</td>
-          </tr>`).join(""));
+              ? `<button class="btn btn-sm btn-outline-success py-0" data-sellarmor="${a.idx}">Sell</button>` : ""}</td>
+          </tr>`).join(""))}`).join("");
         body.querySelectorAll("[data-armor]").forEach(btn =>
           btn.addEventListener("click", async (e) => {
-            await postAndRefresh("/api/armor/equip", { item: e.currentTarget.dataset.armor });
+            await postAndRefresh("/api/armor/equip", { item: e.currentTarget.dataset.armor, slot: e.currentTarget.dataset.armorslot });
             loadInventory();
           }));
         body.querySelectorAll("[data-sellarmor]").forEach(btn =>
           btn.addEventListener("click", (e) => {
             const a = rows[Number(e.currentTarget.dataset.sellarmor)];
-            // The worn set can't be sold — cap the modal at qty-1 while equipped.
+            // The worn piece can't be sold — cap the modal at qty-1 while equipped.
             openSell({ item_name: a.name, quantity: a.equipped ? a.quantity - 1 : a.quantity, value: a.value });
           }));
 
@@ -1758,6 +2500,7 @@
     });
 
     // Initial render + live polling
+    initSidebarAccordion();
     loadState();
     setupAutoRefresh();
   </script>

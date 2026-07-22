@@ -19,11 +19,4 @@ rsync \
     --filter=':- .gitignore' \
     ./ \
     "${REMOTE_HOST}:${REMOTE_DIR}"
-echo "Uploading to live"
-rsync \
-    -av \
-    --delete \
-    --filter=':- .gitignore' \
-    ./ \
-    "rvzm@kelvin.rvzm.me:/home/rvzm/projects/zboe2/"
-echo "Backup and Upload complete"
+

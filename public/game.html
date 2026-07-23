@@ -268,18 +268,20 @@
               </div>
             </div>
 
-            <!-- Combat loadout (zombie zones only) -->
+            <!-- Combat loadout (zombie zones only) — stat boxes reflect
+                 whichever weapon-wheel slot is currently active
+                 (players.selected_equip_slot / state.me.selectedSlot). -->
             <div class="row g-2 mb-3" id="gunStats">
               <div class="col-6">
                 <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                  <div class="muted-mono">Ammo</div>
-                  <div class="fs-5 fw-semibold"><span id="meAmmo">4</span> / <span id="meMaxAmmo">6</span></div>
+                  <div class="muted-mono" id="statBox1Label">Ammo</div>
+                  <div class="fs-5 fw-semibold"><span id="statBox1Value">4 / 6</span></div>
                 </div>
               </div>
               <div class="col-6">
                 <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                  <div class="muted-mono">Clips</div>
-                  <div class="fs-5 fw-semibold"><span id="meClips">2</span> / <span id="meMaxClips">3</span></div>
+                  <div class="muted-mono" id="statBox2Label">Clips</div>
+                  <div class="fs-5 fw-semibold"><span id="statBox2Value">2 / 3</span></div>
                 </div>
               </div>
             </div>
@@ -287,12 +289,36 @@
             <div class="d-grid gap-2">
               <div class="d-grid gap-2" id="combatButtons">
                 <button class="btn btn-success" id="btnShoot">Shoot</button>
-                <!-- Gun switcher: solid = equipped, outline = owned, locked = unowned -->
-                <div class="d-flex gap-2" id="gunSwitch">
-                  <button class="btn btn-sm btn-primary w-100" data-gun="Handgun" type="button">Handgun</button>
-                  <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Rifle" type="button">Rifle</button>
-                  <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Shotgun" type="button">Shotgun</button>
-                  <button class="btn btn-sm btn-outline-secondary w-100" data-gun="Burst Rifle" type="button">Burst Rifle</button>
+                <!-- Weapon-wheel slot buttons: Gun/Melee/Fist/Ranged/Throwing/
+                     Zombie. Each main button opens a category-filtered
+                     picker (openWeaponPicker); each quick-swap button below
+                     it just switches the active slot to whatever's already
+                     equipped there (POST /api/weapon/select), no picker. -->
+                <div class="row row-cols-3 g-2" id="slotGrid">
+                  <div class="col"><div class="d-grid gap-1">
+                    <button class="btn btn-sm w-100" data-slot="gun" type="button">Gun</button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="gun" type="button" style="font-size:.68rem;">—</button>
+                  </div></div>
+                  <div class="col"><div class="d-grid gap-1">
+                    <button class="btn btn-sm w-100" data-slot="melee" type="button">Melee</button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="melee" type="button" style="font-size:.68rem;">—</button>
+                  </div></div>
+                  <div class="col"><div class="d-grid gap-1">
+                    <button class="btn btn-sm w-100" data-slot="fist" type="button">Fist</button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="fist" type="button" style="font-size:.68rem;">—</button>
+                  </div></div>
+                  <div class="col"><div class="d-grid gap-1">
+                    <button class="btn btn-sm w-100" data-slot="ranged" type="button">Ranged</button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="ranged" type="button" style="font-size:.68rem;">—</button>
+                  </div></div>
+                  <div class="col"><div class="d-grid gap-1">
+                    <button class="btn btn-sm w-100" data-slot="throwing" type="button">Throwing</button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="throwing" type="button" style="font-size:.68rem;">—</button>
+                  </div></div>
+                  <div class="col"><div class="d-grid gap-1">
+                    <button class="btn btn-sm w-100" data-slot="zombie" type="button">Zombie</button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="zombie" type="button" style="font-size:.68rem;">—</button>
+                  </div></div>
                 </div>
                 <div class="d-flex gap-2">
                   <button class="btn btn-outline-light w-50" id="btnReload">Reload</button>
@@ -401,16 +427,29 @@
           </div>
           <div class="card-body">
             <div class="row g-2" id="huntStats">
-              <div class="col-6">
+              <div class="col-12">
                 <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                  <div class="muted-mono">Zombies</div>
-                  <div class="fs-4 fw-semibold" id="zombieCount">0</div>
-                </div>
-              </div>
-              <div class="col-6">
-                <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                  <div class="muted-mono">Horde</div>
-                  <div class="fs-5 fw-semibold" id="hordeState">idle</div>
+                  <div class="d-flex align-items-center justify-content-between mb-1">
+                    <div class="muted-mono">Targeted Zombies</div>
+                    <div class="fs-4 fw-semibold" id="tzMain">0</div>
+                  </div>
+                  <div class="d-flex flex-column gap-1" id="tzRows">
+                    <div class="d-flex align-items-center justify-content-between">
+                      <span class="small">World: <span id="tzWorldCount">0</span></span>
+                      <button class="btn btn-sm" type="button" id="tzBtnWorld" data-scope="World">Target</button>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-between">
+                      <span class="small">Location: <span id="tzLocationCount">0</span></span>
+                      <button class="btn btn-sm" type="button" id="tzBtnLocation" data-scope="Location">Target</button>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-between">
+                      <span class="small">Nearby: <span id="tzNearbyCount">0</span></span>
+                      <button class="btn btn-sm" type="button" id="tzBtnNearby" data-scope="Nearby">Target</button>
+                    </div>
+                  </div>
+                  <div class="mt-2 text-center">
+                    <span class="badge text-bg-danger" id="tzForcePill">Targeting You: 0</span>
+                  </div>
                 </div>
               </div>
               <div class="col-6">
@@ -603,6 +642,42 @@
         </div>
         <div class="modal-body p-0">
           <div class="list-group list-group-flush" id="spellsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Weapons modal: opened per-category from a slot button (openWeaponPicker) —
+       lists only owned items matching that category, with Equip/Unequip per
+       row — combat-facing, kept separate from the inventory-browsing
+       Backpack modal. Mirrors the armorPickerModal pattern. -->
+  <div class="modal fade" id="weaponsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Choose <span id="weaponsModalCategory">—</span></h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="weaponsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Heal target picker: switches away from Spells (same hide/reopen
+       pattern as armorPickerModal — stacking a second Bootstrap modal on top
+       corrupts the modal/backdrop state) for aid-type spells like Healing
+       Touch, lists online players with health/shield bars to pick a target. -->
+  <div class="modal fade" id="healPickerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Heal Who? — <span id="healPickerSpell">—</span></h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="healPickerList"></div>
         </div>
       </div>
     </div>
@@ -928,9 +1003,23 @@
     function renderTop(){
       if (state.version) $("verBadge").textContent = `[DEV] ${state.version}`;
       $("huntState").textContent = state.huntActive ? "Active" : "Inactive";
-      $("hordeState").textContent = state.hordeStatus;
       $("raidState").textContent = state.raid ? "Yes" : "No";
-      $("zombieCount").textContent = state.zombies;
+
+      // Targeted Zombies box — World/Location/Nearby counts, the Main number
+      // (the currently-targeted pool's raw count), and the "Targeting You"
+      // zombie-force pill (targeted pool + Nearby, see /api/game-state).
+      $("tzMain").textContent = state.targetedCount;
+      $("tzWorldCount").textContent = state.zombies;
+      $("tzLocationCount").textContent = state.locationZombies;
+      $("tzNearbyCount").textContent = state.nearbyZombies;
+      $("tzForcePill").textContent = `Targeting You: ${state.zombieForce}`;
+      for (const scope of ["World", "Location", "Nearby"]) {
+        const btn = $(`tzBtn${scope}`);
+        const selected = state.targetScope === scope;
+        btn.textContent = selected ? "Selected" : "Target";
+        btn.className = "btn btn-sm " + (selected ? "btn-primary" : "btn-outline-light");
+        btn.disabled = selected;
+      }
 
       $("timeBadge").textContent = `Tick: every ${state.tickSeconds} seconds`;
       $("onlineCountBadge").textContent = `Online: ${state.online.length}`;
@@ -1004,10 +1093,6 @@
       $("meXpText").textContent = `${state.me.xp} / ${state.me.nextLevelCost}`;
       $("meXpBar").style.width = xpPct + "%";
 
-      $("meAmmo").textContent = state.me.ammo;
-      $("meMaxAmmo").textContent = state.me.maxAmmo;
-      $("meClips").textContent = state.me.clips;
-      $("meMaxClips").textContent = state.me.maxClips;
       $("meAcc").textContent = state.me.acc;
       $("meGold").textContent = state.me.gold;
       $("meTokens").textContent = state.me.tokens;
@@ -1027,12 +1112,10 @@
       // Player Info, but gun stats/combat buttons swap for campfire/cook/meditate.
       const safe = !state.me.zombieZone;
       $("loadoutTitle").textContent = safe ? "Adventure Panel" : "Your Loadout";
-      $("gunBadge").classList.toggle("d-none", safe);
-      $("jamBadge").classList.toggle("d-none", safe);
-      // (condPill's visibility is folded into its tier className below)
       $("gunStats").classList.toggle("d-none", safe);
       $("combatButtons").classList.toggle("d-none", safe);
       $("adventurePanel").classList.toggle("d-none", !safe);
+      renderLoadoutCombat(safe);
       if (safe) {
         const fireLeft = Math.max(0, state.me.campfireUntil - Date.now());
         const burning = fireLeft > 0;
@@ -1066,32 +1149,6 @@
         }
       }
 
-      // While the Golden Gun overlay is active, show its remaining shots.
-      const golden = state.me.goldenShots > 0;
-      $("gunBadge").textContent = golden
-        ? `Golden Gun · ${state.me.goldenShots} shots`
-        : state.me.equippedGun;
-      $("gunBadge").className = "badge rounded-pill border " + (golden ? "text-bg-warning text-dark" : "text-bg-dark");
-
-      // Condition pill (see condTierOf: green 100-85 … white ≤20, BROKEN at 0).
-      const cond = state.me.cond;
-      const condTier = condTierOf(cond);
-      const pill = $("condPill");
-      pill.className = "badge rounded-pill " + condTier + (safe ? " d-none" : "");
-      pill.textContent = cond <= 0 ? "BROKEN" : `${cond}%`;
-
-      $("jamBadge").className = "badge rounded-pill " + (state.me.jammed ? "text-bg-danger" : "text-bg-secondary");
-      $("jamBadge").textContent = "JAM: " + (state.me.jammed ? "YES" : "NO");
-
-      // Gun switcher: solid = equipped, outline = owned & switchable, locked = unowned.
-      const gunsByName = Object.fromEntries(state.me.guns.map(g => [g.name, g]));
-      $("gunSwitch").querySelectorAll("[data-gun]").forEach(btn => {
-        const g = gunsByName[btn.dataset.gun] || { owned: false, equipped: false };
-        btn.disabled = !g.owned || g.equipped;
-        btn.className = "btn btn-sm w-100 " + (g.equipped ? "btn-primary" : g.owned ? "btn-outline-light" : "btn-outline-secondary");
-        btn.textContent = g.owned ? btn.dataset.gun : `${btn.dataset.gun} 🔒`;
-      });
-
       // Leveling controls (in the Player Info modal).
       $("meLevelInfo").textContent = `— level ${state.me.level}, next: ${state.me.nextLevelCost} XP`;
       $("btnLevelUp").textContent = `Level Up (${state.me.nextLevelCost} XP)`;
@@ -1102,13 +1159,129 @@
       const io = $("btnInsideOutside");
       io.textContent = state.me.inside ? "Go Outside" : "Go Inside";
       io.disabled = !state.me.inside && state.base.destroyed;
+    }
 
-      // disable buttons based on state (client-side only; server should enforce too)
-      // Golden Gun ignores ammo/jam/condition while active.
-      $("btnShoot").disabled = !state.huntActive || state.zombies <= 0 || !state.me.zombieZone ||
-        (!golden && (state.me.jammed || state.me.cond <= 0 || state.me.ammo <= 0));
-      $("btnReload").disabled = state.me.clips <= 0 || state.me.ammo === state.me.maxAmmo;
-      $("btnUnjam").disabled = !state.me.jammed || state.me.ammo <= 0 && state.me.clips <= 0;
+    // ---- Weapon-wheel combat controls (Loadout card) ----
+    // state.me.selectedSlot (players.selected_equip_slot, server-persisted)
+    // drives all of this — which slot's stats show, which slot the action
+    // button acts through, which slot/quick-swap buttons are highlighted.
+    const SLOT_KEYS = ["gun", "melee", "fist", "ranged", "throwing", "zombie"];
+    const STAT_BOX_LABELS = {
+      gun: ["Ammo", "Clips"],
+      melee: ["Condition", "Spares"], fist: ["Condition", "Spares"],
+      ranged: ["Quiver", "Condition"], throwing: ["Pouch", "Condition"],
+      zombie: ["Dmg", "Targets"],
+    };
+
+    // Label/disabled/click-target for the single action button — computed
+    // fresh from live state, used by both the render pass (label/disabled)
+    // and the click handler (dispatch), so a click always acts on whatever
+    // is true right now rather than whatever was true when last rendered.
+    // Melee/Fist/Throwing can only reach the player's own Nearby pool — the
+    // same "too far away" gate the server enforces on /api/action/attack.
+    const CLOSE_RANGE_REACH = new Set(["Melee", "Fist", "Throwing"]);
+
+    function computeAttack(){
+      const slot = state.me.selectedSlot;
+      // targetedCount is server-computed off whichever pool is currently
+      // targeted (World/Location/Nearby) — using it here (instead of always
+      // state.zombies) is what makes the button scope-aware for free.
+      const universalGate = !state.huntActive || state.targetedCount <= 0 || !state.me.zombieZone;
+      if (slot === "gun") {
+        const golden = state.me.goldenShots > 0;
+        return {
+          label: "Shoot",
+          disabled: universalGate || (!golden && (state.me.jammed || state.me.cond <= 0 || state.me.ammo <= 0)),
+          onClick: (btn) => postAction("/api/action/shoot", btn),
+        };
+      }
+      const w = state.me.weapons[slot];
+      if (!w) return { label: "Attack", disabled: true, onClick: null };
+      const verb = w.section === "Ranged" ? "Fire" : w.section === "Throwing" ? "Throw" : "Attack";
+      const reachGate = CLOSE_RANGE_REACH.has(w.reach) && state.targetScope !== "Nearby";
+      const brokenGate = (w.section === "Melee" || w.section === "Fist") && w.condition <= 0;
+      const ammoGate = w.section === "Ranged" ? w.quiver <= 0 : w.section === "Throwing" ? w.pouch <= 0 : false;
+      const jamGate = w.section === "Ranged" && w.jammed;
+      return {
+        label: verb,
+        disabled: universalGate || reachGate || brokenGate || ammoGate || jamGate,
+        onClick: () => postAndRefresh("/api/action/attack", { slot }),
+      };
+    }
+
+    function renderLoadoutCombat(safe){
+      $("gunBadge").classList.toggle("d-none", safe);
+      $("jamBadge").classList.toggle("d-none", safe);
+      if (safe) return; // rest of this card is the Adventure Panel instead
+
+      const slot = state.me.selectedSlot;
+      const w = slot === "gun" ? null : state.me.weapons[slot];
+      const golden = state.me.goldenShots > 0;
+
+      // --- Header badges ---
+      $("gunBadge").textContent = slot === "gun"
+        ? (golden ? `Golden Gun · ${state.me.goldenShots} shots` : state.me.equippedGun)
+        : (w ? w.label : "Nothing equipped");
+      $("gunBadge").className = "badge rounded-pill border " + (golden && slot === "gun" ? "text-bg-warning text-dark" : "text-bg-dark");
+
+      const condVal = slot === "gun" ? state.me.cond : (slot === "zombie" || !w ? null : w.condition);
+      $("condPill").classList.toggle("d-none", condVal == null);
+      if (condVal != null) {
+        $("condPill").className = "badge rounded-pill " + condTierOf(condVal);
+        $("condPill").textContent = condVal <= 0 ? "BROKEN" : `${condVal}%`;
+      }
+
+      const jamRelevant = slot === "gun" || slot === "ranged";
+      const jamVal = slot === "gun" ? state.me.jammed : Boolean(w?.jammed);
+      $("jamBadge").classList.toggle("d-none", !jamRelevant || (slot === "ranged" && !w));
+      $("jamBadge").className = "badge rounded-pill " + (jamVal ? "text-bg-danger" : "text-bg-secondary");
+      $("jamBadge").textContent = "JAM: " + (jamVal ? "YES" : "NO");
+
+      // --- Stat boxes ---
+      const [label1, label2] = STAT_BOX_LABELS[slot];
+      $("statBox1Label").textContent = label1;
+      $("statBox2Label").textContent = label2;
+      if (slot === "gun") {
+        $("statBox1Value").textContent = `${state.me.ammo} / ${state.me.maxAmmo}`;
+        $("statBox2Value").textContent = `${state.me.clips} / ${state.me.maxClips}`;
+      } else if (!w) {
+        $("statBox1Value").textContent = "—";
+        $("statBox2Value").textContent = "—";
+      } else if (slot === "melee" || slot === "fist") {
+        $("statBox1Value").textContent = `${w.condition}%`;
+        $("statBox2Value").textContent = `${w.spares}`;
+      } else if (slot === "ranged") {
+        $("statBox1Value").textContent = `${w.quiver} / ${w.quiverMax ?? "—"}`;
+        $("statBox2Value").textContent = `${w.condition}%`;
+      } else if (slot === "throwing") {
+        $("statBox1Value").textContent = `${w.pouch} / ${w.pouchMax}`;
+        $("statBox2Value").textContent = `${w.condition}%`;
+      } else if (slot === "zombie") {
+        $("statBox1Value").textContent = `${w.dmg}`;
+        $("statBox2Value").textContent = `${w.targetsMax}`;
+      }
+
+      // --- Slot grid: main buttons (filled = active) + quick-swap buttons ---
+      SLOT_KEYS.forEach(s => {
+        const main = $("slotGrid").querySelector(`[data-slot="${s}"]`);
+        main.className = "btn btn-sm w-100 " + (slot === s ? "btn-primary" : "btn-outline-light");
+        const swap = $("slotGrid").querySelector(`[data-slotswap="${s}"]`);
+        const equippedHere = s === "gun" ? state.me.equippedGun : state.me.weapons[s]?.label;
+        swap.disabled = s !== "gun" && !state.me.weapons[s];
+        swap.textContent = equippedHere || "—";
+      });
+
+      // --- Action button ---
+      const info = computeAttack();
+      $("btnShoot").textContent = info.label;
+      $("btnShoot").disabled = info.disabled;
+
+      // --- Reload/Unjam: gun-only for Reload; gun or ranged (crossbow) for Unjam ---
+      $("btnReload").classList.toggle("d-none", slot !== "gun");
+      if (slot === "gun") $("btnReload").disabled = state.me.clips <= 0 || state.me.ammo === state.me.maxAmmo;
+      $("btnUnjam").classList.toggle("d-none", !(slot === "gun" || slot === "ranged"));
+      if (slot === "gun") $("btnUnjam").disabled = !state.me.jammed || (state.me.ammo <= 0 && state.me.clips <= 0);
+      if (slot === "ranged") $("btnUnjam").disabled = !w?.jammed;
     }
 
     function renderBase(){
@@ -1428,15 +1601,15 @@
       const list = $("playerList");
       list.innerHTML = "";
       $("onlineCount").textContent = state.online.length;
-      const online = new Set(state.online);
+      const online = new Set(state.online.map(p => p.username));
 
       const sorted = [...state.leaderboard].sort((a,b) => b.xp - a.xp);
       sorted.forEach((row, idx) => list.appendChild(playerRow(row, idx + 1, online.has(row.user))));
 
       // Online players who didn't make the top list still show, unranked, below it.
       const listed = new Set(sorted.map(r => r.user));
-      state.online.filter(u => !listed.has(u))
-        .forEach(u => list.appendChild(playerRow({ user: u }, null, true)));
+      state.online.filter(p => !listed.has(p.username))
+        .forEach(p => list.appendChild(playerRow({ user: p.username }, null, true)));
     }
 
     // The 6 paperdoll slots, in display order — mirrors item_backbone.js's ARMOR_PIECES.
@@ -1537,6 +1710,12 @@
         hordeStatus: data?.hordeStatus ?? "idle",
         raid: Boolean(data?.raid),
         zombies: Number(data?.zombies ?? 0),
+        locationZombies: Number(data?.locationZombies ?? 0),
+        nearbyZombies: Number(data?.nearbyZombies ?? 0),
+        nearbyZombieHealth: Number(data?.nearbyZombieHealth ?? 0),
+        targetScope: data?.targetScope ?? "World",
+        targetedCount: Number(data?.targetedCount ?? 0),
+        zombieForce: Number(data?.zombieForce ?? 0),
         tickSeconds: Number(data?.tickSeconds ?? 15),
         base: {
           health: Number(data?.base?.health ?? 0),
@@ -1599,7 +1778,9 @@
           map: Array.isArray(data?.me?.map) ? data.me.map : [],
           isAdmin: Boolean(data?.me?.isAdmin),
           admFun: Boolean(data?.me?.admFun),
-          jammed: Boolean(data?.me?.jammed)
+          jammed: Boolean(data?.me?.jammed),
+          weapons: data?.me?.weapons ?? { melee: null, fist: null, ranged: null, throwing: null, zombie: null },
+          selectedSlot: data?.me?.selectedSlot ?? "gun"
         },
         actions: Array.isArray(data?.actions) ? data.actions : [],
         quests: {
@@ -1649,7 +1830,12 @@
       loadState();
     });
 
-    $("btnShoot").addEventListener("click", (e) => postAction("/api/action/shoot", e.currentTarget));
+    // Dispatches through computeAttack() so a click always acts on whatever
+    // slot/weapon is live right now, not whatever was true when last rendered.
+    $("btnShoot").addEventListener("click", (e) => {
+      const info = computeAttack();
+      if (info.onClick) info.onClick(e.currentTarget);
+    });
     $("btnReload").addEventListener("click", (e) => postAction("/api/action/reload", e.currentTarget));
     $("btnHuntToggle").addEventListener("click", (e) => postAction("/api/hunt/toggle", e.currentTarget));
     $("btnHuntVoteStart").addEventListener("click", (e) => postAction("/api/hunt/vote/start", e.currentTarget));
@@ -1697,6 +1883,7 @@
           <span class="d-flex align-items-center gap-2">
             <span class="fw-semibold">${escapeHtml(w.name)}</span>
             ${w.zombie ? `<span class="badge text-bg-danger">zombies</span>` : `<span class="badge text-bg-success">safe</span>`}
+            ${w.zombie && w.zombieCount != null ? `<span class="badge badge-soft">${w.zombieCount}</span>` : ""}
           </span>
           <button class="btn btn-sm btn-outline-success" data-travel="${w.key}">Travel</button>
         `;
@@ -1934,9 +2121,120 @@
           btnLabel: "Cast",
           btnClass: "btn-outline-info",
           disabled: locked || !afford,
-          onClick: () => postAndRefresh("/api/spell/cast", { key: s.key }).then(renderSpells)
+          onClick: () => s.type === "aid" ? openHealPicker(s) : postAndRefresh("/api/spell/cast", { key: s.key }).then(renderSpells)
         }));
       });
+    }
+
+    // Heal target picker for aid-type spells (Healing Touch) — same
+    // hide/reopen convention as openArmorPicker, since stacking a second
+    // Bootstrap modal directly on top corrupts the modal/backdrop state.
+    let healPickerModal = null, returnToSpells = false;
+    $("healPickerModal").addEventListener("hidden.bs.modal", () => {
+      if (!returnToSpells) return;
+      returnToSpells = false;
+      if (!spellsModal) spellsModal = new bootstrap.Modal($("spellsModal"));
+      spellsModal.show();
+    });
+
+    function healPlayerRow(p, spellKey){
+      const hpPct = p.maxHealth > 0 ? (p.health / p.maxHealth) * 100 : 0;
+      const shPct = p.maxShield > 0 ? (p.shield / p.maxShield) * 100 : 0;
+      const row = document.createElement("div");
+      row.className = "list-group-item bg-transparent text-light border-secondary-subtle";
+      row.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="fw-semibold">${escapeHtml(p.username)}${p.username === state.me.user ? " (you)" : ""}</span>
+          <button class="btn btn-sm btn-outline-info py-0" type="button">Heal</button>
+        </div>
+        <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;"><span>Health</span><span>${p.health} / ${p.maxHealth}</span></div>
+        <div class="progress mb-1" style="height:8px; background: rgba(255,255,255,.08);"><div class="progress-bar bg-danger" style="width:${Math.max(0, Math.min(100, hpPct))}%;"></div></div>
+        <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;"><span>Shield</span><span>${p.shield} / ${p.maxShield}</span></div>
+        <div class="progress" style="height:8px; background: rgba(255,255,255,.08);"><div class="progress-bar bg-primary" style="width:${Math.max(0, Math.min(100, shPct))}%;"></div></div>
+      `;
+      row.querySelector("button").addEventListener("click", async () => {
+        const params = p.username === state.me.user ? { key: spellKey } : { key: spellKey, target: p.username };
+        await postAndRefresh("/api/spell/cast", params).then(renderSpells);
+        healPickerModal.hide();
+      });
+      return row;
+    }
+
+    function openHealPicker(spell){
+      $("healPickerSpell").textContent = spell.name;
+      const list = $("healPickerList");
+      list.innerHTML = "";
+      list.appendChild(healPlayerRow({ username: state.me.user, health: state.me.health, maxHealth: state.me.maxHealth, shield: state.me.shield, maxShield: state.me.maxShield }, spell.key));
+      state.online.filter(p => p.username !== state.me.user)
+        .forEach(p => list.appendChild(healPlayerRow(p, spell.key)));
+      returnToSpells = true;
+      if (!healPickerModal) healPickerModal = new bootstrap.Modal($("healPickerModal"));
+      if (spellsModal) spellsModal.hide();
+      healPickerModal.show();
+    }
+
+    // -------------------------
+    // Weapons modal: opened per-category from a slot button in the Loadout
+    // card (openWeaponPicker) — lists only owned items matching that
+    // category, each with an Equip/Unequip toggle. Mirrors openArmorPicker's
+    // shared-modal-filtered-by-param pattern.
+    // -------------------------
+    let weaponsModal = null;
+    const CATEGORY_LABEL = { gun: "Gun", melee: "Melee Weapon", fist: "Fist Weapon", ranged: "Ranged Weapon", throwing: "Throwing Weapon", zombie: "Zombie Weapon" };
+    const SECTION_FOR_SLOT = { melee: "Melee", fist: "Fist", ranged: "Ranged", throwing: "Throwing" };
+
+    async function openWeaponPicker(category){
+      $("weaponsModalCategory").textContent = CATEGORY_LABEL[category];
+      await loadInventory();
+      renderWeaponsModal(category);
+      if (!weaponsModal) weaponsModal = new bootstrap.Modal($("weaponsModal"));
+      weaponsModal.show();
+    }
+
+    function renderWeaponsModal(category){
+      const list = $("weaponsList");
+      list.innerHTML = "";
+      if (!invData) return;
+
+      if (category === "gun") {
+        (invData.guns || []).forEach(g => {
+          const equipped = state.me.equippedGun === g.name;
+          list.appendChild(actionRow({
+            title: `${escapeHtml(g.name)} <span class="badge rounded-pill ${condTierOf(g.condition)}">${g.condition <= 0 ? "BROKEN" : `${g.condition}%`}</span>`,
+            sub: `Ammo ${g.ammo}/${g.maxAmmo} · Clips ${g.clips}/${g.maxClips}${g.jammed ? " · JAMMED" : ""}`,
+            btnLabel: equipped ? "Equipped" : "Equip",
+            btnClass: "btn-primary",
+            disabled: equipped,
+            onClick: async () => { await postAndRefresh("/api/inventory/equip", { item: g.name }); await loadInventory(); renderWeaponsModal(category); },
+          }));
+        });
+        if (!(invData.guns || []).length) list.innerHTML = emptyRow("No guns owned yet.");
+        return;
+      }
+
+      // Live state.me.weapons check, not invData's (stale, first-match-only)
+      // equippedSlot — an item can occupy two independent slots at once
+      // (e.g. a Zombie Sword in both melee and zombie), so "is this equipped
+      // in THIS category" has to be asked per-category, not read off the item.
+      const rows = (invData.weapons || []).filter(w => category === "zombie" ? w.zombieThemed : w.section === SECTION_FOR_SLOT[category]);
+      rows.forEach(w => {
+        const equippedHere = state.me.weapons[category]?.name === w.name;
+        const ammoBit = w.section === "Ranged" ? `Quiver ${w.quiver}${w.quiverMax != null ? `/${w.quiverMax}` : ""}${w.jammed ? " · JAMMED" : ""}` :
+          w.section === "Throwing" ? `Pouch ${w.pouch}/${w.pouchMax}` :
+          `Spares ${w.spares}`;
+        const targetsBit = w.targetsMax > 1 ? `up to ${w.targetsMax} targets` : "1 target";
+        list.appendChild(actionRow({
+          title: `${escapeHtml(w.label)} <span class="badge rounded-pill ${condTierOf(w.condition)}">${w.condition <= 0 ? "BROKEN" : `${w.condition}%`}</span>${equippedHere ? ` <span class="badge text-bg-info">equipped</span>` : ""}`,
+          sub: `${ammoBit} · dmg ${w.dmg} · ${targetsBit} · x${w.quantity}`,
+          btnLabel: equippedHere ? "Unequip" : "Equip",
+          btnClass: equippedHere ? "btn-outline-secondary" : "btn-primary",
+          onClick: async () => {
+            await postAndRefresh("/api/weapon/equip", { slot: category, item: equippedHere ? "none" : w.name });
+            await loadInventory(); renderWeaponsModal(category);
+          },
+        }));
+      });
+      if (!rows.length) list.innerHTML = emptyRow(`No ${CATEGORY_LABEL[category].toLowerCase()}s owned yet.`);
     }
 
     // -------------------------
@@ -2102,9 +2400,30 @@
     $("btnNuke").addEventListener("click", (e) => postAction("/api/nuke/vote", e.currentTarget));
     $("btnBaseReset").addEventListener("click", (e) => postAction("/api/base/reset", e.currentTarget));
 
-    $("btnUnjam").addEventListener("click", (e) => postAction("/api/action/unjam", e.currentTarget));
-    $("gunSwitch").querySelectorAll("[data-gun]").forEach(btn =>
-      btn.addEventListener("click", (e) => postAndRefresh("/api/inventory/equip", { item: e.currentTarget.dataset.gun })));
+    // Gun jams clear via /api/action/unjam; a jammed ranged (crossbow) slot
+    // uses the separate /api/action/unjam-ranged instead — this button is
+    // only ever shown for one of those two slots at a time (renderLoadoutCombat).
+    $("btnUnjam").addEventListener("click", (e) => {
+      if (state.me.selectedSlot === "ranged") postAndRefresh("/api/action/unjam-ranged", {});
+      else postAction("/api/action/unjam", e.currentTarget);
+    });
+
+    // Slot grid: a main [data-slot] button opens the category-filtered
+    // weapon picker; a [data-slotswap] button just switches the active
+    // combat slot to whatever's already equipped there (no picker).
+    $("slotGrid").addEventListener("click", (e) => {
+      const slotBtn = e.target.closest("[data-slot]");
+      if (slotBtn) { openWeaponPicker(slotBtn.dataset.slot); return; }
+      const swapBtn = e.target.closest("[data-slotswap]");
+      if (swapBtn && !swapBtn.disabled) postAndRefresh("/api/weapon/select", { slot: swapBtn.dataset.slotswap });
+    });
+
+    // Targeted Zombies box: Target/Selected buttons switch which pool
+    // (World/Location/Nearby) the player is fighting/exposed to.
+    $("tzRows").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-scope]");
+      if (btn && !btn.disabled) postAndRefresh("/api/target/select", { scope: btn.dataset.scope });
+    });
 
     // -------------------------
     // Global chat

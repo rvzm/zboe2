@@ -211,6 +211,7 @@
                 <button class="btn btn-outline-light" data-maintab="toolbelt" type="button">Toolbelt</button>
                 <button class="btn btn-outline-light" data-maintab="potions" type="button">Potions</button>
                 <button class="btn btn-outline-light" data-maintab="spells" type="button">Spells</button>
+                <button class="btn btn-outline-light" data-maintab="quests" type="button">Quests</button>
               </div>
               <div class="card-body p-0">
 
@@ -218,6 +219,7 @@
                   <div class="col-3 col-md-2 border-end" style="border-color: rgba(255,255,255,.12) !important;">
                     <div class="d-grid gap-1 p-2" id="bpTabs">
                       <button class="btn btn-sm btn-outline-info active" data-bptab="guns" type="button">Guns</button>
+                      <button class="btn btn-sm btn-outline-info" data-bptab="weapons" type="button">Weapons</button>
                       <button class="btn btn-sm btn-outline-info" data-bptab="armor" type="button">Armor</button>
                       <button class="btn btn-sm btn-outline-info" data-bptab="materials" type="button">Materials</button>
                       <button class="btn btn-sm btn-outline-info" data-bptab="treasure" type="button">Treasure</button>
@@ -233,6 +235,23 @@
                 <div id="mtToolbelt" class="d-none p-2" style="max-height: 55vh; overflow-y: auto; overflow-x: hidden;"></div>
                 <div id="mtPotions" class="d-none p-2" style="max-height: 55vh; overflow-y: auto; overflow-x: hidden;"></div>
                 <div id="mtSpells" class="d-none p-2" style="max-height: 55vh; overflow-y: auto; overflow-x: hidden;"></div>
+
+                <!-- Quests: 1-1-3 flex column — Active (top), Started (middle),
+                     Completed accordion (bottom, its own scroll). -->
+                <div id="mtQuests" class="d-none p-2 d-flex flex-column gap-2" style="height: 55vh;">
+                  <div class="soft-card border rounded p-2" style="flex: 1 1 0; overflow-y: auto;">
+                    <div class="fw-semibold muted-mono mb-1">Active Quest</div>
+                    <div id="questActiveBody"></div>
+                  </div>
+                  <div class="soft-card border rounded p-2" style="flex: 1 1 0; overflow-y: auto;">
+                    <div class="fw-semibold muted-mono mb-1">Started</div>
+                    <div id="questStartedBody"></div>
+                  </div>
+                  <div class="soft-card border rounded p-2" style="flex: 3 1 0; overflow-y: auto;">
+                    <div class="fw-semibold muted-mono mb-1">Completed</div>
+                    <div id="questCompletedBody"></div>
+                  </div>
+                </div>
 
               </div>
             </div>
@@ -365,6 +384,7 @@
       renderFlat("mtToolbelt", ["Tool", "Tier", "Qty"], data.tools, (i) => [i.tier || "General"]);
       renderFlat("mtPotions", ["Item", "Qty"], data.potions, () => []);
       renderSpellsTab(data.spells || []);
+      renderQuestsTab(data.quests || { active: null, started: [], completed: [] });
       currentCard = data;
     }
 
@@ -377,6 +397,60 @@
         <td><span class="badge text-bg-secondary">${esc(s.type)}</span></td>
         <td>${s.level}</td>
         <td><span class="badge badge-purple">${s.cost}</span></td></tr>`).join(""));
+    }
+
+    // ---- Quests tab (read-only — active/started/completed, 1-1-3 layout) ----
+    function rewardSummary(reward){
+      const bits = [];
+      if (reward?.gold) bits.push(`+${reward.gold} gold`);
+      if (reward?.xp) bits.push(`+${reward.xp} XP`);
+      return bits.join(", ");
+    }
+
+    function renderQuestsTab(quests){
+      const activeBody = $("questActiveBody");
+      if (quests.active) {
+        const objectivesHtml = quests.active.objectives.map(o => `
+          <div class="d-flex justify-content-between align-items-center muted-mono" style="font-size:.8rem;">
+            <span>${o.done ? "✅" : "⬜"} ${esc(o.label)}</span><span>${o.have}/${o.need}</span>
+          </div>`).join("");
+        activeBody.innerHTML = `
+          <div class="fw-semibold">${esc(quests.active.name)}</div>
+          <div class="muted-mono mb-1">${esc(quests.active.desc)}</div>
+          ${objectivesHtml}`;
+      } else {
+        activeBody.innerHTML = packEmpty("No active quest.");
+      }
+
+      const startedBody = $("questStartedBody");
+      startedBody.innerHTML = quests.started.length
+        ? quests.started.map(q => `
+          <div class="mb-1">
+            <span class="fw-semibold">${esc(q.name)}</span>
+            <div class="muted-mono" style="font-size:.8rem;">${esc(q.desc)}</div>
+          </div>`).join("")
+        : packEmpty("No other quests started.");
+
+      const completedBody = $("questCompletedBody");
+      if (!quests.completed.length) {
+        completedBody.innerHTML = packEmpty("No quests completed yet.");
+        return;
+      }
+      completedBody.innerHTML = quests.completed.map((q, i) => `
+        <div class="border rounded mb-2" style="border-color: rgba(255,255,255,.12) !important;">
+          <button class="btn btn-sm btn-outline-light border-0 w-100 text-start d-flex justify-content-between align-items-center" type="button" data-questacc="${i}">
+            <span class="fw-semibold">${esc(q.name)}</span>
+            <span class="muted-mono">${esc(rewardSummary(q.reward))}</span>
+          </button>
+          <div class="p-2 d-none" id="questAccBody${i}">
+            <div class="muted-mono mb-2">${esc(q.long_desc)}</div>
+            <div class="muted-mono mb-2">${q.quest_level ? `Requires level ${q.quest_level}` : "No level requirement"}</div>
+            <div class="muted-mono mb-1">Reward: ${esc(rewardSummary(q.reward)) || "—"}</div>
+            <div class="muted-mono">${q.objectives.map(o => `<div>• ${esc(o)}</div>`).join("")}</div>
+          </div>
+        </div>`).join("");
+      completedBody.querySelectorAll("[data-questacc]").forEach(btn =>
+        btn.addEventListener("click", () => $("questAccBody" + btn.dataset.questacc).classList.toggle("d-none")));
     }
 
     // ---- Skills (read-only — same numbers as the Player Info modal, no Buy) ----
@@ -403,7 +477,7 @@
     $("mainTabs").querySelectorAll("[data-maintab]").forEach(b => b.addEventListener("click", () => {
       mainTab = b.dataset.maintab;
       $("mainTabs").querySelectorAll("button").forEach(x => x.classList.toggle("active", x === b));
-      ["Backpack", "Toolbelt", "Potions", "Spells"].forEach(t => $("mt" + t).classList.toggle("d-none", t.toLowerCase() !== mainTab));
+      ["Backpack", "Toolbelt", "Potions", "Spells", "Quests"].forEach(t => $("mt" + t).classList.toggle("d-none", t.toLowerCase() !== mainTab));
     }));
     $("bpTabs").querySelectorAll("[data-bptab]").forEach(b => b.addEventListener("click", () => {
       bpTab = b.dataset.bptab;
@@ -462,6 +536,15 @@
           <tr><td class="fw-semibold">${esc(g.name)}</td><td>${g.condition}</td><td>${g.ammo} / ${g.maxAmmo}</td>
           <td>${g.clips} / ${g.maxClips}</td>
           <td>${g.equipped ? '<span class="badge text-bg-primary">equipped</span>' : ""}${g.jammed ? ' <span class="badge text-bg-danger">JAMMED</span>' : ""}</td></tr>`).join(""));
+      } else if (bpTab === "weapons") {
+        if (!data.weapons.length) { body.innerHTML = packEmpty("No weapons owned."); return; }
+        body.innerHTML = packTable(["Weapon", "Cond", "Ammo/Spares", "Dmg", "Targets", ""], data.weapons.map(w => {
+          const ammo = w.section === "Ranged" ? `Quiver ${w.quiver}${w.quiverMax != null ? `/${w.quiverMax}` : ""}` :
+            w.section === "Throwing" ? `Pouch ${w.pouch}/${w.pouchMax}` : `Spares ${w.spares}`;
+          return `<tr><td class="fw-semibold">${esc(w.label)}</td><td>${w.condition}%</td><td>${esc(ammo)}</td>
+          <td>${w.dmg}</td><td>${w.targetsMax}</td>
+          <td>${w.equippedSlot ? `<span class="badge text-bg-primary">${esc(w.equippedSlot)}</span>` : ""}</td></tr>`;
+        }).join(""));
       } else if (bpTab === "armor") {
         if (!data.armors.length) { body.innerHTML = packEmpty("No armor owned."); return; }
         body.innerHTML = packTable(["Armor", "AP", "Def", "Cond", "Qty", ""], armorRowsHtml(data.armors));

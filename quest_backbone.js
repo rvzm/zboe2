@@ -1,7 +1,8 @@
 // quest-backbone.js
 // Quest Bacbone for zboe2
 
-export const QUEST_NAMES = ["basic_training", "space_invader", "resupply", "first_horde", "first_raid", "can_you_hear_me", "drop_it", "defense_up", "getting_started" ];
+export const QUEST_NAMES = ["basic_training_1", "basic_training_2", "basic_training_3", "space_invader", "resupply", "first_horde", "first_raid", "can_you_hear_me", "drop_it", "defense_up", "getting_started" ];
+export const QUEST_LINES = ["basics", "bunker_bunker", "outbreak"]
 
 // Quest definitions: each quest has a name, description, and a set of objectives.
 export const QUESTS = {
@@ -17,20 +18,52 @@ export const QUESTS = {
       { type: "acquire_item", item: "firewood", qty: 5 },
     ],
   },
-  "basic_training": {
-    name: "Basic Training",
-    desc: "Learn the basics of surviving in the world.",
-    long_desc: "Learn the basics of surviving in the world. This quest guided you through learning a spell, acquiring essential items, and preparing for future challenges.",
+
+  // Basic Training line
+  "basic_training_1": {
+    name: "Basic Training 1",
+    line: "basics",
+    desc: "Let's learn Fireball!",
+    long_desc: "Let's learn Fireball! This quest guides you through learning the Fireball spell, acquiring necessary ingredients, and preparing for combat situations.",
     quest_level: 1,
     reward: { gold: 100, xp: 50 },
     starter: { enter_location: "basecamp_inside" },
     objectives: [
-      { type: "learn_spell", spell: "teleport", qty: 1 },
+      { type: "learn_spell", spell: "fireball", qty: 1 },
       { type: "acquire_item", item: "firewood", qty: 5 },
-      { type: "acquire_item", item: "glowcap", qty: 3 },
-      { type: "acquire_item", item: "mana shard", qty: 2 },
+      { type: "acquire_item", item: "arcane dust", qty: 2 },
+      { type: "acquire_item", item: "mana shard", qty: 1 },
     ],
   },
+  "basic_training_2": {
+    name: "Basic Training 2",
+    line: "basics",
+    desc: "Let's learn Heal!",
+    long_desc: "Let's learn Heal! This quest guides you through learning the Heal spell, acquiring necessary ingredients, and preparing for combat situations.",
+    quest_level: 1,
+    reward: { gold: 100, xp: 50 },
+    starter: { quest: "basic_training_1" },
+    objectives: [
+      { type: "learn_spell", spell: "heal", qty: 1 },
+      { type: "acquire_item", item: "spirit bloom", qty: 1 },
+      { type: "acquire_item", item: "glowcap", qty: 2 },
+    ],
+  },
+    "basic_training_3": {
+      name: "Basic Training 3",
+      line: "basics",
+      desc: "Let's learn Oak Skin!",
+      long_desc: "Let's learn Oak Skin! This quest guides you through learning the Oak Skin spell, acquiring necessary ingredients, and preparing for combat situations.",
+      quest_level: 2,
+      reward: { gold: 100, xp: 50 },
+      starter: { quest: "basic_training_2" },
+      objectives: [
+        { type: "learn_spell", spell: "oak skin", qty: 1 },
+        { type: "acquire_item", item: "arcane dust", qty: 1 },
+        { type: "acquire_item", item: "glowcap", qty: 3 },
+      ],
+    },
+
   "space_invader": {
     name: "Space Invader",
     desc: "Acquire a Storage Locker to store your items safely.",
@@ -44,16 +77,22 @@ export const QUESTS = {
   },
   "first_horde": {
     name: "First Horde",
+    line: "outbreak",
     desc: "Break your first zombie horde.",
-    starter: { starter: true },
+    long_desc: "Break your first zombie horde. This quest guides you through the process of encountering and defeating a zombie horde, teaching you essential combat skills and strategies for survival.",
+    quest_level: 1,
     reward: { gold: 300, xp: 150 },
+    starter: { starter: true },
     objectives: [
         { type: "break_horde", qty: 1 },
     ],
   }, 
   "first_raid": {
     name: "First Raid",
+    line: "outbreak",
     desc: "Clear your first zombie raid.",
+    long_desc: "Clear your first zombie raid. This quest guides you through the process of encountering and defeating a zombie raid, teaching you advanced combat skills and strategies for survival.",
+    quest_level: 1,
     reward: { gold: 400, xp: 200 },
     starter: { starter: true },
     objectives: [
@@ -66,6 +105,7 @@ export const QUESTS = {
   "resupply": {
     // Basic
     name: "Resupply",
+    line: "bunker_bunker",
     desc: "Use a Supply Beacon to call in supplies.",
     long_desc: "Use a Supply Beacon to call in supplies. This quest guides you through the process of using a Supply Beacon, which allows you to call in essential supplies to aid in your survival.",
     quest_level: 4,
@@ -77,16 +117,23 @@ export const QUESTS = {
   },  
   "can_you_hear_me": {
     name: "Can You Hear Me?",
+    line: "bunker_bunker",
     desc: "Use a Functional Radio Call for a supply drop.",
-    reward: { gold: 250, xp: 125 },
+    long_desc: "Use a Functional Radio Call for a supply drop. This quest guides you through the process of using a Functional Radio Call, which allows you to request a supply drop to aid in your survival.",
+    quest_level: 4,
     starter: { quest: "resupply" },
+    reward: { gold: 250, xp: 125 },
     objectives: [
       { type: "action", action: "attempt_supply_beacon", qty: 1 },
     ],
   },
   "drop_it": {
     name: "Drop It",
+    line: "bunker_bunker",
     desc: "Use a Supply Beacon to call in supplies.",
+    long_desc: "Use a Supply Beacon to call in supplies. This quest guides you through the process of using a Supply Beacon, which allows you to call in essential supplies to aid in your survival.",
+    quest_level: 4,
+    starter: { quest: "can_you_hear_me" },
     reward: { gold: 150, xp: 75, items: { "supply drop": 1 }, grant_instant_level: true },
     starter: { quest: "can_you_hear_me" },
     objectives: [

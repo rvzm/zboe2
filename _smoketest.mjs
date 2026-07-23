@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RECIPES, ITEMS, ARMOR_PIECES } from "./item_backbone.js";
+import { RECIPES, ITEMS, ARMOR_PIECES, WEAPON_TYPES, WEAPON_ATTACK_EXPORT, WEAPON_FIREARM_TYPES, WEAPON_FIREARM_EXPORT } from "./item_backbone.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,7 +45,7 @@ async function check(name, fn) {
 
 console.log(paint(["bold", "cyan"], "== Stage 0: registry sanity (no server needed) =="));
 {
-  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc"];
+  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc", "weapon", "armor"];
   const bad = [];
   for (const r of RECIPES) {
     if (!RECIPE_CATEGORIES.includes(r.category)) bad.push(`${r.key}: bad category "${r.category}"`);
@@ -65,6 +65,22 @@ console.log(paint(["bold", "cyan"], "== Stage 0: registry sanity (no server need
 
   const badStation = RECIPES.filter((r) => r.station !== undefined && typeof r.station !== "string").map((r) => r.key);
   record(`no RECIPES row has a non-string station`, badStation.length === 0, badStation.slice(0, 5).join(", "));
+}
+{
+  // Zombie Location Pool: WEAPON_FIREARM_EXPORT is the Nearby-scope gun
+  // accuracy/damage model — every WEAPON_FIREARM_TYPES key needs a valid
+  // entry, and every WEAPON_TYPES section needs a floor in WEAPON_ATTACK_EXPORT
+  // (the boot-crash-then-FATAL bug this regression-guards against: server.js
+  // couldn't even boot far enough to run its own validator until the
+  // WEAPON_RANGED_TYPES/WEAPON_RANGED_OPTIONS import mismatch was fixed).
+  const badFirearm = WEAPON_FIREARM_TYPES.filter((t) => {
+    const cfg = WEAPON_FIREARM_EXPORT[t];
+    return !cfg || !(Number.isFinite(cfg.dmg) && cfg.dmg >= 0) || !["player", "condition"].includes(cfg.acc_model);
+  });
+  record(`every WEAPON_FIREARM_TYPES entry (${WEAPON_FIREARM_TYPES.length}) has a valid WEAPON_FIREARM_EXPORT row`, badFirearm.length === 0, badFirearm.join(", "));
+
+  const badFloor = WEAPON_TYPES.filter((s) => !Number.isFinite(WEAPON_ATTACK_EXPORT[s]?.floor));
+  record(`every WEAPON_TYPES section (${WEAPON_TYPES.length}) has a floor in WEAPON_ATTACK_EXPORT`, badFloor.length === 0, badFloor.join(", "));
 }
 
 console.log(paint(["bold", "cyan"], "\n== Stage 1: isolated boot =="));
@@ -335,6 +351,160 @@ try {
     const after = await req("admin", "GET", "/api/admin/items/owners?item=" + encodeURIComponent("healing potion"));
     const p1 = after.json.owners.find((o) => o.username === "player1");
     if (!p1 || p1.quantity < 7) throw new Error(`expected player1 to own >=7 healing potion, got ${p1?.quantity}`);
+  });
+
+  console.log(paint(["bold", "cyan"], "\n== Stage 2c: quests + weapon system + heal picker =="));
+
+  await check("GET /api/game-state (quests field present, online carries objects)", async () => {
+    const r = await req("player1", "GET", "/api/game-state");
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    if (!r.json?.quests || typeof r.json.quests !== "object") throw new Error("missing quests payload");
+    if (!Array.isArray(r.json.online)) throw new Error("online should be an array");
+    if (r.json.online.length && typeof r.json.online[0] !== "object") throw new Error("online entries should be objects, not bare strings");
+    if (r.json.online.length && !("health" in r.json.online[0])) throw new Error("online entries missing health field");
+  });
+
+  await check("GET /api/playercard (quests present when authenticated, absent when not)", async () => {
+    const authed = await req("player1", "GET", "/api/playercard?user=player1");
+    if (!authed.json?.ok || !authed.json.quests) throw new Error("expected quests in authenticated payload");
+    const anonRes = await fetch(BASE + "/api/playercard?user=player1");
+    const anon = await anonRes.json();
+    if (!anon.ok) throw new Error("expected ok=true for anonymous view");
+    if (anon.authenticated) throw new Error("expected authenticated=false for anonymous request");
+    if (anon.quests) throw new Error("quests should be withheld from an unauthenticated view");
+  });
+
+  await check("POST /api/weapon/equip (melee/ranged/throwing/zombie round trip + wrong-slot rejection)", async () => {
+    const grants = [["Baseball Bat", "melee"], ["Bow", "ranged"], ["Throwing Knives", "throwing"], ["zombie sword", "zombie"]];
+    for (const [item, slot] of grants) {
+      const grant = await req("admin", "POST", "/api/admin/player/inventory/add", { username: "player1", item, qty: 1 });
+      if (!grant.json?.ok) throw new Error(`grant ${item}: ${grant.json?.message || grant.status}`);
+      const equip = await req("player1", "POST", "/api/weapon/equip", { slot, item });
+      if (!equip.json?.ok) throw new Error(`equip ${item} into ${slot}: ${equip.json?.message || equip.status}`);
+    }
+    const inv = await req("player1", "GET", "/api/inventory");
+    const bat = (inv.json?.weapons || []).find((w) => w.name === "Baseball Bat");
+    if (!bat || bat.equippedSlot !== "melee") throw new Error(`Baseball Bat not equipped in melee slot: ${JSON.stringify(bat)}`);
+    const bow = (inv.json?.weapons || []).find((w) => w.name === "Bow");
+    if (!bow || bow.equippedSlot !== "ranged") throw new Error(`Bow not equipped in ranged slot: ${JSON.stringify(bow)}`);
+
+    const wrongSlot = await req("player1", "POST", "/api/weapon/equip", { slot: "ranged", item: "Baseball Bat" });
+    if (wrongSlot.json?.ok || wrongSlot.status !== 400) throw new Error(`expected a 400 rejecting Baseball Bat in the ranged slot, got ${wrongSlot.status} ${JSON.stringify(wrongSlot.json)}`);
+  });
+
+  await check("POST /api/weapon/equip (fist is an independent slot — doesn't evict melee, rejects fist items from melee)", async () => {
+    const grant = await req("admin", "POST", "/api/admin/player/inventory/add", { username: "player1", item: "Spiked Knuckles", qty: 1 });
+    if (!grant.json?.ok) throw new Error(`grant Spiked Knuckles: ${grant.json?.message || grant.status}`);
+    const equip = await req("player1", "POST", "/api/weapon/equip", { slot: "fist", item: "Spiked Knuckles" });
+    if (!equip.json?.ok) throw new Error(`equip Spiked Knuckles into fist: ${equip.json?.message || equip.status}`);
+
+    const inv = await req("player1", "GET", "/api/inventory");
+    const bat = (inv.json?.weapons || []).find((w) => w.name === "Baseball Bat");
+    if (!bat || bat.equippedSlot !== "melee") throw new Error(`Baseball Bat was evicted from melee by the fist equip: ${JSON.stringify(bat)}`);
+    const knuckles = (inv.json?.weapons || []).find((w) => w.name === "Spiked Knuckles");
+    if (!knuckles || knuckles.equippedSlot !== "fist") throw new Error(`Spiked Knuckles not equipped in fist slot: ${JSON.stringify(knuckles)}`);
+    if (!inv.json?.equippedWeapons || inv.json.equippedWeapons.fist !== "Spiked Knuckles") throw new Error(`equippedWeapons.fist missing/wrong: ${JSON.stringify(inv.json?.equippedWeapons)}`);
+
+    const wrongSlot = await req("player1", "POST", "/api/weapon/equip", { slot: "melee", item: "Spiked Knuckles" });
+    if (wrongSlot.json?.ok || wrongSlot.status !== 400) throw new Error(`expected a 400 rejecting a Fist item in the melee slot, got ${wrongSlot.status} ${JSON.stringify(wrongSlot.json)}`);
+  });
+
+  await check("POST /api/weapon/select (quick-swap) + selectedSlot round trip through /api/game-state and /api/inventory", async () => {
+    const select = await req("player1", "POST", "/api/weapon/select", { slot: "fist" });
+    if (!select.json?.ok) throw new Error(`select fist: ${select.json?.message || select.status}`);
+    const gs = await req("player1", "GET", "/api/game-state");
+    if (gs.json?.me?.selectedSlot !== "fist") throw new Error(`expected me.selectedSlot "fist", got ${JSON.stringify(gs.json?.me?.selectedSlot)}`);
+    if (!gs.json?.me?.weapons?.fist || gs.json.me.weapons.fist.name !== "Spiked Knuckles") throw new Error(`me.weapons.fist missing/wrong: ${JSON.stringify(gs.json?.me?.weapons?.fist)}`);
+    const inv = await req("player1", "GET", "/api/inventory");
+    if (inv.json?.selectedSlot !== "fist") throw new Error(`expected /api/inventory selectedSlot "fist", got ${JSON.stringify(inv.json?.selectedSlot)}`);
+
+    const bad = await req("player1", "POST", "/api/weapon/select", { slot: "bogus" });
+    if (bad.json?.ok || bad.status !== 400) throw new Error(`expected a 400 for an unknown slot, got ${bad.status} ${JSON.stringify(bad.json)}`);
+  });
+
+  await check("admin: refill horde for weapon-attack checks", async () => {
+    const horde = await req("admin", "POST", "/api/admin/world/horde", { size: 10 });
+    if (!horde.json?.ok) throw new Error(JSON.stringify(horde.json));
+  });
+
+  await check("POST /api/action/attack (melee while targeting World — 409, attack-reach gate)", async () => {
+    const r = await req("player1", "POST", "/api/action/attack", { slot: "melee" });
+    if (r.json?.ok || r.status !== 409) throw new Error(`expected a 409 (too far away), got ${r.status} ${JSON.stringify(r.json)}`);
+  });
+
+  await check("POST /api/target/select (Nearby rejected with zombie_near=0, accepted once seeded)", async () => {
+    const empty = await req("player1", "POST", "/api/target/select", { scope: "Nearby" });
+    if (empty.json?.ok || empty.status !== 409) throw new Error(`expected a 409 with no nearby zombies, got ${empty.status} ${JSON.stringify(empty.json)}`);
+
+    const near = await req("admin", "POST", "/api/admin/player/stat", { username: "player1", field: "zombie_near", value: 3 });
+    if (!near.json?.ok) throw new Error(`seed zombie_near: ${near.json?.message || near.status}`);
+    const hp = await req("admin", "POST", "/api/admin/player/stat", { username: "player1", field: "zombie_near_health", value: 20 });
+    if (!hp.json?.ok) throw new Error(`seed zombie_near_health: ${hp.json?.message || hp.status}`);
+
+    const select = await req("player1", "POST", "/api/target/select", { scope: "Nearby" });
+    if (!select.json?.ok) throw new Error(`select Nearby: ${select.json?.message || select.status}`);
+    const gs = await req("player1", "GET", "/api/game-state");
+    if (gs.json?.targetScope !== "Nearby") throw new Error(`expected targetScope "Nearby", got ${JSON.stringify(gs.json?.targetScope)}`);
+    if (gs.json?.nearbyZombies !== 3) throw new Error(`expected nearbyZombies 3, got ${JSON.stringify(gs.json?.nearbyZombies)}`);
+  });
+
+  await check("POST /api/action/attack (melee, Nearby scope — real HP combat, Fighting XP on hit, World/Location untouched)", async () => {
+    const worldBefore = (await req("player1", "GET", "/api/game-state")).json.zombies;
+    const before = await req("player1", "GET", "/api/game-state");
+    const fightingBefore = before.json.me.skills.find((s) => s.key === "fighting");
+    let landed = false;
+    for (let i = 0; i < 25 && !landed; i++) {
+      const r = await req("player1", "POST", "/api/action/attack", { slot: "melee" });
+      if (!r.json?.ok) throw new Error(r.json?.message || `status ${r.status}`);
+      if (r.json.result === "hit") landed = true;
+    }
+    if (!landed) throw new Error("melee attack never landed a hit in 25 tries");
+    const after = await req("player1", "GET", "/api/game-state");
+    const fightingAfter = after.json.me.skills.find((s) => s.key === "fighting");
+    if (!(fightingAfter.xp > fightingBefore.xp || fightingAfter.level > fightingBefore.level))
+      throw new Error("Fighting skill XP/level did not increase after a landed hit");
+    if (after.json.zombies !== worldBefore) throw new Error(`World pool changed from a Nearby-scope kill: ${worldBefore} -> ${after.json.zombies}`);
+  });
+
+  await check("POST /api/travel (blocked with zombie_near > 3, allowed once <= 3)", async () => {
+    const bump = await req("admin", "POST", "/api/admin/player/stat", { username: "player1", field: "zombie_near", value: 4 });
+    if (!bump.json?.ok) throw new Error(`seed zombie_near=4: ${bump.json?.message || bump.status}`);
+    const blocked = await req("player1", "POST", "/api/travel", { to: "forest" });
+    if (blocked.json?.ok || blocked.status !== 409) throw new Error(`expected a 409 (too many zombies), got ${blocked.status} ${JSON.stringify(blocked.json)}`);
+
+    const drop = await req("admin", "POST", "/api/admin/player/stat", { username: "player1", field: "zombie_near", value: 2 });
+    if (!drop.json?.ok) throw new Error(`seed zombie_near=2: ${drop.json?.message || drop.status}`);
+    const allowed = await req("player1", "POST", "/api/travel", { to: "forest" });
+    if (!allowed.json?.ok) throw new Error(`expected travel to succeed with zombie_near=2: ${allowed.json?.message || allowed.status}`);
+    const gs = await req("player1", "GET", "/api/game-state");
+    if (gs.json?.nearbyZombies !== 0) throw new Error(`expected zombie_near flushed to 0 after travel, got ${JSON.stringify(gs.json?.nearbyZombies)}`);
+    // Back to basecamp_outside and World targeting for the remaining checks below.
+    await req("player1", "POST", "/api/travel", { to: "basecamp_outside" });
+    await req("player1", "POST", "/api/target/select", { scope: "World" });
+  });
+
+  await check("POST /api/action/attack (ranged, out-of-ammo graceful failure)", async () => {
+    const r = await req("player1", "POST", "/api/action/attack", { slot: "ranged" });
+    if (r.json?.ok) return "ranged attack succeeded (ammo already present)";
+    if (r.status !== 409 || !r.json?.message) throw new Error(`expected a well-formed 409, got ${r.status} ${JSON.stringify(r.json)}`);
+  });
+
+  await check("POST /api/inventory/use (ammo pack — rangedAmmo effect verb fills the Quiver, clamped at cap)", async () => {
+    const grant = await req("admin", "POST", "/api/admin/player/inventory/add", { username: "player1", item: "pack of arrows", qty: 1 });
+    if (!grant.json?.ok) throw new Error(`grant: ${grant.json?.message || grant.status}`);
+    const before = await req("player1", "GET", "/api/inventory");
+    const bowBefore = (before.json?.weapons || []).find((w) => w.name === "Bow");
+    const use = await req("player1", "POST", "/api/inventory/use", { item: "pack of arrows" });
+    if (!use.json?.ok) throw new Error(`use: ${use.json?.message || use.status}`);
+    const after = await req("player1", "GET", "/api/inventory");
+    const bowAfter = (after.json?.weapons || []).find((w) => w.name === "Bow");
+    if (bowAfter.quiver <= bowBefore.quiver) throw new Error(`quiver did not increase: ${bowBefore.quiver} -> ${bowAfter.quiver}`);
+    if (bowAfter.quiver > bowAfter.quiverMax) throw new Error(`quiver exceeded quiverMax: ${bowAfter.quiver}/${bowAfter.quiverMax}`);
+  });
+
+  await check("POST /api/action/attack (ranged, now has ammo — fires without crashing)", async () => {
+    const r = await req("player1", "POST", "/api/action/attack", { slot: "ranged" });
+    if (!r.json?.ok) throw new Error(r.json?.message || `status ${r.status}`);
   });
 
   exitCode = results.every((r) => r.ok) ? 0 : 1;

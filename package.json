@@ -2,7 +2,7 @@
   "name": "@rvzm/zboe2",
   "type": "module",
   "private": false,
-  "version": "2.0.27-dev-rc",
+  "version": "2.0.28-dev-rc",
   "scripts": {
     "dev": "node server.js --dev -s -t -d",
     "stable": "node server.js",

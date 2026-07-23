@@ -69,13 +69,25 @@ export const LOCATION_NAMES = {
   town: "Town",
 };
 
+export const OUTBREAK_LOCATIONS = new Set([
+  // safe areas that become unsafe
+  "mountains",
+  "river",
+  "cave",
+  "town",
+  // zombie areas should get outbreak included
+  "basecamp_outside",
+  "forest",
+  "lake",
+  "swamp",
+]);
+
 // Locations where the zombie pool is active — tick attacks and hunting only
 // happen here. Everywhere else is "safe" (the game page swaps Hunt Info for
 // Actions there). basecamp_inside counts: zombies besiege the base itself,
 // with player hits absorbed as base HP.
 export const ZOMBIE_LOCATIONS = new Set([
   "basecamp_outside",
-  "basecamp_inside",
   "forest",
   "lake",
   "swamp",
@@ -100,10 +112,11 @@ export const LOCATION_LINKS = {
 // Trainable skills; each has s_<key>_lvl / s_<key>_xp columns on players.
 // Skill XP comes from location actions and is SPENT on skill levels (same
 // philosophy as the main level): buy the next level when xp >= skillLevelCost.
-export const SKILLS = ["magic", "defense", "woodcutting", "fishing", "mining", "smithing", "crafting", "foraging", "trapping", "alchemy", "cooking"];
+export const SKILLS = ["magic", "defense", "fighting", "woodcutting", "fishing", "mining", "smithing", "crafting", "foraging", "trapping", "alchemy", "cooking"];
 export const SKILL_NAMES = {
   magic: "Magic",
   defense: "Defense",
+  fighting: "Fighting",
   woodcutting: "Woodcutting",
   fishing: "Fishing",
   mining: "Mining",
@@ -322,56 +335,103 @@ CREATE TABLE IF NOT EXISTS players (
   xp INTEGER NOT NULL DEFAULT 0,             -- spendable XP (spent on levels)
   lifetime_xp INTEGER NOT NULL DEFAULT 0,    -- total XP ever earned (leaderboard rank)
   level INTEGER NOT NULL DEFAULT 1,
+  kills INTEGER NOT NULL DEFAULT 0,
+  accuracy INTEGER NOT NULL DEFAULT 45,      -- % hit chance
+  c_gold INTEGER NOT NULL DEFAULT 0,             -- in-game currency
+  c_tokens INTEGER NOT NULL DEFAULT 0,        -- number of horde tokens player has
+  golden_shots INTEGER NOT NULL DEFAULT 0,     -- remaining Golden Gun power-up shots (0 = not active)
+
+  -- Full Playercard Schema --
+  
+  --Playercard Base Stats
   health INTEGER NOT NULL DEFAULT 100,
   max_health INTEGER NOT NULL DEFAULT 100,
   shield INTEGER NOT NULL DEFAULT 0,
   max_shield INTEGER NOT NULL DEFAULT 100,
   mana INTEGER NOT NULL DEFAULT 100,
   mana_max INTEGER NOT NULL DEFAULT 100,
-  kills INTEGER NOT NULL DEFAULT 0,
-  accuracy INTEGER NOT NULL DEFAULT 45,      -- % hit chance
-  c_gold INTEGER NOT NULL DEFAULT 0,             -- in-game currency
-  c_tokens INTEGER NOT NULL DEFAULT 0,        -- number of horde tokens player has
-  golden_shots INTEGER NOT NULL DEFAULT 0,     -- remaining Golden Gun power-up shots (0 = not active)
-  equipped_gun TEXT NOT NULL DEFAULT 'Handgun',
-  equipped_weapon TEXT NOT NULL DEFAULT '',        -- '' = no weapon equipped (registry weapon name otherwise)
-  ap_level INTEGER NOT NULL DEFAULT 0,             -- innate "Base AP" — adds into armorApOf() on top of gear/spells; bought via the AP Base upgrade (mana + materials)
-  -- Per-type weapon stats. Page stats (ammo/clips/condition/type for guns, condition/quantity you have [minus the equipped item]) read from the equipped weapon's type.
+
+  -- Playercard Equipped Weapons
+  equipped_gun TEXT NOT NULL DEFAULT 'Handgun',     -- '' = no gun equipped (registry weapon name otherwise)
+  equipped_melee TEXT NOT NULL DEFAULT '',          -- '' = no weapon equipped (registry weapon name otherwise)
+  equipped_ranged TEXT NOT NULL DEFAULT '',         -- '' = no melee equipped (registry weapon name otherwise)
+  equipped_throwing TEXT NOT NULL DEFAULT '',       -- '' = no throwing weapon equipped (registry weapon name otherwise)
+  equipped_fist_weapon TEXT NOT NULL DEFAULT '',      -- '' = no fist weapon equipped (registry weapon name otherwise)
+  equipped_zombie_weapon TEXT NOT NULL DEFAULT '',  -- '' = no zombie weapon equipped (registry weapon name otherwise)
+  selected_equip_slot TEXT NOT NULL DEFAULT 'gun', -- which of the 6 weapon-wheel slots is currently active for combat (gun, melee, fist, ranged, throwing, zombie) — drives game.html's action button/stat boxes
+
+  -- Per-type weapon stats.
   handgun_ammo INTEGER NOT NULL DEFAULT 6,
   handgun_max_ammo INTEGER NOT NULL DEFAULT 6,
   handgun_clips INTEGER NOT NULL DEFAULT 3,
   handgun_max_clips INTEGER NOT NULL DEFAULT 3,
   handgun_condition INTEGER NOT NULL DEFAULT 100,
   handgun_jammed INTEGER NOT NULL DEFAULT 0,   -- 0/1, jam is tracked per gun
+  
   rifle_ammo INTEGER NOT NULL DEFAULT 15,
   rifle_max_ammo INTEGER NOT NULL DEFAULT 15,
   rifle_clips INTEGER NOT NULL DEFAULT 4,
   rifle_max_clips INTEGER NOT NULL DEFAULT 4,
   rifle_condition INTEGER NOT NULL DEFAULT 100,
   rifle_jammed INTEGER NOT NULL DEFAULT 0,
+  
   burstrifle_ammo INTEGER NOT NULL DEFAULT 30,
   burstrifle_max_ammo INTEGER NOT NULL DEFAULT 30,
   burstrifle_clips INTEGER NOT NULL DEFAULT 2,
   burstrifle_max_clips INTEGER NOT NULL DEFAULT 2,
   burstrifle_condition INTEGER NOT NULL DEFAULT 100,
   burstrifle_jammed INTEGER NOT NULL DEFAULT 0,
+  
   shotgun_ammo INTEGER NOT NULL DEFAULT 5,
   shotgun_max_ammo INTEGER NOT NULL DEFAULT 5,
   shotgun_clips INTEGER NOT NULL DEFAULT 6,
   shotgun_max_clips INTEGER NOT NULL DEFAULT 6,
   shotgun_condition INTEGER NOT NULL DEFAULT 100,
   shotgun_jammed INTEGER NOT NULL DEFAULT 0,
-  -- Playercard Armor — one equipped item name per paperdoll slot ('' = empty).
+
+  railgun_ammo INTEGER NOT NULL DEFAULT 5,
+  railgun_max_ammo INTEGER NOT NULL DEFAULT 5,
+  railgun_clips INTEGER NOT NULL DEFAULT 2,
+  railgun_max_clips INTEGER NOT NULL DEFAULT 2,
+  railgun_condition INTEGER NOT NULL DEFAULT 100,
+  railgun_jammed INTEGER NOT NULL DEFAULT 0,
+
+  bfg2000_ammo INTEGER NOT NULL DEFAULT 1,
+  bfg2000_max_ammo INTEGER NOT NULL DEFAULT 1,
+  bfg2000_clips INTEGER NOT NULL DEFAULT 3,
+  bfg2000_max_clips INTEGER NOT NULL DEFAULT 3,
+  bfg2000_condition INTEGER NOT NULL DEFAULT 100,
+  bfg2000_jammed INTEGER NOT NULL DEFAULT 0,
+
+  melee_condition INTEGER NOT NULL DEFAULT 100,
+
+  ranged_condition INTEGER NOT NULL DEFAULT 100,
+  ranged_ammo INTEGER NOT NULL DEFAULT 0,
+  ranged_crossbow_max_ammo INTEGER NOT NULL DEFAULT 5,
+  ranged_bow_max_ammo INTEGER NOT NULL DEFAULT 10,
+  ranged_slingshot_max_ammo INTEGER NOT NULL DEFAULT 20,
+  ranged_cb_jammed INTEGER NOT NULL DEFAULT 0,
+  
+  throwing_condition INTEGER NOT NULL DEFAULT 100,
+  throwing_ammo INTEGER NOT NULL DEFAULT 0,
+  throwing_max_ammo INTEGER NOT NULL DEFAULT 10,
+  
+  fist_weapon_condition INTEGER NOT NULL DEFAULT 100,
+
+
+  -- - Playercard Armor — one equipped item name per paperdoll slot ('' = empty).
   -- Condition of whatever's equipped is read live from player_inventory.condition
   -- for that item_name (already tracked there, per stack) — no per-slot condition
-  -- column needed; armorApOf() and the UI both look it up live.
+  -- column needed; armor is counted in inventory, which carries it's own condition levels.
+  ap_level INTEGER NOT NULL DEFAULT 0, -- innate "Base AP" — adds into armorApOf() on top of gear/spells; bought via the AP Base upgrade (mana + materials)
   a_head TEXT NOT NULL DEFAULT '',
   a_torso TEXT NOT NULL DEFAULT '',
   a_legs TEXT NOT NULL DEFAULT '',
   a_boots TEXT NOT NULL DEFAULT '',
   a_hands TEXT NOT NULL DEFAULT '',
   a_shield TEXT NOT NULL DEFAULT '',
-  -- Playercard Skills
+  
+  -- - Playercard Skills
   s_magic_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's magic skill
   s_magic_xp INTEGER NOT NULL DEFAULT 0, -- spendable magic XP (spent on skill levels)
   s_woodcutting_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's woodcutting skill
@@ -392,26 +452,34 @@ CREATE TABLE IF NOT EXISTS players (
   s_trapping_xp INTEGER NOT NULL DEFAULT 0, -- spendable trapping XP (spent on skill levels)
   s_foraging_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's foraging skill
   s_foraging_xp INTEGER NOT NULL DEFAULT 0, -- spendable foraging XP (spent on skill levels)
+  s_fighting_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's fighting skill
+  s_fighting_xp INTEGER NOT NULL DEFAULT 0, -- spendable fighting XP (spent on skill levels)
   s_defense_lvl INTEGER NOT NULL DEFAULT 1, -- level of the player's defense skill
   s_defense_xp INTEGER NOT NULL DEFAULT 0, -- spendable defense XP (spent on skill levels)
-  -- Playercard Location
+  
+  -- - Playercard Location
   location TEXT NOT NULL DEFAULT 'basecamp_outside', -- current location key (see LOCATION_NAMES)
   hidden INTEGER NOT NULL DEFAULT 0,         -- 0/1, hiding at current location
-  -- Playercard Quests
+  target_scope TEXT NOT NULL DEFAULT 'World', -- Targeted scope for attacks (World, Location, Nearby) to determine which pool is targeted for attacks
+  
+  -- - Playercard Quests
   quest_active TEXT NOT NULL DEFAULT 'NONE',     -- '' = no active quest, otherwise QUESTS key (quest_backbone.js)
   quest_objectives TEXT NOT NULL DEFAULT '', -- JSON-encoded object of the active quest's objectives and their completion status (quest_backbone.js)
   quest_started TEXT NOT NULL DEFAULT '', -- comma-separated list of started QUESTS keys (QUEST_NAMES from quest_backbone.js)
   quest_completed TEXT NOT NULL DEFAULT '',  -- comma-separated list of completed QUESTS keys (QUEST_NAMES from quest_backbone.js)
-  -- Player Tracking Information
-  -- - Station activations (beacon, forge, Arcane Table) are cleared when the player logs out or the server restarts.
+  
+  -- - Player Tracking Information
+  -- - - Station activations (beacon, forge, Arcane Table) are cleared when the player logs out or the server restarts.
   beacon_fired INTEGER NOT NULL DEFAULT 0,         -- 0/1, live supply beacon at the Bunker (cleared when the drop is redeemed)
   forge_fired INTEGER NOT NULL DEFAULT 0,          -- 0/1, has the player fired the forge yet?
   forge_fired_at INTEGER NOT NULL DEFAULT 0,     -- timestamp of when the player fired the forge
   arcane_table INTEGER NOT NULL DEFAULT 0,        -- 0/1, has the player activated the Arcane Table. 5min time active
   arcane_table_activated_at INTEGER NOT NULL DEFAULT 0, -- timestamp of when the player activated the Arcane Table
--- - zombie tracking (for horde attacks and hunting) — the player is only counted if they are in a ZOMBIE_LOCATIONS location, and have zombies near them.
-zombie_near INTEGER NOT NULL DEFAULT 0,          -- Number of zombies near the player, this is an exact count, not a boolean. 0 = no zombies near the player.
-  -- - timestamps for last activity and last update (used for online-player counters and leaderboard sorting)
+  
+  -- - - Zombie tracking (for horde attacks and hunting) — the player is only counted if they are in a ZOMBIE_LOCATIONS location, and have zombies near them.
+  zombie_near INTEGER NOT NULL DEFAULT 0,          -- Number of zombies near the player, this is an exact count, not a boolean. 0 = no zombies near the player.
+  zombie_near_health INTEGER NOT NULL DEFAULT 0, -- Total health of current targeted zombie near the player, this is an exact count, not a boolean. 0 = zombie has been killed, and we're ready for another target if available.
+  -- | timestamps for last activity and last update (used for online-player counters and leaderboard sorting)
   last_seen INTEGER NOT NULL DEFAULT 0,             -- timestamp of last activity 
   updated_at INTEGER NOT NULL                       -- timestamp of last update
 );
@@ -499,7 +567,6 @@ CREATE TABLE IF NOT EXISTS game_state (
   sentry_until INTEGER NOT NULL DEFAULT 0,     -- epoch ms the sentry turret protects the base until (0 = offline)
   -- location zombie counts (for horde attacks and hunting) — the player is only counted if they are in a ZOMBIE_LOCATIONS location, and have zombies near them.
   zombies_basecamp_outside INTEGER NOT NULL DEFAULT 0,
-  zombies_bunker INTEGER NOT NULL DEFAULT 0,
   zombies_forest INTEGER NOT NULL DEFAULT 0,
   zombies_lake INTEGER NOT NULL DEFAULT 0,
   zombies_swamp INTEGER NOT NULL DEFAULT 0,
@@ -857,10 +924,10 @@ export function ensurePlayer(userId) {
 // ----- Per-gun ammo/clip helpers -----
 // Ammo/clips are stored per gun type (handgun/rifle/shotgun/burstrifle).
 // Column names are built from a whitelisted type so they can't be injected.
-export const GUN_TYPES = ["handgun", "rifle", "shotgun", "burstrifle"];
+export const GUN_TYPES = ["handgun", "rifle", "shotgun", "burstrifle", "railgun", "bfg2000"];
 // Canonical gun item names (map 1:1 to the types above); list order is the
 // display order of the gun switcher / admin gun buttons (by unlock cost).
-export const GUN_NAMES = ["Handgun", "Rifle", "Shotgun", "Burst Rifle"];
+export const GUN_NAMES = ["Handgun", "Rifle", "Shotgun", "Burst Rifle", "Railgun", "BFG 2000"];
 function gunCol(type, suffix) {
   if (!GUN_TYPES.includes(type)) throw new Error(`Invalid gun type: ${type}`);
   return `${type}_${suffix}`;
@@ -884,8 +951,9 @@ export function gunAmmoOf(player, type) {
 // previously missing here, so Base AP silently never contributed via this path).
 export function getActivePlayers(sinceMs) {
   return db.prepare(`
-    SELECT p.user_id, u.username, p.health, p.shield, p.location, p.ap_level,
-           p.a_head, p.a_torso, p.a_legs, p.a_boots, p.a_hands, p.a_shield
+    SELECT p.user_id, u.username, p.health, p.shield, p.max_health, p.max_shield, p.location, p.ap_level,
+           p.a_head, p.a_torso, p.a_legs, p.a_boots, p.a_hands, p.a_shield,
+           p.zombie_near, p.zombie_near_health, p.target_scope
     FROM players p JOIN users u ON u.id = p.user_id
     WHERE p.last_seen >= ?
   `).all(sinceMs);
@@ -997,6 +1065,7 @@ export function startQuest(userId, questKey) {
   if (!quest) return;
   const player = stmtPlayerByUserId.get(userId);
   if (!player) return;
+  if (quest.quest_level && player.level < quest.quest_level) return;
   const started = questKeyList(player.quest_started);
   if (started.includes(questKey)) return;
   started.push(questKey);
@@ -1252,6 +1321,153 @@ export function updateGunMaxClips(userId, type, change) {
   const newMax = Math.max(0, player[col] + change);
   db.prepare(`UPDATE players SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
     .run(newMax, Date.now(), userId);
+}
+
+// ----- Weapon wheel (melee/ranged/throwing/zombie slots) -----
+// Mirrors the gun accessors above, but the condition columns don't follow a
+// regular ${type}_condition naming scheme (fist weapons share the melee slot
+// but write fist_weapon_condition, not fist_condition) so callers pass the
+// exact column name rather than a type string.
+const WEAPON_CONDITION_COLS = ["melee_condition", "ranged_condition", "throwing_condition", "fist_weapon_condition"];
+export function adjustWeaponCondition(userId, col, delta) {
+  if (!WEAPON_CONDITION_COLS.includes(col)) return null;
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return null;
+  const newCond = Math.max(0, Math.min(100, player[col] + delta));
+  db.prepare(`UPDATE players SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+    .run(newCond, Date.now(), userId);
+  return newCond;
+}
+
+export function addRangedAmmo(userId, amount, cap) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+  const newAmmo = Math.max(0, Math.min(cap, player.ranged_ammo + amount));
+  db.prepare(`UPDATE players SET ranged_ammo = ?, updated_at = ? WHERE user_id = ?`)
+    .run(newAmmo, Date.now(), userId);
+}
+
+export function addThrowingAmmo(userId, amount) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+  const newAmmo = Math.max(0, Math.min(player.throwing_max_ammo, player.throwing_ammo + amount));
+  db.prepare(`UPDATE players SET throwing_ammo = ?, updated_at = ? WHERE user_id = ?`)
+    .run(newAmmo, Date.now(), userId);
+}
+
+const RANGED_TYPES = ["crossbow", "bow", "slingshot"];
+export function updateRangedMaxAmmo(userId, rangedType, change) {
+  if (!RANGED_TYPES.includes(rangedType)) return;
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+  const col = `ranged_${rangedType}_max_ammo`;
+  const newMax = Math.max(0, player[col] + change);
+  db.prepare(`UPDATE players SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+    .run(newMax, Date.now(), userId);
+}
+
+export function updateThrowingMaxAmmo(userId, change) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return;
+  const newMax = Math.max(0, player.throwing_max_ammo + change);
+  db.prepare(`UPDATE players SET throwing_max_ammo = ?, updated_at = ? WHERE user_id = ?`)
+    .run(newMax, Date.now(), userId);
+}
+
+export function setRangedJammed(userId, jammed) {
+  db.prepare(`UPDATE players SET ranged_cb_jammed = ?, updated_at = ? WHERE user_id = ?`)
+    .run(jammed ? 1 : 0, Date.now(), userId);
+}
+
+// Clear a ranged (crossbow) jam: costs 1 ranged_ammo, same convention as
+// unjamGun spending a clip — but the shared ranged pool has no clip concept,
+// so there's no "reload from a fresh clip" branch, just spend-and-clear.
+export function clearRangedJam(userId) {
+  const player = stmtPlayerByUserId.get(userId);
+  if (!player) return { ok: false, reason: "no_player" };
+  if (!player.ranged_cb_jammed) return { ok: false, reason: "not_jammed" };
+  if (player.ranged_ammo <= 0) return { ok: false, reason: "no_ammo" };
+  db.prepare(`UPDATE players SET ranged_cb_jammed = 0, ranged_ammo = ranged_ammo - 1, updated_at = ? WHERE user_id = ?`)
+    .run(Date.now(), userId);
+  return { ok: true };
+}
+
+const WEAPON_SLOT_COLS = { melee: "equipped_melee", fist: "equipped_fist_weapon", ranged: "equipped_ranged", throwing: "equipped_throwing", zombie: "equipped_zombie_weapon" };
+export function equipWeaponSlot(userId, slot, itemName) {
+  const col = WEAPON_SLOT_COLS[slot];
+  if (!col) return false;
+  db.prepare(`UPDATE players SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+    .run(itemName, Date.now(), userId);
+  return true;
+}
+
+// Which of the 6 weapon-wheel slots (gun/melee/fist/ranged/throwing/zombie)
+// is currently active for combat — server-persisted so it survives reloads
+// and stays in sync across tabs/sessions, unlike a client-only UI toggle.
+const SELECTABLE_SLOTS = ["gun", "melee", "fist", "ranged", "throwing", "zombie"];
+export function setSelectedSlot(userId, slot) {
+  if (!SELECTABLE_SLOTS.includes(slot)) return false;
+  db.prepare(`UPDATE players SET selected_equip_slot = ?, updated_at = ? WHERE user_id = ?`)
+    .run(slot, Date.now(), userId);
+  return true;
+}
+
+// ----- Zombie Location Pool -----
+// Three-tier zombie pools: World (game_state.horde_size) -> Location
+// (game_state.zombies_<loc>, ZOMBIE_LOCATIONS only during normal play) ->
+// Nearby (players.zombie_near/zombie_near_health, personal per-player).
+
+// Add (or, with a negative delta, remove) zombies from a location's pool,
+// floored at 0. `location` is validated against ZOMBIE_LOCATIONS so the
+// column name can't be injected.
+export function adjustLocationZombies(location, delta) {
+  if (!ZOMBIE_LOCATIONS.has(location)) throw new Error(`Invalid zombie location: ${location}`);
+  const col = `zombies_${location}`;
+  db.prepare(`UPDATE game_state SET ${col} = MAX(0, ${col} + ?), updated_at = ? WHERE key = 'main'`)
+    .run(delta, Date.now());
+}
+
+const TARGET_SCOPES = ["World", "Location", "Nearby"];
+export function setTargetScope(userId, scope) {
+  if (!TARGET_SCOPES.includes(scope)) return false;
+  db.prepare(`UPDATE players SET target_scope = ?, updated_at = ? WHERE user_id = ?`)
+    .run(scope, Date.now(), userId);
+  return true;
+}
+
+// Add (or, with a negative delta, remove) zombies from a player's "nearby"
+// pool, floored at 0.
+export function adjustZombieNear(userId, delta) {
+  db.prepare(`UPDATE players SET zombie_near = MAX(0, zombie_near + ?), updated_at = ? WHERE user_id = ?`)
+    .run(delta, Date.now(), userId);
+}
+
+// Absolute set for zombie_near_health, floored at 0 — used both to refill to
+// z_hp for the next queued zombie and to zero out when the pool empties.
+export function setZombieNearHealth(userId, hp) {
+  db.prepare(`UPDATE players SET zombie_near_health = MAX(0, ?), updated_at = ? WHERE user_id = ?`)
+    .run(hp, Date.now(), userId);
+}
+
+// Single-hit primitive for Nearby-scope combat: apply `dmg` to the player's
+// currently-queued nearby zombie. On kill, decrement zombie_near and refill
+// health to `zHp` for the next queued zombie (or leave it at 0 if the pool is
+// now empty). Returns null if the player had no nearby zombies to hit.
+export function damageNearbyZombie(userId, dmg, zHp) {
+  const p = stmtPlayerByUserId.get(userId);
+  if (!p || p.zombie_near <= 0) return null;
+  const remaining = Math.max(0, p.zombie_near_health - dmg);
+  let zombieNear = p.zombie_near;
+  let zombieNearHealth = remaining;
+  let killed = 0;
+  if (remaining <= 0) {
+    killed = 1;
+    zombieNear = Math.max(0, zombieNear - 1);
+    zombieNearHealth = zombieNear > 0 ? zHp : 0;
+  }
+  db.prepare(`UPDATE players SET zombie_near = ?, zombie_near_health = ?, updated_at = ? WHERE user_id = ?`)
+    .run(zombieNear, zombieNearHealth, Date.now(), userId);
+  return { killed, zombieNear, zombieNearHealth };
 }
 
 export function updatePlayerStats(userId, xpChange, killChange) {
@@ -1546,6 +1762,20 @@ export function updatePlayerLocation(userId, location) {
 
   if (player.location === location) return;
 
+  // Traveling flushes any "nearby" zombies back into the pool of the
+  // location being left (conserves the total zombie count rather than
+  // deleting or teleporting them) — the >3 travel block itself is enforced
+  // by the caller (server.js's /api/travel), before this ever runs.
+  if (player.zombie_near > 0 && ZOMBIE_LOCATIONS.has(player.location)) {
+    adjustLocationZombies(player.location, player.zombie_near);
+    db.prepare(`
+      UPDATE players
+      SET location = ?, zombie_near = 0, zombie_near_health = 0, updated_at = ?
+      WHERE user_id = ?
+    `).run(location, Date.now(), userId);
+    return;
+  }
+
   db.prepare(`
     UPDATE players
     SET location = ?, updated_at = ?
@@ -1815,6 +2045,11 @@ export const EDITABLE_STATS = {
   rifle_ammo: {}, rifle_max_ammo: {}, rifle_clips: {}, rifle_max_clips: {}, rifle_condition: { max: 100 }, rifle_jammed: { max: 1 },
   shotgun_ammo: {}, shotgun_max_ammo: {}, shotgun_clips: {}, shotgun_max_clips: {}, shotgun_condition: { max: 100 }, shotgun_jammed: { max: 1 },
   burstrifle_ammo: {}, burstrifle_max_ammo: {}, burstrifle_clips: {}, burstrifle_max_clips: {}, burstrifle_condition: { max: 100 }, burstrifle_jammed: { max: 1 },
+  melee_condition: { max: 100 },
+  ranged_condition: { max: 100 }, ranged_ammo: {}, ranged_crossbow_max_ammo: {}, ranged_bow_max_ammo: {}, ranged_slingshot_max_ammo: {}, ranged_cb_jammed: { max: 1 },
+  throwing_condition: { max: 100 }, throwing_ammo: {}, throwing_max_ammo: {},
+  fist_weapon_condition: { max: 100 },
+  zombie_near: {}, zombie_near_health: {},
   // Skill levels/XP (one _lvl/_xp pair per entry in SKILLS).
   ...Object.fromEntries(SKILLS.flatMap((s) => [[`s_${s}_lvl`, {}], [`s_${s}_xp`, {}]])),
 };

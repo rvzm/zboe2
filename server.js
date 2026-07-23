@@ -34,6 +34,10 @@ import {
   grantGoldenShots, useGoldenShot,
   ensureDbStamp, rotateDbStamp, hasProvenanceColumns, getLeaderboardRank,
   checkQuestTriggers, recordQuestProgress, setActiveQuest,
+  adjustWeaponCondition, addRangedAmmo, addThrowingAmmo,
+  updateRangedMaxAmmo, updateThrowingMaxAmmo, setRangedJammed, clearRangedJam,
+  equipWeaponSlot, setSelectedSlot,
+  adjustLocationZombies, setTargetScope, adjustZombieNear, setZombieNearHealth, damageNearbyZombie,
 } from "./db.js";
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -46,7 +50,7 @@ import { styleText } from "node:util";
 import { game_config, file_config, zombie_config, ssl_config, app_version, account_config } from "./config.js";
 import https from "node:https";
 import http from "node:http";
-import { ITEMS, RECIPES, ITEM_TYPES, RANDOM_DROPS, BONUS_DROPS, SUPPLY_DROP_ROLL, SMELT_TYPES, ARMOR_PIECES } from "./item_backbone.js";
+import { ITEMS, RECIPES, ITEM_TYPES, RANDOM_DROPS, BONUS_DROPS, SUPPLY_DROP_ROLL, SMELT_TYPES, ARMOR_PIECES, WEAPON_TYPES, WEAPON_RANGED_OPTIONS, WEAPON_ATTACK_EXPORT, WEAPON_FIREARM_EXPORT, WEAPON_FIREARM_TYPES } from "./item_backbone.js";
 import {
   MAGIC_SPELLS, MAGIC_SPELL_CATEGORIES, validateMagicSpells,
   SPELL_ARMOR_BUFFS, SPELL_ARMOR_BUFF_SECONDS, spellApOf,
@@ -834,6 +838,28 @@ function questsPayloadFor(player) {
   return { active, started: started_other, completed: completedList };
 }
 
+// Richer variant for the playercard Quests tab — same active/started shape
+// as questsPayloadFor (reused so game.html's Quest Info card is untouched),
+// but completed quests carry full detail (long_desc/quest_level/objectives)
+// instead of just name+reward, since the card's completed-quests section is
+// an accordion meant to be read in full, not skimmed from a feed.
+function questsPayloadForCard(player) {
+  const base = questsPayloadFor(player);
+  const completed = player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : [];
+  const completedList = completed.filter((k) => QUESTS[k]).map((k) => {
+    const q = QUESTS[k];
+    return {
+      key: k,
+      name: q.name,
+      long_desc: q.long_desc ?? q.desc,
+      quest_level: q.quest_level ?? null,
+      reward: q.reward,
+      objectives: q.objectives.map(questObjectiveLabel),
+    };
+  });
+  return { active: base.active, started: base.started, completed: completedList };
+}
+
 app.get("/api/game-state", requireAuth, (req, res) => {
   log("FULL", `API request for game state by user ${req.user}`, game_config);
   touchPlayerSeen(req.userId);
@@ -852,7 +878,7 @@ app.get("/api/game-state", requireAuth, (req, res) => {
   // Players seen within the timeout window are "online".
   const activeCutoff = Date.now() - game_config.timeout * 1000;
   const actives = getActivePlayers(activeCutoff);
-  const online = actives.map((p) => p.username);
+  const online = actives.map((p) => ({ username: p.username, health: p.health, maxHealth: p.max_health, shield: p.shield, maxShield: p.max_shield }));
   // Ammo/clips shown on the page come from whichever gun is equipped.
   const gun = gunAmmoOf(player, equippedType(player));
   const locKey = locationOf(player);
@@ -878,6 +904,12 @@ app.get("/api/game-state", requireAuth, (req, res) => {
     nuke: baseDestroyed ? nukeVoteStatus() : null,
     huntVote: huntVoteStatus(req.userId, actives),
     zombies,
+    locationZombies: locationZombiesOf(gameState, locKey),
+    nearbyZombies: player.zombie_near,
+    nearbyZombieHealth: player.zombie_near_health,
+    targetScope: player.target_scope,
+    targetedCount: targetedPoolCountOf(player, gameState),
+    zombieForce: zombieForceOf(player, gameState),
     tickSeconds: zombie_config.z_tic,
     online,
     leaderboard,
@@ -935,10 +967,39 @@ app.get("/api/game-state", requireAuth, (req, res) => {
       // flagged safe/zombie for the map's color-coded pills.
       map: (LOCATION_LINKS[locKey] || []).map((k) => ({
         key: k, name: LOCATION_NAMES[k], zombie: ZOMBIE_LOCATIONS.has(k),
+        zombieCount: ZOMBIE_LOCATIONS.has(k) ? locationZombiesOf(gameState, k) : null,
       })),
       isAdmin: isUserAdmin(req.userId),
       admFun: req.gates.admFun, // sub-permission within admin — gates the 🎉 Fun button specifically
       jammed: gun.jammed, // the equipped gun's jam state (jams are per gun)
+      // Weapon wheel — per-slot summary (null = nothing equipped there) for
+      // the Weapon Attacks buttons and the HUD's Quiver/Pouch/Spares display.
+      // The zombie slot has no tracked condition — always reported pristine.
+      weapons: (() => {
+        const ownedQty = Object.fromEntries(getInventory(req.userId).map((i) => [i.item_name, i.quantity]));
+        const slotInfo = (slotKey, col) => {
+          const name = player[col];
+          const item = WEAPONS[name];
+          if (!item) return null;
+          const tracked = slotKey !== "zombie";
+          const condition = tracked ? player[weaponConditionColFor(item)] : 100;
+          const base = { name, label: item.name, section: item.section, reach: weaponReachOf(item), dmg: item.attack.dmg, targetsMax: item.attack.targets_max ?? 1, condition };
+          if (item.section === "Ranged") return { ...base, quiver: player.ranged_ammo, quiverMax: item.rangedType ? player[`ranged_${item.rangedType}_max_ammo`] : null, jammed: tracked && item.rangedType === "crossbow" && Boolean(player.ranged_cb_jammed) };
+          if (item.section === "Throwing") return { ...base, pouch: player.throwing_ammo, pouchMax: player.throwing_max_ammo };
+          return { ...base, spares: Math.max(0, (ownedQty[name] ?? 0) - 1) };
+        };
+        return {
+          melee: slotInfo("melee", "equipped_melee"),
+          fist: slotInfo("fist", "equipped_fist_weapon"),
+          ranged: slotInfo("ranged", "equipped_ranged"),
+          throwing: slotInfo("throwing", "equipped_throwing"),
+          zombie: slotInfo("zombie", "equipped_zombie_weapon"),
+        };
+      })(),
+      // Which of the 6 weapon-wheel slots is active for combat — server-
+      // persisted (players.selected_equip_slot) so it survives reloads and
+      // stays in sync across tabs, unlike a client-only UI toggle.
+      selectedSlot: player.selected_equip_slot,
     },
     // This location's actions, annotated with lvlOk/toolOk for this player.
     actions: actionsFor(player, locKey),
@@ -993,6 +1054,50 @@ function latchRaidIfNeeded() {
   }
   return false;
 }
+// ----- Zombie Location Pool helpers -----
+// World pool = gs.horde_size (existing). Location pools = gs.zombies_<loc>,
+// scoped to ZOMBIE_LOCATIONS during normal play. Nearby pool = the player's
+// own zombie_near/zombie_near_health.
+function locationZombiesOf(gs, location) {
+  if (!ZOMBIE_LOCATIONS.has(location)) return 0;
+  return gs[`zombies_${location}`] ?? 0;
+}
+
+// The raw count of whichever pool a player currently has targeted.
+function targetedPoolCountOf(player, gs) {
+  const scope = player.target_scope;
+  if (scope === "Location") return locationZombiesOf(gs, locationOf(player));
+  if (scope === "Nearby") return player.zombie_near || 0;
+  return gs.horde_size; // "World" (and any unrecognized value defaults here)
+}
+
+// "Zombie force" — what actually attacks a player each tick, per a1: a
+// player's own Nearby pool always threatens them on top of whatever else
+// they're targeting. When Nearby IS the targeted scope, don't double it.
+function zombieForceOf(player, gs) {
+  const near = player.zombie_near || 0;
+  if (player.target_scope === "Nearby") return near;
+  return targetedPoolCountOf(player, gs) + near;
+}
+
+// Gate for switching target_scope: a player may only target a scope that
+// currently has zombies in it (mirrors the splintering gate).
+function hasZombiesInScope(player, gs, scope) {
+  if (scope === "World") return gs.horde_size > 0;
+  if (scope === "Location") return locationZombiesOf(gs, locationOf(player)) > 0;
+  if (scope === "Nearby") return (player.zombie_near || 0) > 0;
+  return false;
+}
+
+// A weapon's effective reach category: zombie-themed items resolve through
+// their underlying `class` (Melee/Ranged/Throwing/Fist) rather than their
+// display `section` ("Zombie"). Ranged and guns can hit at any target_scope;
+// Melee/Fist/Throwing can only reach a player's own Nearby pool.
+function weaponReachOf(item) {
+  return item.section === "Zombie" ? item.class : item.section;
+}
+const CLOSE_RANGE_REACH = new Set(["Melee", "Fist", "Throwing"]);
+
 function baseIsDestroyed(gs) { return gs.base_health <= 0; }
 
 // Full experiment reset: zombies die, hunt/raid off, base rebuilt.
@@ -1145,6 +1250,39 @@ function equippedGunName(player) {
 }
 function equippedType(player) {
   return GUNS[equippedGunName(player)].type;
+}
+
+// ----- Weapon wheel (melee/ranged/throwing/zombie slots) -----
+// Derived from the registry: every ITEMS entry with type "weapon". `section`
+// ("Melee"/"Ranged"/"Throwing"/"Fist") IS the type discriminator — matches
+// WEAPON_ATTACK_EXPORT's keys 1:1, so no separate weaponType field is needed.
+const WEAPONS = Object.fromEntries(
+  Object.entries(ITEMS).filter(([, item]) => item.type === "weapon")
+);
+// Zombie-themed weapons are eligible for the zombie slot regardless of their
+// natural section — identified by key prefix, which is 100% consistent
+// across the registry (no dedicated flag needed for this).
+function isZombieWeapon(name) {
+  return typeof name === "string" && name.startsWith("zombie ");
+}
+// Quiver-cap resolution: which of ranged_crossbow_max_ammo/ranged_bow_max_ammo/
+// ranged_slingshot_max_ammo applies right now. Falls back to whatever's in the
+// zombie slot (a zombie-themed crossbow/bow/slingshot is still that rangedType
+// mechanically) so the rangedAmmo effect verb never has nothing to resolve.
+function effectiveRangedType(player) {
+  return WEAPONS[player.equipped_ranged]?.rangedType ?? WEAPONS[player.equipped_zombie_weapon]?.rangedType ?? null;
+}
+function rangedCapFor(player) {
+  const rt = effectiveRangedType(player);
+  return rt ? player[`ranged_${rt}_max_ammo`] : player.ranged_ammo;
+}
+// Which condition column a weapon's section reads/writes.
+function weaponConditionColFor(item) {
+  if (item.section === "Melee") return "melee_condition";
+  if (item.section === "Fist") return "fist_weapon_condition";
+  if (item.section === "Ranged") return "ranged_condition";
+  if (item.section === "Throwing") return "throwing_condition";
+  return null;
 }
 
 // Player's current location key, hardened against unknown/legacy values
@@ -1318,6 +1456,47 @@ function riflePierces(player, hordeSize) {
   return Math.random() * 100 < chance;
 }
 
+// Nearby-scope gun hit chance — deliberately a separate accuracy model from
+// GUN_BEHAVIOR/computeHitChance (World/Location), built on WEAPON_FIREARM_EXPORT
+// instead. Guns without an explicit floor (only "player"-model handgun today)
+// default to 5, matching GUN_BEHAVIOR's own floor for player-model guns.
+function nearbyGunHitChance(player, type, gunCondition) {
+  const cfg = WEAPON_FIREARM_EXPORT[type];
+  const floor = cfg.floor ?? 5;
+  if (cfg.acc_model === "condition")
+    return Math.max(5, Math.round(floor * (gunCondition / 100)));
+  return Math.max(floor, Math.round(player.accuracy * (gunCondition / 100)));
+}
+
+// ----- Weapon wheel combat math -----
+// Fighting skill drives non-gun weapon accuracy the way player.accuracy
+// drives guns. 40% at level 1, up to a 95% plateau at level 30+, linear
+// between — a starting baseline, easy to retune later.
+const FIGHTING_ACC_MIN = 40, FIGHTING_ACC_MAX = 95, FIGHTING_ACC_MAX_LEVEL = 30;
+function fightingAccuracyOf(player) {
+  const t = Math.min(player.s_fighting_lvl - 1, FIGHTING_ACC_MAX_LEVEL - 1) / (FIGHTING_ACC_MAX_LEVEL - 1);
+  return Math.round(FIGHTING_ACC_MIN + (FIGHTING_ACC_MAX - FIGHTING_ACC_MIN) * Math.max(0, t));
+}
+
+// Same two branches as computeHitChance; floor comes from WEAPON_ATTACK_EXPORT
+// keyed by the item's own section — condition is 0-100 (the zombie slot
+// substitutes a flat 100, since nothing tracks its wear).
+function computeWeaponHitChance(player, section, attack, condition) {
+  const floor = WEAPON_ATTACK_EXPORT[section].floor;
+  if (attack.acc_model === "condition")
+    return Math.max(5, Math.round(floor * (condition / 100)));
+  return Math.max(floor, Math.round(fightingAccuracyOf(player) * (condition / 100)));
+}
+
+// targets_max absent => a hit always drops exactly 1 zombie. When present,
+// scales between 1 and targets_max by fighting accuracy x condition —
+// mirrors shotgunTargets()'s shape.
+function weaponTargetsHit(player, attack, condition) {
+  if (!attack.targets_max) return 1;
+  const scaled = 1 + (attack.targets_max - 1) * (fightingAccuracyOf(player) / 100) * (condition / 100);
+  return Math.max(1, Math.min(attack.targets_max, Math.round(scaled)));
+}
+
 // ----- Chat censor -----
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function loadCensorWords() {
@@ -1354,6 +1533,10 @@ const STATIC_UPGRADES = [
     inputs: { "firewood": 10, "copper ore": 5, "glowcap": 3 }, defense: 2,
     apply: (uid) => setPlayerStat(uid, "ap_level", (getPlayerByUserId(uid).ap_level || 0) + 10) },
   { key: "clip_holster", label: "Clip Holster",      desc: "+1 max clips (equipped gun)", cost: 120, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxClips(uid, gun, 1) },
+  { key: "quiver_expansion", label: "Quiver Expansion", desc: "+3 max Quiver ammo (equipped ranged weapon)", cost: 140, type: "stat", category: "upgrade",
+    apply: (uid) => { const rt = effectiveRangedType(getPlayerByUserId(uid)); if (rt) updateRangedMaxAmmo(uid, rt, 3); } },
+  { key: "pouch_expansion", label: "Pouch Expansion", desc: "+3 max Pouch ammo (throwing weapons)", cost: 140, type: "stat", category: "upgrade",
+    apply: (uid) => updateThrowingMaxAmmo(uid, 3) },
   { key: "laser_sight",  label: "Accuracy Potion",   desc: "+5% accuracy",                cost: 200, type: "stat", category: "upgrade", apply: (uid) => updatePlayerAccuracy(uid, 5) },
   { key: "spare_clip",   label: "Spare Clip",        desc: "+1 clip (equipped gun)",      cost: 5,   type: "stat", category: "item", apply: (uid, gun) => updateGunAmmo(uid, gun, 0, 1) },
   { key: "gun_oil",      label: "Gun Oil",           desc: "consumable · restores condition", cost: 25, type: "consumable", category: "item", item: "gun oil" },
@@ -1381,6 +1564,33 @@ const EFFECT_VERBS = {
   mana:         (uid, n) => { addMana(uid, n);                return `+${n} mana`; },
   maxShield:    (uid, n) => { increaseMaxShield(uid, n);     return `+${n} max shield`; },
   gunCondition: (uid, n) => { adjustGunCondition(uid, equippedType(getPlayerByUserId(uid)), n); return `+${n} equipped gun condition`; },
+  // Restores condition to every currently-equipped non-gun slot at once
+  // (melee/fist share one column depending on which subtype's equipped) —
+  // the zombie slot is excluded, it has no tracked condition column.
+  weaponCondition: (uid, n) => {
+    const p = getPlayerByUserId(uid);
+    const cols = new Set();
+    for (const slotItem of [p.equipped_melee, p.equipped_ranged, p.equipped_throwing]) {
+      const item = WEAPONS[slotItem];
+      if (item) cols.add(weaponConditionColFor(item));
+    }
+    for (const col of cols) adjustWeaponCondition(uid, col, n);
+    return `+${n} equipped weapon condition`;
+  },
+  rangedAmmo:   (uid, n) => { addRangedAmmo(uid, n, rangedCapFor(getPlayerByUserId(uid))); return `+${n} Quiver`; },
+  throwingAmmo: (uid, n) => { addThrowingAmmo(uid, n);       return `+${n} Pouch`; },
+  railgunAmmo:  (uid, n) => {
+    const { ammo, maxAmmo } = gunAmmoOf(getPlayerByUserId(uid), "railgun");
+    const add = Math.max(0, Math.min(n, maxAmmo - ammo));
+    updateGunAmmo(uid, "railgun", add, 0);
+    return `+${add} Railgun ammo`;
+  },
+  bfgAmmo:      (uid, n) => {
+    const { ammo, maxAmmo } = gunAmmoOf(getPlayerByUserId(uid), "bfg2000");
+    const add = Math.max(0, Math.min(n, maxAmmo - ammo));
+    updateGunAmmo(uid, "bfg2000", add, 0);
+    return `+${add} BFG 2000 ammo`;
+  },
   gold:         (uid, n) => { updatePlayerGold(uid, n);      return `+${n} gold`; },
   accuracy:     (uid, n) => { updatePlayerAccuracy(uid, n);  return `+${n} accuracy`; },
   goldenShots:  (uid, n) => { grantGoldenShots(uid, n);      return `+${n} golden shots`; },
@@ -1421,6 +1631,32 @@ function applyItemEffects(userId, use) {
       bad.push(`ITEMS["${key}"] is an armor with no valid defense level (int >= 1)`);
     if (item.type === "armor" && !ARMOR_PIECES.includes(item.piece))
       bad.push(`ITEMS["${key}"] is an armor with invalid/missing piece "${item.piece}" (${ARMOR_PIECES.join("/")})`);
+    if (item.type === "weapon") {
+      if (!WEAPON_TYPES.includes(item.section)) bad.push(`ITEMS["${key}"] is a weapon with invalid section "${item.section}" (${WEAPON_TYPES.join("/")})`);
+      if (item.section === "Ranged" && !WEAPON_RANGED_OPTIONS.includes(item.rangedType))
+        bad.push(`ITEMS["${key}"] is a Ranged weapon with invalid/missing rangedType "${item.rangedType}" (${WEAPON_RANGED_OPTIONS.join("/")})`);
+      const at = item.attack;
+      if (!at || !(Number.isFinite(at.dmg) && at.dmg >= 0)) bad.push(`ITEMS["${key}"] is a weapon with no valid attack.dmg`);
+      if (at && at.targets_max !== undefined && !(Number.isInteger(at.targets_max) && at.targets_max >= 1))
+        bad.push(`ITEMS["${key}"].attack.targets_max must be an integer >= 1 when present`);
+      if (at && !["player", "condition"].includes(at.acc_model))
+        bad.push(`ITEMS["${key}"].attack.acc_model must be "player" or "condition"`);
+    }
+  }
+  for (const section of WEAPON_TYPES)
+    if (!Number.isFinite(WEAPON_ATTACK_EXPORT[section]?.floor)) bad.push(`WEAPON_ATTACK_EXPORT["${section}"] has no valid floor`);
+  // WEAPON_FIREARM_EXPORT — the Nearby-scope gun accuracy/damage model
+  // (deliberately separate from GUN_BEHAVIOR, see plan §1). `floor` is
+  // optional (only required for "condition"-model guns; nearbyGunHitChance
+  // defaults missing floors to 5 for "player"-model guns).
+  for (const type of WEAPON_FIREARM_TYPES) {
+    const cfg = WEAPON_FIREARM_EXPORT[type];
+    if (!cfg) { bad.push(`WEAPON_FIREARM_EXPORT is missing an entry for "${type}"`); continue; }
+    if (!(Number.isFinite(cfg.dmg) && cfg.dmg >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid dmg`);
+    if (!(Number.isFinite(cfg.ammo) && cfg.ammo >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid ammo`);
+    if (!(Number.isFinite(cfg.clips) && cfg.clips >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid clips`);
+    if (!["player", "condition"].includes(cfg.acc_model)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"].acc_model must be "player" or "condition"`);
+    if (cfg.floor !== undefined && !Number.isFinite(cfg.floor)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"].floor must be a number when present`);
   }
   const check = (name, where) => { if (name && !ITEMS[name]) bad.push(`${where} references unknown item "${name}"`); };
   for (const [loc, actions] of Object.entries(LOCATION_ACTIONS))
@@ -1459,7 +1695,7 @@ function applyItemEffects(userId, use) {
     }
   const FORGE_SECTIONS = ["Ingredients", "Guns", "Tools", "Bronze", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
   // Admin-panel Recipes tabs (see RECIPE_CATEGORIES/RECIPE_METAL_TYPES below).
-  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc"];
+  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc", "weapon", "armor"];
   const RECIPE_METAL_TYPES = ["armor", "crafting", "tools"];
   for (const r of RECIPES) {
     // output: a single item name, or an { item: qty } bundle.
@@ -1547,20 +1783,14 @@ function applyItemEffects(userId, use) {
 const ZOMBIE_BITS = Object.keys(ITEMS).filter((k) => ITEMS[k].section === "Zombie Bits");
 const ZOMBIE_BIT_DROP_CHANCE = 15; // % — tunable
 
-// Shared kill resolution — XP/gold award, horde decrement, the public "kill"
-// event, and the horde/raid-break token bonus. Used by both the shoot handler
-// (gun kills) and spell casting (attack-type spells). `sourceLabel` is the
-// human text for "dropped N zombies with <sourceLabel>" (e.g. "the Rifle —
-// the round went clean through", or a spell's name). Returns the bonus note
-// text ("" if no token was awarded) to fold into the caller's response message.
-function resolveKill(userId, username, killed, gameState, sourceLabel) {
-  const hordeBefore = gameState.horde_size;
-  const hordeAfter = hordeBefore - killed;
-  const wasRaiding = gameState.raid_enabled === "true";
-
+// Shared reward tail — XP/gold, the zombie-bit drop roll, and the public
+// "kill" event. Every kill path uses this (guns, weapon-wheel, spells, and
+// Nearby-scope combat); it never touches a zombie pool — callers own that.
+// `sourceLabel` is the human text for "dropped N zombies with <sourceLabel>".
+// Returns the bit-drop note ("" if nothing dropped).
+function grantKillRewards(userId, username, killed, sourceLabel) {
   updatePlayerStats(userId, XP_PER_KILL * killed, killed);
   updatePlayerGold(userId, GOLD_PER_KILL * killed);
-  adjustHordeSize(-killed);
 
   let bitNote = "";
   if (Math.random() * 100 < ZOMBIE_BIT_DROP_CHANCE) {
@@ -1570,8 +1800,29 @@ function resolveKill(userId, username, killed, gameState, sourceLabel) {
   }
   const noun = killed === 1 ? "a zombie" : `${killed} zombies`;
   insertEvent("kill", `${username} dropped ${noun} with ${sourceLabel} (+${XP_PER_KILL * killed} XP, +${GOLD_PER_KILL * killed} gold)${bitNote}`, "public", "global");
+  return bitNote;
+}
 
-  let bonus = bitNote;
+// Broad (World/Location) kill resolution — the reward tail plus decrementing
+// whichever pool the kill came from. The horde-broken/raid-cleared token
+// bonus only ever evaluates for World-scope kills (Location kills grant
+// normal rewards, never the bonus — see plan §1). `scope` defaults to
+// "World" for callers that don't target Location (e.g. attack spells, which
+// have no Nearby-mode path — see plan §4).
+function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "World", location = null) {
+  const bonus0 = grantKillRewards(userId, username, killed, sourceLabel);
+  let bonus = bonus0;
+
+  if (scope === "Location") {
+    adjustLocationZombies(location, -killed);
+    return bonus;
+  }
+
+  const hordeBefore = gameState.horde_size;
+  const hordeAfter = hordeBefore - killed;
+  const wasRaiding = gameState.raid_enabled === "true";
+  adjustHordeSize(-killed);
+
   if (wasRaiding && hordeAfter <= 0) {
     addTokens(userId, 3);
     setRaidEnabled(false);
@@ -1587,9 +1838,17 @@ function resolveKill(userId, username, killed, gameState, sourceLabel) {
   return bonus;
 }
 
+// Nearby-scope kill reward: same reward tail, no pool decrement (the caller
+// already resolved the HP cascade via damageNearbyZombie) and never the
+// horde-broken/raid-cleared token bonus.
+function grantNearbyKillRewards(userId, username, killed, sourceLabel) {
+  return grantKillRewards(userId, username, killed, sourceLabel);
+}
+
 app.post("/api/action/shoot", requireAuth, (req, res) => {
   const player = ensurePlayer(req.userId);
   const gameState = getGameState();
+  const scope = player.target_scope;
 
   // Server-side guards. The client disables the button in these cases, but the
   // client is never trusted — re-check everything here.
@@ -1597,17 +1856,76 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
     return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
   if (gameState.hunt_enabled !== "true")
     return res.status(409).json({ ok: false, message: "The hunt isn't active." });
-  if (gameState.horde_size <= 0)
+  if (targetedPoolCountOf(player, gameState) <= 0)
     return res.status(409).json({ ok: false, message: "No zombies to shoot." });
   // Golden Gun is a temporary overlay: while golden_shots remain, it replaces the
   // equipped gun — perfect shot, no ammo/jam/wear, one zombie per shot.
   const golden = player.golden_shots > 0;
 
+  // ---- Nearby scope: real HP combat against the player's queued zombie ----
+  // Guns always work at range (see plan §1's attack-reach gate — only Melee/
+  // Fist/Throwing are Nearby-only), so this is purely a resolution-mode split.
+  if (scope === "Nearby") {
+    let gunLabel, dmg, goldenRemaining = null;
+    if (golden) {
+      goldenRemaining = useGoldenShot(req.userId);
+      gunLabel = "Golden Gun";
+      dmg = Number.MAX_SAFE_INTEGER; // perfect shot — always a kill
+    } else {
+      const type = equippedType(player);
+      const cfg = WEAPON_FIREARM_EXPORT[type];
+      const { ammo, condition: gunCondition, jammed } = gunAmmoOf(player, type);
+      gunLabel = equippedGunName(player);
+      if (jammed)
+        return res.status(409).json({ ok: false, message: `The ${gunLabel} is jammed — clear it first.` });
+      if (ammo <= 0)
+        return res.status(409).json({ ok: false, message: "Out of ammo — reload." });
+
+      updateGunAmmo(req.userId, type, -1, 0);
+      if (Math.random() * 100 < SHOT_WEAR_CHANCE) {
+        const worn = adjustGunCondition(req.userId, type, -SHOT_WEAR_AMOUNT);
+        log("INFO", `${req.user} ${gunLabel} condition wore to ${worn}`, game_config);
+      }
+      const jamChance = (100 - gunCondition) * JAM_FACTOR;
+      if (Math.random() * 100 < jamChance) {
+        setGunJammed(req.userId, type, true);
+        insertEvent("shoot", `Your ${gunLabel} jammed!`, "private", req.userId);
+        log("INFO", `${req.user} ${gunLabel} jammed (cond=${gunCondition} chance=${jamChance.toFixed(1)}%)`, game_config);
+        return res.json({ ok: true, result: "jam", message: `The ${gunLabel} jammed! Clear it to keep shooting.` });
+      }
+      const hitChance = nearbyGunHitChance(player, type, gunCondition);
+      const roll = Math.random() * 100;
+      if (roll >= hitChance) {
+        insertEvent("shoot", `You fired the ${gunLabel} and missed`, "private", req.userId);
+        log("INFO", `${req.user} shoot ${gunLabel} (nearby) roll=${roll.toFixed(1)} chance=${hitChance} -> miss`, game_config);
+        return res.json({ ok: true, result: "miss", message: "Missed!" });
+      }
+      dmg = cfg.dmg;
+    }
+
+    const result = damageNearbyZombie(req.userId, dmg, zombie_config.z_hp);
+    const bonus = result?.killed ? grantNearbyKillRewards(req.userId, req.user, 1, `the ${gunLabel}`) : "";
+    let goldenNote = "";
+    if (golden) {
+      if (goldenRemaining <= 0) {
+        goldenNote = ` Golden Gun spent — back to your ${equippedGunName(player)}.`;
+        insertEvent("item", `Your Golden Gun is spent — back to the ${equippedGunName(player)}.`, "private", req.userId);
+      } else {
+        goldenNote = ` (${goldenRemaining} golden shots left)`;
+      }
+    }
+    log("INFO", `${req.user} shoot ${gunLabel} (nearby) -> killed=${result?.killed ?? 0}${golden ? ` golden(${goldenRemaining} left)` : ""}`, game_config);
+    const message = (result?.killed ? "Hit — zombie down!" + bonus : `Hit! (${result?.zombieNearHealth ?? 0} health left)`) + goldenNote;
+    return res.json({ ok: true, result: "hit", killed: result?.killed ? 1 : 0, golden, message });
+  }
+
+  // ---- World/Location scope: existing instant-kill "Broad" resolution ----
+  const poolCount = targetedPoolCountOf(player, gameState);
   let killed, gunLabel, goldenRemaining = null, pierced = false;
   if (golden) {
     goldenRemaining = useGoldenShot(req.userId);
     gunLabel = "Golden Gun";
-    killed = Math.min(1, gameState.horde_size);
+    killed = Math.min(1, poolCount);
   } else {
     const type = equippedType(player);
     const behavior = GUN_BEHAVIOR[type];
@@ -1644,17 +1962,17 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
     }
     let targets = behavior.maxTargets;
     if (type === "shotgun") targets = shotgunTargets(player, gunCondition);
-    else if (type === "burstrifle") targets = Math.min(3, gameState.horde_size);
-    else if (type === "rifle" && riflePierces(player, gameState.horde_size)) {
+    else if (type === "burstrifle") targets = Math.min(3, poolCount);
+    else if (type === "rifle" && riflePierces(player, poolCount)) {
       targets = 2;
       pierced = true;
     }
-    killed = Math.min(targets, gameState.horde_size);
+    killed = Math.min(targets, poolCount);
   }
 
   // ---- Kill resolution (shared with spell casting — see resolveKill) ----
   const pierceTag = pierced ? " — the round went clean through" : "";
-  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${gunLabel}${pierceTag}`);
+  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${gunLabel}${pierceTag}`, scope, locationOf(player));
 
   // ---- Golden Gun depletion ----
   let goldenNote = "";
@@ -1670,6 +1988,132 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
   log("INFO", `${req.user} shoot ${gunLabel} -> hit x${killed}${golden ? ` golden(${goldenRemaining} left)` : ""}`, game_config);
   const base = pierced ? "Clean through — 2 zombies down!" : killed > 1 ? `Hit — ${killed} zombies down!` : "Hit — zombie down!";
   return res.json({ ok: true, result: "hit", killed, golden, message: base + bonus + goldenNote });
+});
+
+// Attack with a weapon-wheel slot (melee/ranged/throwing/zombie) — a fully
+// separate route from /api/action/shoot (guns), not a generalization of it.
+// The zombie slot has no tracked condition column (nothing wears it, nothing
+// jams it), but still draws from the shared ranged/throwing ammo pools when
+// its own section is Ranged/Throwing — those pools are player-scoped, not
+// slot-scoped.
+app.post("/api/action/attack", requireAuth, (req, res) => {
+  const player = ensurePlayer(req.userId);
+  const gameState = getGameState();
+  const scope = player.target_scope;
+  const slot = String(req.body.slot || "").trim();
+  if (!WEAPON_SLOT_KEYS.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown weapon slot." });
+
+  if (!ZOMBIE_LOCATIONS.has(locationOf(player)))
+    return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
+  if (gameState.hunt_enabled !== "true")
+    return res.status(409).json({ ok: false, message: "The hunt isn't active." });
+
+  const equippedCol = { melee: "equipped_melee", fist: "equipped_fist_weapon", ranged: "equipped_ranged", throwing: "equipped_throwing", zombie: "equipped_zombie_weapon" }[slot];
+  const weaponName = player[equippedCol];
+  const item = WEAPONS[weaponName];
+  if (!item) return res.status(400).json({ ok: false, message: `Nothing equipped in your ${slot} slot.` });
+
+  // Attack-reach gate: Melee/Fist/Throwing can't hit something "100s of feet
+  // away" — those only work against the player's own Nearby pool. Ranged and
+  // guns (the latter never reach this route) work at any target_scope.
+  if (CLOSE_RANGE_REACH.has(weaponReachOf(item)) && scope !== "Nearby")
+    return res.status(409).json({ ok: false, message: `Too far away — get closer (switch to Nearby targeting).` });
+
+  if (targetedPoolCountOf(player, gameState) <= 0)
+    return res.status(409).json({ ok: false, message: "No zombies to attack." });
+
+  const section = item.section;
+  const weaponLabel = item.name;
+  const tracked = slot !== "zombie"; // the zombie slot has no tracked condition — always pristine
+  const condCol = tracked ? weaponConditionColFor(item) : null;
+  const condition = tracked ? player[condCol] : 100;
+
+  if (tracked && (section === "Melee" || section === "Fist") && condition <= 0)
+    return res.status(409).json({ ok: false, message: `The ${weaponLabel} is broken — repair it first.` });
+  if (section === "Ranged") {
+    if (tracked && item.rangedType === "crossbow" && player.ranged_cb_jammed)
+      return res.status(409).json({ ok: false, message: `The ${weaponLabel} is jammed — clear it first.` });
+    if (player.ranged_ammo <= 0)
+      return res.status(409).json({ ok: false, message: "Out of ammo — use an ammo pack to refill your Quiver." });
+  }
+  if (section === "Throwing" && player.throwing_ammo <= 0)
+    return res.status(409).json({ ok: false, message: "Out of ammo — use an ammo pack to refill your Pouch." });
+
+  // The round/swing is spent whether or not it connects (or jams).
+  if (section === "Ranged") addRangedAmmo(req.userId, -1, rangedCapFor(player));
+  else if (section === "Throwing") addThrowingAmmo(req.userId, -1);
+
+  if (tracked && Math.random() * 100 < SHOT_WEAR_CHANCE) {
+    const worn = adjustWeaponCondition(req.userId, condCol, -SHOT_WEAR_AMOUNT);
+    log("INFO", `${req.user} ${weaponLabel} condition wore to ${worn}`, game_config);
+  }
+
+  // Jam roll — crossbow only, never for the permanently-pristine zombie slot.
+  if (tracked && section === "Ranged" && item.rangedType === "crossbow") {
+    const jamChance = (100 - condition) * JAM_FACTOR;
+    if (Math.random() * 100 < jamChance) {
+      setRangedJammed(req.userId, true);
+      insertEvent("shoot", `Your ${weaponLabel} jammed!`, "private", req.userId);
+      log("INFO", `${req.user} ${weaponLabel} jammed (cond=${condition} chance=${jamChance.toFixed(1)}%)`, game_config);
+      return res.json({ ok: true, result: "jam", message: `The ${weaponLabel} jammed! Clear it to keep firing.` });
+    }
+  }
+
+  const hitChance = computeWeaponHitChance(player, section, item.attack, condition);
+  const roll = Math.random() * 100;
+  if (roll >= hitChance) {
+    insertEvent("shoot", `You attacked with the ${weaponLabel} and missed`, "private", req.userId);
+    log("INFO", `${req.user} attack ${weaponLabel} roll=${roll.toFixed(1)} chance=${hitChance} -> miss`, game_config);
+    return res.json({ ok: true, result: "miss", message: "Missed!" });
+  }
+
+  // Fighting XP only on a landed hit — deliberately asymmetric vs. Magic XP,
+  // which spell casts grant on a miss too.
+  addSkillXp(req.userId, "fighting", 10);
+
+  if (scope === "Nearby") {
+    // Cascade: this swing can chain-kill up to attack.targets_max queued
+    // zombies (default 1) — a hit that doesn't finish the current zombie
+    // stops the cascade there, no partial carry-over (see plan §1).
+    const targetsMax = item.attack.targets_max || 1;
+    let killedCount = 0;
+    for (let i = 0; i < targetsMax; i++) {
+      const result = damageNearbyZombie(req.userId, item.attack.dmg, zombie_config.z_hp);
+      if (!result) break;
+      if (!result.killed) break;
+      killedCount++;
+    }
+    const bonus = killedCount > 0 ? grantNearbyKillRewards(req.userId, req.user, killedCount, `the ${weaponLabel}`) : "";
+    log("INFO", `${req.user} attack ${weaponLabel} (nearby) -> hit x${killedCount}`, game_config);
+    const base = killedCount > 0
+      ? (killedCount > 1 ? `Hit — ${killedCount} zombies down!` : "Hit — zombie down!")
+      : "Hit!";
+    return res.json({ ok: true, result: "hit", killed: killedCount, message: base + bonus });
+  }
+
+  const poolCount = targetedPoolCountOf(player, gameState);
+  const killed = Math.min(weaponTargetsHit(player, item.attack, condition), poolCount);
+  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${weaponLabel}`, scope, locationOf(player));
+
+  log("INFO", `${req.user} attack ${weaponLabel} -> hit x${killed}`, game_config);
+  const base = killed > 1 ? `Hit — ${killed} zombies down!` : "Hit — zombie down!";
+  return res.json({ ok: true, result: "hit", killed, message: base + bonus });
+});
+
+// Clear a jammed ranged weapon (crossbow only weapon that can jam) — the
+// shared ranged ammo pool has no clip concept to spend the way guns do, so
+// this just consumes 1 ranged_ammo to clear it instead.
+app.post("/api/action/unjam-ranged", requireAuth, (req, res) => {
+  const result = clearRangedJam(req.userId);
+  if (!result.ok) {
+    const message = result.reason === "not_jammed"
+      ? "Nothing's jammed."
+      : "No ammo left to clear the jam — use an ammo pack first.";
+    return res.status(409).json({ ok: false, message });
+  }
+  insertEvent("item", "You cleared the jam on your ranged weapon", "private", req.userId);
+  log("INFO", `${req.user} cleared a ranged weapon jam`, game_config);
+  return res.json({ ok: true, message: "Jam cleared." });
 });
 
 app.post("/api/action/reload", requireAuth, (req, res) => {
@@ -1911,9 +2355,30 @@ app.get("/api/inventory", requireAuth, (req, res) => {
       quantity: i.quantity,
       equipped: isArmorEquippedAnywhere(player, i.item_name),
     }));
+  // Owned weapon-wheel items (melee/ranged/throwing/zombie) — feeds the
+  // combat-facing Weapons modal, same shape as /api/playercard's `weapons`.
+  const weapons = Object.entries(WEAPONS)
+    .filter(([name]) => (ownedQty[name] ?? 0) > 0)
+    .map(([name, w]) => {
+      const equippedSlot =
+        player.equipped_melee === name ? "melee" :
+        player.equipped_fist_weapon === name ? "fist" :
+        player.equipped_ranged === name ? "ranged" :
+        player.equipped_throwing === name ? "throwing" :
+        player.equipped_zombie_weapon === name ? "zombie" : null;
+      const base = {
+        name, label: w.name, section: w.section, quantity: ownedQty[name], equippedSlot,
+        zombieThemed: isZombieWeapon(name), dmg: w.attack.dmg, targetsMax: w.attack.targets_max ?? 1,
+      };
+      if (w.section === "Ranged") return { ...base, condition: player.ranged_condition, quiver: player.ranged_ammo, quiverMax: w.rangedType ? player[`ranged_${w.rangedType}_max_ammo`] : null, jammed: Boolean(player.ranged_cb_jammed) };
+      if (w.section === "Throwing") return { ...base, condition: player.throwing_condition, pouch: player.throwing_ammo, pouchMax: player.throwing_max_ammo };
+      return { ...base, condition: player[weaponConditionColFor(w)], spares: Math.max(0, ownedQty[name] - (equippedSlot ? 1 : 0)) };
+    });
   res.json({
-    items, usable, guns, armors, equipped: equippedGunName(player),
+    items, usable, guns, armors, weapons, equipped: equippedGunName(player),
     equippedArmor: Object.fromEntries(ARMOR_PIECES.map((slot) => [slot, player[`a_${slot}`] || null])),
+    equippedWeapons: { melee: player.equipped_melee || null, fist: player.equipped_fist_weapon || null, ranged: player.equipped_ranged || null, throwing: player.equipped_throwing || null, zombie: player.equipped_zombie_weapon || null },
+    selectedSlot: player.selected_equip_slot,
   });
 });
 
@@ -1970,6 +2435,27 @@ app.get("/api/playercard", (req, res) => {
         defense: ARMORS[i.item_name].defense,
         condition: i.condition, quantity: i.quantity, equipped: isArmorEquippedAnywhere(player, i.item_name),
       }));
+    // Every owned non-gun weapon, annotated with whichever wheel slot (if
+    // any) it's currently equipped in. Ranged/Throwing carry a Quiver/Pouch
+    // ammo+max pair; Melee/Fist carry a "Spares" count (owned copies beyond
+    // the one worn) instead — no ammo concept for those.
+    const weapons = Object.entries(WEAPONS)
+      .filter(([name]) => (ownedQty[name] ?? 0) > 0)
+      .map(([name, w]) => {
+        const equippedSlot =
+          player.equipped_melee === name ? "melee" :
+          player.equipped_fist_weapon === name ? "fist" :
+          player.equipped_ranged === name ? "ranged" :
+          player.equipped_throwing === name ? "throwing" :
+          player.equipped_zombie_weapon === name ? "zombie" : null;
+        const base = {
+          name, label: w.name, section: w.section, quantity: ownedQty[name], equippedSlot,
+          zombieThemed: isZombieWeapon(name), dmg: w.attack.dmg, targetsMax: w.attack.targets_max ?? 1,
+        };
+        if (w.section === "Ranged") return { ...base, condition: player.ranged_condition, quiver: player.ranged_ammo, quiverMax: w.rangedType ? player[`ranged_${w.rangedType}_max_ammo`] : null };
+        if (w.section === "Throwing") return { ...base, condition: player.throwing_condition, pouch: player.throwing_ammo, pouchMax: player.throwing_max_ammo };
+        return { ...base, condition: player[weaponConditionColFor(w)], spares: Math.max(0, ownedQty[name] - (equippedSlot ? 1 : 0)) };
+      });
     // One helper for the flat (non-gun/armor) categories — same registry
     // lookup shape /api/inventory's `items` array uses, filtered by a
     // predicate over (item name, registry entry).
@@ -1989,7 +2475,8 @@ app.get("/api/playercard", (req, res) => {
       gold: player.c_gold, tokens: player.c_tokens,
       location: locKey, locationName: LOCATION_NAMES[locKey], zombieZone: ZOMBIE_LOCATIONS.has(locKey),
       gunsOwned: GUN_NAMES.filter((g) => ownedQty[g] > 0),
-      guns, armors,
+      guns, armors, weapons,
+      quests: questsPayloadForCard(player),
       tools: byType(["tool"]),
       // Potions = the toolbag consumables minus gun oil (that's its own
       // Survival stat above); Food = every other consumable (cooked meals,
@@ -2054,9 +2541,76 @@ app.post("/api/inventory/equip", requireAuth, (req, res) => {
   if (!owned) return res.status(409).json({ ok: false, message: `You don't own a ${gunName}.` });
 
   updatePlayerGun(req.userId, gunName);
+  setSelectedSlot(req.userId, "gun");
   insertEvent("item", `You equipped the ${gunName}`, "private", req.userId);
   log("INFO", `${req.user} equipped ${gunName}`, game_config);
   return res.json({ ok: true, message: `Equipped ${gunName}.` });
+});
+
+// Equip (or with ""/"none" clear) one of the five weapon-wheel slots. Melee
+// and Fist are independent slots (each requires an exact section match);
+// ranged/throwing likewise; zombie accepts any zombie-themed weapon
+// regardless of its natural section. Every successful call (equip or clear)
+// also makes this slot the active one for combat (players.selected_equip_slot)
+// — picking a weapon through this route is how a player "switches to" it.
+const WEAPON_SLOT_KEYS = ["melee", "fist", "ranged", "throwing", "zombie"];
+app.post("/api/weapon/equip", requireAuth, (req, res) => {
+  const slot = String(req.body.slot || "").trim();
+  if (!WEAPON_SLOT_KEYS.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown weapon slot." });
+  const itemName = String(req.body.item || "").trim();
+
+  if (!itemName || itemName === "none") {
+    equipWeaponSlot(req.userId, slot, "");
+    setSelectedSlot(req.userId, slot);
+    insertEvent("item", `You unequipped your ${slot} weapon`, "private", req.userId);
+    log("INFO", `${req.user} cleared their ${slot} weapon slot`, game_config);
+    return res.json({ ok: true, message: `${slot} slot cleared.` });
+  }
+  const item = WEAPONS[itemName];
+  if (!item) return res.status(400).json({ ok: false, message: "That isn't a weapon." });
+  const slotOk =
+    slot === "melee" ? item.section === "Melee" :
+    slot === "fist" ? item.section === "Fist" :
+    slot === "ranged" ? item.section === "Ranged" :
+    slot === "throwing" ? item.section === "Throwing" :
+    isZombieWeapon(itemName);
+  if (!slotOk) return res.status(400).json({ ok: false, message: `${item.name} doesn't go in the ${slot} slot.` });
+  const owned = getInventory(req.userId).find((i) => i.item_name === itemName && i.quantity > 0);
+  if (!owned) return res.status(409).json({ ok: false, message: `You don't own a ${item.name}.` });
+
+  equipWeaponSlot(req.userId, slot, itemName);
+  setSelectedSlot(req.userId, slot);
+  insertEvent("item", `You equipped the ${item.name} in your ${slot} slot`, "private", req.userId);
+  log("INFO", `${req.user} equipped ${itemName} in their ${slot} weapon slot`, game_config);
+  return res.json({ ok: true, message: `Equipped ${item.name}.` });
+});
+
+// Quick-swap: make an already-equipped slot the active one for combat,
+// without touching what's equipped anywhere. This is the server call behind
+// game.html's quick-swap buttons (switching e.g. Handgun -> Zombie Bow
+// without opening the weapon picker) — the whole point of persisting
+// selected_equip_slot server-side rather than as an ephemeral client toggle.
+app.post("/api/weapon/select", requireAuth, (req, res) => {
+  const slot = String(req.body.slot || "").trim();
+  if (!setSelectedSlot(req.userId, slot)) return res.status(400).json({ ok: false, message: "Unknown weapon slot." });
+  log("INFO", `${req.user} switched active combat slot to ${slot}`, game_config);
+  return res.json({ ok: true, message: `Switched to ${slot}.` });
+});
+
+// Switch which zombie pool (World/Location/Nearby) a player is targeting —
+// only allowed into a scope that currently has zombies in it (mirrors the
+// splintering gate, see plan §1).
+app.post("/api/target/select", requireAuth, (req, res) => {
+  const player = ensurePlayer(req.userId);
+  const gameState = getGameState();
+  const scope = String(req.body.scope || "").trim();
+  if (!["World", "Location", "Nearby"].includes(scope))
+    return res.status(400).json({ ok: false, message: "Unknown target scope." });
+  if (!hasZombiesInScope(player, gameState, scope))
+    return res.status(409).json({ ok: false, message: `No zombies in ${scope} to target.` });
+  setTargetScope(req.userId, scope);
+  log("INFO", `${req.user} switched target scope to ${scope}`, game_config);
+  return res.json({ ok: true, message: `Now targeting ${scope}.` });
 });
 
 // Sell treasure or armor for gold at registry value. Body: item, qty (number
@@ -2143,6 +2697,10 @@ app.post("/api/level/up", requireAuth, (req, res) => {
   const bonusNote = r.bonus ? " (+5 accuracy, +5 max health)" : "";
   insertEvent("level", `${req.user} increased to level ${target}!${bonusNote}`, "public", "global");
   log("INFO", `${req.user} leveled to ${target} for ${cost} xp`, game_config);
+  // Re-check location-gated quests: a quest that was quest_level-gated but
+  // whose enter_location condition already fired earlier stays stuck until
+  // something re-evaluates it — leveling up is that trigger.
+  checkQuestTriggers(req.userId, { type: "location", location: locationOf(player) });
   return res.json({ ok: true, message: `Level ${target}!`, level: r.level });
 });
 
@@ -2159,6 +2717,7 @@ app.post("/api/level/max", requireAuth, (req, res) => {
   }
   if (!gained) return res.status(409).json({ ok: false, message: "Not enough XP for the next level." });
   insertEvent("level", `${req.user} increased to level ${player.level}! (+${gained} level${gained === 1 ? "" : "s"})`, "public", "global");
+  checkQuestTriggers(req.userId, { type: "location", location: locationOf(player) });
   return res.json({ ok: true, message: `Reached level ${player.level} (+${gained} levels).`, level: player.level });
 });
 
@@ -2178,6 +2737,8 @@ app.post("/api/travel", requireAuth, (req, res) => {
     return res.status(409).json({ ok: false, message: `You're already at ${LOCATION_NAMES[to]}.` });
   if (!(LOCATION_LINKS[from] || []).includes(to))
     return res.status(409).json({ ok: false, message: `You can't reach ${LOCATION_NAMES[to]} from ${LOCATION_NAMES[from]}.` });
+  if (player.zombie_near > 3)
+    return res.status(409).json({ ok: false, message: "Too many zombies on you to run — fight some off first." });
 
   updatePlayerLocation(req.userId, to);
   insertEvent("travel", `You traveled to ${LOCATION_NAMES[to]}`, "private", req.userId);
@@ -2544,12 +3105,17 @@ app.post("/api/spell/cast", requireAuth, (req, res) => {
     return res.status(409).json({ ok: false, message: `Not enough mana — ${spell.name} costs ${spell.cost}, you have ${player.mana}.` });
 
   const gameState = getGameState();
+  // Attack spells always resolve Broad (World/Location) — there's no
+  // Nearby-mode spell path; a player targeting Nearby still casts against
+  // whichever of World/Location their target_scope would otherwise resolve.
+  const spellScope = player.target_scope === "Location" ? "Location" : "World";
+  const spellPoolCount = spellScope === "Location" ? locationZombiesOf(gameState, locationOf(player)) : gameState.horde_size;
   if (spell.type === "attack") {
     if (!ZOMBIE_LOCATIONS.has(locationOf(player)))
       return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
     if (gameState.hunt_enabled !== "true")
       return res.status(409).json({ ok: false, message: "The hunt isn't active." });
-    if (gameState.horde_size <= 0)
+    if (spellPoolCount <= 0)
       return res.status(409).json({ ok: false, message: "No zombies to target." });
   }
 
@@ -2572,8 +3138,8 @@ app.post("/api/spell/cast", requireAuth, (req, res) => {
       log("INFO", `${req.user} cast ${key} -> miss (roll=${roll.toFixed(1)} chance=${spell.effect.accuracy})`, game_config);
       return res.json({ ok: true, result: "miss", message: `${spell.name} fizzled!` });
     }
-    const killed = Math.min(spell.effect.targets, gameState.horde_size);
-    const bonus = resolveKill(req.userId, req.user, killed, gameState, spell.name);
+    const killed = Math.min(spell.effect.targets, spellPoolCount);
+    const bonus = resolveKill(req.userId, req.user, killed, gameState, spell.name, spellScope, locationOf(player));
     log("INFO", `${req.user} cast ${key} -> hit x${killed}`, game_config);
     const base = killed > 1 ? `${spell.name} — ${killed} zombies down!` : `${spell.name} — zombie down!`;
     return res.json({ ok: true, result: "hit", killed, message: base + bonus });
@@ -3324,42 +3890,105 @@ function startZombieTicker() {
       latchRaidIfNeeded(); // a spawn may push us into raid territory
     }
 
-    // 2) Attack phase.
-    gs = getGameState();
-    const z = gs.horde_size;
-    if (z <= 0) { if (gs.raid_enabled === "true") setRaidEnabled(false); return; }
-
-    const raiding = gs.raid_enabled === "true";
-    if (gs.hunt_enabled !== "true" && !raiding) return; // paused unless a raid is ongoing
-
+    // Players in zombie-pool locations, snapshotted once and reused across
+    // splinter/wander/attack below (their location doesn't change mid-tick).
+    // Dev -s: admins are invisible to the tick — no damage, no targeting, no
+    // base absorption.
     const cutoff = Date.now() - game_config.timeout * 1000;
-    // Zombies only reach players in zombie-pool locations; everyone else is
-    // in a safe area and sits this tick out entirely. Dev -s: admins are
-    // invisible to the tick — no damage, no targeting, no base absorption.
-    const active = getActivePlayers(cutoff)
+    const zombieLocPlayers = getActivePlayers(cutoff)
       .filter((p) => ZOMBIE_LOCATIONS.has(locationOf(p)))
       .filter((p) => !(DEV_FLAGS.stealthAdmins && isUserAdmin(p.user_id)));
+
+    // 2) Splinter/flow-back: World <-> Location pools (see plan §1). Once
+    // World reaches z_wander, every zombie-location with a player present
+    // pulls 1 zombie out of World per tick; below z_wander, 1 flows back per
+    // tick from whichever location pool is currently largest. Positioned
+    // after spawn so a same-tick spawn can immediately splinter.
+    if (gs.hunt_enabled === "true") {
+      const presentLocations = new Set(zombieLocPlayers.map((p) => locationOf(p)));
+      const preSplinter = getGameState();
+      if (preSplinter.horde_size >= zombie_config.z_wander) {
+        for (const loc of ZOMBIE_LOCATIONS) {
+          if (!presentLocations.has(loc)) continue;
+          if (getGameState().horde_size <= 0) break;
+          adjustHordeSize(-1);
+          adjustLocationZombies(loc, 1);
+          insertEvent("spawn", `A zombie splits off toward ${LOCATION_NAMES[loc]}`, "background", "global");
+        }
+      } else {
+        let biggestLoc = null, biggestCount = 0;
+        for (const loc of ZOMBIE_LOCATIONS) {
+          const count = locationZombiesOf(preSplinter, loc);
+          if (count > biggestCount) { biggestCount = count; biggestLoc = loc; }
+        }
+        if (biggestLoc) {
+          adjustLocationZombies(biggestLoc, -1);
+          adjustHordeSize(1);
+          insertEvent("spawn", `A zombie drifts back from ${LOCATION_NAMES[biggestLoc]} toward the world`, "background", "global");
+        }
+      }
+      latchRaidIfNeeded(); // flow-back adding to World may cross into raid territory
+    }
+
+    // 3) Wander: Location -> a present player's own Nearby pool — a passive
+    // hazard independent of target_scope, only while the horde is actively
+    // hunting/raiding (see plan §1). Deliberately distinct internal naming
+    // from hordeStatusOf()'s "wandering" tier — unrelated mechanics that
+    // happen to share a word.
+    gs = getGameState();
+    const tierNow = hordeStatusOf(gs);
+    if (gs.hunt_enabled === "true" && (tierNow === "hunting" || tierNow === "raiding")) {
+      for (const p of zombieLocPlayers) {
+        const loc = locationOf(p);
+        if (locationZombiesOf(getGameState(), loc) <= 0) continue;
+        if (Math.random() * 100 < zombie_config.z_wander_chance) {
+          adjustLocationZombies(loc, -1);
+          adjustZombieNear(p.user_id, 1);
+          setZombieNearHealth(p.user_id, zombie_config.z_hp);
+          insertEvent("spawn", `A zombie creeps toward you at ${LOCATION_NAMES[loc]}`, "private", p.user_id);
+        }
+      }
+    }
+
+    // 4) Attack phase. Raid stays exactly as it was — sampling from the
+    // global World pool only. Non-raid moves to per-player "zombie force"
+    // (targeted pool + Nearby, see plan §1): each player's tier and
+    // attacker-count roll is now independent, based on their own exposure,
+    // instead of one shared roll off the global pool.
+    gs = getGameState();
+    const raiding = gs.raid_enabled === "true";
+    if (raiding && gs.horde_size <= 0) { setRaidEnabled(false); return; }
+    if (gs.hunt_enabled !== "true" && !raiding) return; // paused unless a raid is ongoing
+
+    const active = zombieLocPlayers;
     if (!active.length) return;
 
     // Tally damage per player for this tick based on the tier.
     const dmgByPlayer = new Map();
     const addDmg = (uid, d) => dmgByPlayer.set(uid, (dmgByPlayer.get(uid) || 0) + d);
 
-    const tier = raiding ? "raiding" : z >= zombie_config.z_horde ? "hunting" : "wandering";
     if (raiding) {
+      const z = gs.horde_size;
       const perHit = zombie_config.z_damage * 2;
       for (let i = 0; i < Math.min(z, 2000); i++) {
         if (Math.random() * 100 < zombie_config.z_hit / 2) {
           for (const t of sampleUpTo(active, 10)) addDmg(t.user_id, perHit);
         }
       }
-    } else if (z >= zombie_config.z_horde) {
-      const attackers = Math.floor(Math.random() * (Math.floor(0.75 * z) + 1));
-      if (attackers > 0) for (const p of active) addDmg(p.user_id, attackers * zombie_config.z_damage);
-    } else if (Math.random() * 100 < zombie_config.z_hit) {
-      for (const p of active) addDmg(p.user_id, zombie_config.z_damage);
+      log("INFO", `tick: tier=raiding zombies=${z} active=${active.length} playersHit=${dmgByPlayer.size}`, game_config);
+    } else {
+      for (const p of active) {
+        const force = zombieForceOf(p, gs);
+        if (force <= 0) continue;
+        if (force >= zombie_config.z_horde) {
+          const attackers = Math.floor(Math.random() * (Math.floor(0.75 * force) + 1));
+          if (attackers > 0) addDmg(p.user_id, attackers * zombie_config.z_damage);
+        } else if (Math.random() * 100 < zombie_config.z_hit) {
+          addDmg(p.user_id, zombie_config.z_damage);
+        }
+      }
+      log("INFO", `tick: tier=per-player active=${active.length} playersHit=${dmgByPlayer.size}`, game_config);
     }
-    log("INFO", `tick: tier=${tier} zombies=${z} active=${active.length} playersHit=${dmgByPlayer.size}`, game_config);
 
     // Apply: inside players are absorbed by the base (2 each, up to 500);
     // outside players take the hit and may die. The tallied total is checked

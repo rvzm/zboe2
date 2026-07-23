@@ -15,7 +15,7 @@ export const file_config = {
 export const game_config = {
   verbose: false, // Set to true for detailed logging
   dev: false, // Set to true for development mode, false for development mode
-  debugLevel: 'NONE', // Set to 'FULL', 'INFO', 'WARN', 'ERROR', or 'FATAL' for logging levels
+  debugLevel: 'ERROR', // Set to 'FULL', 'INFO', 'WARN', 'ERROR', or 'FATAL' for logging levels
   sessionSecret: 'changeme', // Change this to a secure random string in production
   timeout: 10, // Session timeout in seconds
   heartbeatSeconds: 10, // How often the --verbose heartbeat prints
@@ -23,6 +23,12 @@ export const game_config = {
   experimentResetHours: 24, // Hours a destroyed base persists before auto-resetting the experiment
   tokenExchangeGold: 500 // Gold granted per horde token exchanged in the shop
 
+};
+
+export const server_config = {
+  port: 3000, // Server port
+  host: "localhost", // Server host
+  
 };
 
 export const ui_config = {
@@ -51,6 +57,9 @@ export const zombie_config = {
   z_damage: 3, // Damage dealt per zombie hit (absorbed by shield first, then health)
   z_horde: 5, // Number of zombies in a horde
   z_raid: 15, // Number of zombies in a raid
+  z_hp: 20, // Health points of each zombie
+  z_wander: 15, // number of zombie required to start world wandering
+  z_wander_chance: 10, // per-player, per-tick chance (percentage) a Location zombie wanders into a present player's "nearby" pool during a horde
   z_break: 100, // Number of zombies needed to create a Zombie Break event.
   z_break_chance: 10, // Chance of a Zombie Break event occurring (percentage)
   z_break_duration: 60, // Duration of a Zombie Break event in seconds

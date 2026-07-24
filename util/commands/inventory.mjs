@@ -1,4 +1,4 @@
-import { db } from "../../db.js";
+import { db } from "../../db_backbone.js";
 
 function getUserId(username) {
   const row = db.prepare("SELECT id FROM users WHERE username = ?").get(username);

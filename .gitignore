@@ -7,7 +7,8 @@ dist/
 build/
 data/
 util/sanitycheck*
-util/backup*
+util/backups/**
+expansions/
 .env
 .env.local
 *.sqlite
@@ -18,7 +19,6 @@ util/backup*
 .npmrc
 Thumbs.db
 scratchbook*
-zboe.sh
 dev.sh
 live.sh
 package-lock.json

@@ -26,6 +26,12 @@
     .muted-mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.6); font-size: .8rem; }
     /* Bootstrap has no built-in purple progress-bar variant — Mana needs one. */
     .bg-mana { background-color: #8b5cf6 !important; }
+    /* Same purple, reused for the zombie splinter/flow-back buttons so the
+       app has one consistent purple rather than a second competing shade. */
+    .btn-purple { background-color: #8b5cf6; border-color: #8b5cf6; color: #fff; }
+    .btn-purple:hover, .btn-purple:focus { background-color: #7c3aed; border-color: #7c3aed; color: #fff; }
+    .btn-outline-purple { color: #8b5cf6; border-color: #8b5cf6; background-color: transparent; }
+    .btn-outline-purple:hover, .btn-outline-purple:focus { background-color: #8b5cf6; border-color: #8b5cf6; color: #fff; }
     .soft-card { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.12); }
     /* Bootstrap cards reset to the dark body color — force the titles bright. */
     .soft-card .card-header {
@@ -91,24 +97,36 @@
           <div class="card soft-card h-100">
             <div class="card-header fw-semibold">Horde</div>
             <div class="card-body text-center">
-              <div class="statval fs-3" id="wHorde">0</div>
-              <div class="muted-mono mb-2" id="wHordeStatus">—</div>
-              <div class="d-flex gap-1 justify-content-center mb-2">
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-10">-10</button>
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-5">-5</button>
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-1">-1</button>
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="1">+1</button>
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="5">+5</button>
-                <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="10">+10</button>
+              <div id="wHordeNormal">
+                <div class="statval fs-3" id="wHorde">0</div>
+                <div class="muted-mono mb-2" id="wHordeStatus">—</div>
+                <div class="d-flex gap-1 justify-content-center mb-2">
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-10">-10</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-5">-5</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="-1">-1</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="1">+1</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="5">+5</button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-hordedelta="10">+10</button>
+                </div>
+                <div class="d-flex gap-1 justify-content-center mb-2">
+                  <input class="form-control form-control-sm" id="wHordeSize" style="max-width:90px" placeholder="size">
+                  <button class="btn btn-sm btn-outline-danger" id="wHordeSet">Set</button>
+                </div>
+                <div class="d-flex gap-1 justify-content-center flex-wrap">
+                  <button class="btn btn-sm btn-outline-warning" id="wHordeInstantHorde">Instant Horde</button>
+                  <button class="btn btn-sm btn-outline-danger" id="wHordeInstantRaid">Instant Raid</button>
+                  <button class="btn btn-sm btn-danger" id="wHordeNuke">☢️ Nuke All</button>
+                </div>
+                <div class="mt-2 pt-2 border-top" style="border-color: rgba(255,255,255,.12) !important;">
+                  <div class="muted-mono mb-1">Location Pools</div>
+                  <div class="d-flex flex-wrap gap-1 justify-content-center" id="wHordeLocations"></div>
+                </div>
               </div>
-              <div class="d-flex gap-1 justify-content-center mb-2">
-                <input class="form-control form-control-sm" id="wHordeSize" style="max-width:90px" placeholder="size">
-                <button class="btn btn-sm btn-outline-danger" id="wHordeSet">Set</button>
-              </div>
-              <div class="d-flex gap-1 justify-content-center flex-wrap">
-                <button class="btn btn-sm btn-outline-warning" id="wHordeInstantHorde">Instant Horde</button>
-                <button class="btn btn-sm btn-outline-danger" id="wHordeInstantRaid">Instant Raid</button>
-                <button class="btn btn-sm btn-danger" id="wHordeNuke">☢️ Nuke All</button>
+              <div id="wHordeOutbreak" class="d-none">
+                <div class="fs-3 fw-bold text-danger mb-2">!!OUTBREAK!!</div>
+                <div class="muted-mono mb-1">Total Zombie Force</div>
+                <div class="statval fs-3 mb-3" id="wOutbreakTotal">0</div>
+                <button class="btn btn-sm btn-danger w-100" id="wOutbreakForceEnd">Force End</button>
               </div>
             </div>
           </div>
@@ -287,7 +305,7 @@
         <div class="card-header fw-semibold d-flex justify-content-between"><span>Locations</span><button class="btn btn-sm btn-outline-light" id="reloadLocations">Reload</button></div>
         <div class="card-body p-0 panel">
           <table class="table table-sm mb-0">
-            <thead><tr><th>Location</th><th>Users</th><th>Zone</th><th class="text-end">Actions</th></tr></thead>
+            <thead><tr><th>Location</th><th>Users</th><th>Zone</th><th>Zombies</th><th class="text-end">Actions</th></tr></thead>
             <tbody id="locationRows"></tbody>
           </table>
         </div>
@@ -314,6 +332,10 @@
             <div class="d-flex gap-2">
               <button class="btn btn-sm btn-outline-warning flex-fill" id="lmEmptyBtn">Empty (move everyone here into the base)</button>
               <button class="btn btn-sm btn-outline-info flex-fill" id="lmTeleportAllBtn">Teleport All (move everyone else here)</button>
+            </div>
+            <div class="d-flex gap-2 mt-2 d-none" id="lmZombieBtns">
+              <button class="btn btn-sm btn-purple flex-fill" id="lmSplinterBtn">Splinter To (World → here)</button>
+              <button class="btn btn-sm btn-outline-purple flex-fill" id="lmFlowbackBtn">Flow Back (here → World)</button>
             </div>
           </div>
         </div>
@@ -372,6 +394,15 @@
                 <div id="statTabArmor" class="d-none p-2"></div>
                 <div id="statTabSkills" class="d-none p-2"></div>
               </div>
+            </div>
+            <div class="card soft-card mt-3">
+              <div class="card-header fw-semibold">Quests <span class="muted-mono">(read-only)</span></div>
+              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="questTabs">
+                <button class="btn btn-outline-light active" data-questtab="started" type="button">Started</button>
+                <button class="btn btn-outline-light" data-questtab="completed" type="button">Completed</button>
+                <button class="btn btn-outline-light" data-questtab="unstarted" type="button">Unstarted</button>
+              </div>
+              <div class="card-body p-2 panel" id="questBody" style="max-height: 30vh;"></div>
             </div>
           </div>
           <div class="col-lg-5">
@@ -443,8 +474,8 @@
               </div>
             </div>
             <div class="card soft-card mb-3">
-              <div class="card-header fw-semibold">Equipped Gun</div>
-              <div class="card-body" id="gunButtons"></div>
+              <div class="card-header fw-semibold">Equip Slots</div>
+              <div class="card-body" id="equipSlots"></div>
             </div>
             <div class="card soft-card">
               <div class="card-header fw-semibold">Inventory</div>
@@ -570,6 +601,17 @@
       $("wHorde").textContent = w.hordeSize;
       currentHordeSize = w.hordeSize;
       $("wHordeStatus").textContent = `${w.hordeStatus}${w.raid ? " · RAID LATCHED" : ""}`;
+      $("wHordeLocations").innerHTML = (w.locationZombies || [])
+        .map(l => `<span class="badge rounded-pill text-bg-dark border">${esc(l.name)}: ${l.count}</span>`)
+        .join("");
+
+      // Outbreak mode replaces the whole Horde box's normal controls with a
+      // single Total Zombie Force readout + Force End button.
+      $("wHordeNormal").classList.toggle("d-none", w.outbreak);
+      $("wHordeOutbreak").classList.toggle("d-none", !w.outbreak);
+      $("wOutbreakTotal").textContent = w.totalZPool;
+      $("wHuntToggle").disabled = w.outbreak;
+
       const pct = w.base.max > 0 ? Math.max(0, Math.min(100, (w.base.health / w.base.max) * 100)) : 0;
       $("wBase").textContent = w.base.destroyed ? "DESTROYED" : `${w.base.health} / ${w.base.max}`;
       const bar = $("wBaseBar");
@@ -761,6 +803,10 @@
     $("wHordeInstantRaid").onclick = async () => {
       await api("/api/admin/world/horde/instant", { tier: "raid" }); loadWorld();
     };
+    $("wOutbreakForceEnd").onclick = async () => {
+      if (!confirm("Force-end the Outbreak? This clears every location's zombies (except Forest, which keeps a chunk) with no reward.")) return;
+      await api("/api/admin/world/outbreak/forceend", {}); loadWorld();
+    };
     $("wBaseRefill").onclick = async () => { await api("/api/admin/world/base/repair", {}); loadWorld(); };
     $("wBaseSentry").onclick = async () => { await api("/api/admin/world/base/sentry", {}); loadWorld(); };
     $("wBaseReset").onclick = async () => {
@@ -831,12 +877,29 @@
         const rows = $("locationRows"); rows.innerHTML = "";
         locationsData.forEach(loc => {
           const tr = document.createElement("tr");
+          const zombieBtns = loc.zombie ? `
+            <button class="btn btn-sm btn-purple py-0 px-2" data-act="splinter">Splinter In</button>
+            <button class="btn btn-sm btn-outline-purple py-0 px-2" data-act="flowback">Shuffle Away</button>` : "";
           tr.innerHTML = `
             <td>${esc(loc.name)}</td>
             <td class="statval">${loc.count} <span class="muted-mono">(${loc.online} online)</span></td>
             <td>${loc.zombie ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
-            <td class="text-end"><button class="btn btn-sm btn-outline-info py-0 px-2">Manage</button></td>`;
-          tr.querySelector("button").onclick = () => openLocationManager(loc.key);
+            <td class="statval">${loc.zombies === null ? '<span class="muted-mono">N/A</span>' : loc.zombies}</td>
+            <td class="text-end">
+              ${zombieBtns}
+              <button class="btn btn-sm btn-outline-info py-0 px-2" data-act="manage">Manage</button>
+            </td>`;
+          tr.querySelector('[data-act="manage"]').onclick = () => openLocationManager(loc.key);
+          const splinterBtn = tr.querySelector('[data-act="splinter"]');
+          if (splinterBtn) splinterBtn.onclick = async () => {
+            await api("/api/admin/world/zombies/splinter", { location: loc.key });
+            loadLocations();
+          };
+          const flowbackBtn = tr.querySelector('[data-act="flowback"]');
+          if (flowbackBtn) flowbackBtn.onclick = async () => {
+            await api("/api/admin/world/zombies/flowback", { location: loc.key });
+            loadLocations();
+          };
           rows.appendChild(tr);
         });
       }
@@ -867,6 +930,7 @@
       $("lmName").textContent = loc.name;
       $("lmZonePill").innerHTML = loc.zombie ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>';
       $("lmEmptyBtn").classList.toggle("d-none", loc.key === "basecamp_inside");
+      $("lmZombieBtns").classList.toggle("d-none", !loc.zombie);
 
       const users = (await api("/api/admin/users") || []).filter(u => {
         const locKey = locationsData.some(l => l.key === u.location) ? u.location : "basecamp_outside";
@@ -877,12 +941,30 @@
       if (!users.length) { rows.innerHTML = `<tr><td class="muted-mono" colspan="4">(nobody here)</td></tr>`; }
       users.forEach(u => {
         const tr = document.createElement("tr");
+        const zombieBtns = loc.zombie ? `
+          <button class="btn btn-sm btn-purple py-0 px-2" data-act="splinter">Splinter To</button>
+          <button class="btn btn-sm btn-outline-purple py-0 px-2" data-act="flowback">Flow Back</button>` : "";
         tr.innerHTML = `
           <td>${esc(u.username)}</td>
           <td class="statval">${u.level ?? "—"}</td>
           <td>${u.online ? '<span class="badge text-bg-success">online</span>' : '<span class="badge text-bg-secondary">offline</span>'}</td>
-          <td class="text-end"><button class="btn btn-sm btn-outline-warning py-0 px-2">Teleport Away</button></td>`;
-        tr.querySelector("button").onclick = () => openTeleportOptions(u.username, loc.key);
+          <td class="text-end">
+            ${zombieBtns}
+            <button class="btn btn-sm btn-outline-warning py-0 px-2" data-act="tp">Teleport Away</button>
+          </td>`;
+        tr.querySelector('[data-act="tp"]').onclick = () => openTeleportOptions(u.username, loc.key);
+        const splinterBtn = tr.querySelector('[data-act="splinter"]');
+        if (splinterBtn) splinterBtn.onclick = async () => {
+          await api("/api/admin/player/zombies/splinter", { username: u.username });
+          await loadLocations();
+          await renderLocationManager();
+        };
+        const flowbackBtn = tr.querySelector('[data-act="flowback"]');
+        if (flowbackBtn) flowbackBtn.onclick = async () => {
+          await api("/api/admin/player/zombies/flowback", { username: u.username });
+          await loadLocations();
+          await renderLocationManager();
+        };
         rows.appendChild(tr);
       });
     }
@@ -897,6 +979,18 @@
       const loc = locationsData.find(l => l.key === lmKey);
       if (!loc || !confirm(`Teleport everyone NOT at ${loc.name} to it?`)) return;
       await api("/api/admin/world/locations/teleport-all", { location: lmKey });
+      await loadLocations();
+      await renderLocationManager();
+    };
+    $("lmSplinterBtn").onclick = async () => {
+      if (!lmKey) return;
+      await api("/api/admin/world/zombies/splinter", { location: lmKey });
+      await loadLocations();
+      await renderLocationManager();
+    };
+    $("lmFlowbackBtn").onclick = async () => {
+      if (!lmKey) return;
+      await api("/api/admin/world/zombies/flowback", { location: lmKey });
       await loadLocations();
       await renderLocationManager();
     };
@@ -955,6 +1049,10 @@
     let currentPlayer = null, statTab = "player", currentPlayerData = null;
     $("statTabs").querySelectorAll("[data-stattab]").forEach(b =>
       b.addEventListener("click", () => { statTab = b.dataset.stattab; renderStatTabs(); }));
+
+    let questTab = "started";
+    $("questTabs").querySelectorAll("[data-questtab]").forEach(b =>
+      b.addEventListener("click", () => { questTab = b.dataset.questtab; renderQuestTabs(); }));
 
     async function loadPlayer(name){
       loadItemSelect(); // populate the grant dropdown once
@@ -1025,16 +1123,9 @@
 
       // Stats table (Player/Currency/Guns tabs) + skill boxes (Skills tab).
       renderStatTabs();
+      renderQuestTabs();
 
-      const gb = $("gunButtons"); gb.innerHTML = "";
-      data.guns.forEach(g => {
-        const b = document.createElement("button");
-        b.className = "btn btn-sm me-2 mb-2 " + (g.equipped ? "btn-primary" : g.owned ? "btn-outline-primary" : "btn-outline-secondary");
-        b.textContent = g.equipped ? `${g.name} ✓` : g.owned ? g.name : `${g.name} [force]`;
-        b.disabled = g.equipped;
-        b.onclick = () => api("/api/admin/player/equip", { username: currentPlayer, gun: g.name, force: g.owned ? "false" : "true" }).then(r => r.ok && loadPlayer(currentPlayer));
-        gb.appendChild(b);
-      });
+      renderEquipSlots(data);
 
       const iv = $("invRows"); iv.innerHTML = "";
       if (!data.inventory.length) iv.innerHTML = `<tr><td class="muted-mono">(empty)</td></tr>`;
@@ -1048,6 +1139,80 @@
         };
         iv.appendChild(tr);
       });
+    }
+
+    // Equip Slots: one section per weapon-wheel slot (gun + melee/fist/ranged/
+    // throwing/zombie) — same owned/equipped/force-equip button pattern as
+    // the old single-gun card and the Armor tab, just repeated per slot.
+    // Unowned items are labeled "Grant" (force-grants + equips in one click).
+    const SLOT_LABELS = { gun: "Gun", melee: "Melee", fist: "Fist", ranged: "Ranged", throwing: "Throwing", zombie: "Zombie" };
+    function renderEquipSlots(data){
+      const wrap = $("equipSlots"); wrap.innerHTML = "";
+      (data.weapons || []).forEach(({ slot, items }) => {
+        const row = document.createElement("div");
+        row.className = "mb-3";
+        row.innerHTML = `<div class="fw-semibold muted-mono mb-1">${esc(SLOT_LABELS[slot] || slot)}</div>`;
+        if (!items.length) row.insertAdjacentHTML("beforeend", `<div class="muted-mono">(no items registered for this slot)</div>`);
+        items.forEach(it => {
+          const label = it.label || it.name;
+          const b = document.createElement("button");
+          b.className = "btn btn-sm me-2 mb-2 " + (it.equipped ? "btn-primary" : it.owned ? "btn-outline-primary" : "btn-outline-secondary");
+          b.textContent = it.equipped ? `${label} ✓` : it.owned ? label : `${label} [Grant]`;
+          b.disabled = it.equipped;
+          b.onclick = () => {
+            const p = slot === "gun"
+              ? api("/api/admin/player/equip", { username: currentPlayer, gun: it.name, force: it.owned ? "false" : "true" })
+              : api("/api/admin/player/weapon/equip", { username: currentPlayer, slot, item: it.name, force: it.owned ? "false" : "true" });
+            p.then(r => r.ok && loadPlayer(currentPlayer));
+          };
+          row.appendChild(b);
+        });
+        wrap.appendChild(row);
+      });
+    }
+
+    // Quests card: read-only Started/Completed/Unstarted view, cached off
+    // currentPlayerData.quests (same "no refetch on tab switch" convention as
+    // renderStatTabs). Started = the active quest (with objective progress)
+    // plus any other started-but-not-active quests.
+    function renderQuestTabs(){
+      const q = currentPlayerData?.quests;
+      $("questTabs").querySelectorAll("[data-questtab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.questtab === questTab));
+      const body = $("questBody");
+      if (!q) { body.innerHTML = `<div class="muted-mono">(no data)</div>`; return; }
+
+      if (questTab === "started") {
+        const parts = [];
+        if (q.active) {
+          const objs = (q.active.objectives || []).map(o => `
+            <div class="d-flex justify-content-between muted-mono" style="font-size:.75rem;">
+              <span>${esc(o.label)}</span><span>${o.have} / ${o.need}${o.done ? " ✓" : ""}</span>
+            </div>`).join("");
+          parts.push(`
+            <div class="mb-2 p-2" style="background: rgba(255,255,255,.04); border-radius:.25rem;">
+              <div class="fw-semibold">${esc(q.active.name)} <span class="badge text-bg-info">active</span></div>
+              <div class="muted-mono mb-1">${esc(q.active.desc || "")}</div>
+              ${objs}
+            </div>`);
+        }
+        (q.started || []).forEach(s => parts.push(`
+          <div class="mb-1"><span class="fw-semibold">${esc(s.name)}</span> <span class="muted-mono">${esc(s.desc || "")}</span></div>`));
+        body.innerHTML = parts.length ? parts.join("") : `<div class="muted-mono">(nothing started)</div>`;
+      } else if (questTab === "completed") {
+        const list = q.completed || [];
+        body.innerHTML = list.length
+          ? list.map(c => {
+              const reward = c.reward ? Object.entries(c.reward).map(([k, v]) => `${k} ${v}`).join(", ") : "—";
+              return `<div class="mb-1"><span class="fw-semibold">${esc(c.name)}</span> <span class="muted-mono">reward: ${esc(reward)}</span></div>`;
+            }).join("")
+          : `<div class="muted-mono">(none completed)</div>`;
+      } else if (questTab === "unstarted") {
+        const list = q.unstarted || [];
+        body.innerHTML = list.length
+          ? list.map(u => `<div class="mb-1"><span class="fw-semibold">${esc(u.name)}</span> <span class="muted-mono">${esc(u.desc || "")}</span></div>`).join("")
+          : `<div class="muted-mono">(none)</div>`;
+      }
     }
 
     // One <tr> for a stat: boolean (max===1) renders a toggle, everything

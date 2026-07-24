@@ -1,6 +1,6 @@
 // cli/commands/users.js
 import crypto from "node:crypto";
-import { db, insertPlayer, banUser, unbanUser, exileUser, unexileUser, setChatFlag, setAdmFun } from "../../db.js";
+import { db, insertPlayer, banUser, unbanUser, exileUser, unexileUser, setChatFlag, setAdmFun } from "../../db_backbone.js";
 import { account_config } from "../../config.js";
 
 // Mirrors server.js hashPassword so CLI-created accounts can log in.

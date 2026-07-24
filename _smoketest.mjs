@@ -9,14 +9,14 @@
 // Exits 0 only if every check passes — safe to use as a go/no-go gate
 // before calling a change "done".
 //
-// This file is deliberately standalone (no imports from server.js/db.js
+// This file is deliberately standalone (no imports from server.js/db_backbone.js
 // beyond the pure-data item_backbone.js) and is meant to be kept current:
 // add a check here whenever a new route/feature is built, or a past bug
 // (like the RECIPES typos below) deserves a permanent regression guard.
 
 import { spawn } from "node:child_process";
 import { styleText } from "node:util";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,12 +75,22 @@ console.log(paint(["bold", "cyan"], "== Stage 0: registry sanity (no server need
   // WEAPON_RANGED_TYPES/WEAPON_RANGED_OPTIONS import mismatch was fixed).
   const badFirearm = WEAPON_FIREARM_TYPES.filter((t) => {
     const cfg = WEAPON_FIREARM_EXPORT[t];
-    return !cfg || !(Number.isFinite(cfg.dmg) && cfg.dmg >= 0) || !["player", "condition"].includes(cfg.acc_model);
+    return !cfg || !(Number.isFinite(cfg.dmg) && cfg.dmg >= 0) || !["player", "condition"].includes(cfg.accuracyModel);
   });
   record(`every WEAPON_FIREARM_TYPES entry (${WEAPON_FIREARM_TYPES.length}) has a valid WEAPON_FIREARM_EXPORT row`, badFirearm.length === 0, badFirearm.join(", "));
 
   const badFloor = WEAPON_TYPES.filter((s) => !Number.isFinite(WEAPON_ATTACK_EXPORT[s]?.floor));
   record(`every WEAPON_TYPES section (${WEAPON_TYPES.length}) has a floor in WEAPON_ATTACK_EXPORT`, badFloor.length === 0, badFloor.join(", "));
+
+  // Gun attack_mod: an item-level { dmg?, acc?, floor? } offset from its base
+  // WEAPON_FIREARM_EXPORT[gunType] row. No gun uses it yet — this passes
+  // vacuously today and becomes a live guard the moment one does.
+  const badMod = Object.entries(ITEMS).filter(([, i]) => i.type === "gun" && i.attack_mod).filter(([, i]) => {
+    const m = i.attack_mod;
+    const base = WEAPON_FIREARM_EXPORT[i.gunType];
+    return !base || ["dmg", "acc", "floor"].some((f) => m[f] !== undefined && !Number.isFinite(m[f])) || (Number.isFinite(m.dmg) && base.dmg + m.dmg < 0);
+  }).map(([k]) => k);
+  record(`every gun ITEMS row with attack_mod has a valid offset`, badMod.length === 0, badMod.join(", "));
 }
 
 console.log(paint(["bold", "cyan"], "\n== Stage 1: isolated boot =="));
@@ -161,6 +171,12 @@ try {
   for (const m of childOutput.matchAll(/^\s*(\w+)\s+pass:\s*(\S+)/gm)) passwords[m[1]] = m[2];
   record("mock-db credentials captured", Object.keys(passwords).length === 3,
     Object.keys(passwords).join(", "));
+
+  // The shipped dev config's zombie_config.z_break_fall (50) is deliberately
+  // below the recommended 75 — confirms the boot-time sanity WARN fires
+  // (always, not gated dev/production).
+  record("boot WARN fires for zombie_config.z_break_fall < 75",
+    /z_break_fall is \d+ \(below the recommended 75\)/.test(childOutput));
 
   console.log(paint(["bold", "cyan"], "\n== Stage 2: backend API coverage =="));
 
@@ -505,6 +521,198 @@ try {
   await check("POST /api/action/attack (ranged, now has ammo — fires without crashing)", async () => {
     const r = await req("player1", "POST", "/api/action/attack", { slot: "ranged" });
     if (!r.json?.ok) throw new Error(r.json?.message || `status ${r.status}`);
+  });
+
+  console.log(paint(["bold", "cyan"], "\n== Stage 2d: admin Equip Slots, Quests box, zombie location pool tooling =="));
+
+  await check("GET /api/admin/player (weapons + quests fields present)", async () => {
+    const r = await req("admin", "GET", "/api/admin/player?username=player1");
+    if (r.status !== 200 || !r.json?.ok) throw new Error(`status ${r.status}`);
+    if (!Array.isArray(r.json.weapons) || r.json.weapons.length !== 6) throw new Error(`expected 6 weapon slots, got ${JSON.stringify(r.json.weapons?.map((w) => w.slot))}`);
+    const meleeSlot = r.json.weapons.find((w) => w.slot === "melee");
+    if (!meleeSlot?.items?.some((i) => i.name === "Baseball Bat")) throw new Error("melee slot missing Baseball Bat from the registry");
+    if (!r.json.quests || !Array.isArray(r.json.quests.unstarted)) throw new Error(`missing quests.unstarted: ${JSON.stringify(r.json.quests)}`);
+  });
+
+  await check("POST /api/admin/player/weapon/equip (force-grant + equip, wrong-slot rejection)", async () => {
+    const equip = await req("admin", "POST", "/api/admin/player/weapon/equip", { username: "player2", slot: "throwing", item: "Throwing Knives", force: "true" });
+    if (!equip.json?.ok) throw new Error(equip.json?.message || `status ${equip.status}`);
+    const check1 = await req("admin", "GET", "/api/admin/player?username=player2");
+    const throwingSlot = check1.json.weapons.find((w) => w.slot === "throwing");
+    if (throwingSlot.equipped !== "Throwing Knives") throw new Error(`expected Throwing Knives equipped, got ${JSON.stringify(throwingSlot)}`);
+
+    const wrongSlot = await req("admin", "POST", "/api/admin/player/weapon/equip", { username: "player2", slot: "melee", item: "Throwing Knives", force: "true" });
+    if (wrongSlot.json?.ok || wrongSlot.status !== 400) throw new Error(`expected a 400 rejecting a Throwing item in the melee slot, got ${wrongSlot.status} ${JSON.stringify(wrongSlot.json)}`);
+
+    const clear = await req("admin", "POST", "/api/admin/player/weapon/equip", { username: "player2", slot: "throwing", item: "" });
+    if (!clear.json?.ok) throw new Error(`clear slot: ${clear.json?.message || clear.status}`);
+    const check2 = await req("admin", "GET", "/api/admin/player?username=player2");
+    if (check2.json.weapons.find((w) => w.slot === "throwing").equipped) throw new Error("throwing slot did not clear");
+  });
+
+  await check("GET /api/admin/world + /api/admin/world/locations (locationZombies / zombies fields present)", async () => {
+    const world = await req("admin", "GET", "/api/admin/world");
+    if (!Array.isArray(world.json?.locationZombies) || world.json.locationZombies.length !== 4)
+      throw new Error(`expected 4 zombie-location entries, got ${JSON.stringify(world.json?.locationZombies)}`);
+
+    const locs = await req("admin", "GET", "/api/admin/world/locations");
+    const byKey = Object.fromEntries((locs.json?.locations || []).map((l) => [l.key, l]));
+    if (typeof byKey.forest?.zombies !== "number") throw new Error(`expected forest.zombies to be numeric, got ${JSON.stringify(byKey.forest)}`);
+    if (byKey.bunker?.zombies !== null) throw new Error(`expected bunker.zombies to be null (N/A), got ${JSON.stringify(byKey.bunker)}`);
+    if (byKey.mountains?.zombies !== null) throw new Error(`expected mountains.zombies to be null pre-Outbreak, got ${JSON.stringify(byKey.mountains)}`);
+  });
+
+  await check("POST /api/admin/world/zombies/splinter (rejects below z_wander, succeeds above it)", async () => {
+    await req("admin", "POST", "/api/admin/world/horde", { size: 2 });
+    const tooLow = await req("admin", "POST", "/api/admin/world/zombies/splinter", { location: "forest" });
+    if (tooLow.json?.ok || tooLow.status !== 409) throw new Error(`expected a 409 below z_wander, got ${tooLow.status} ${JSON.stringify(tooLow.json)}`);
+
+    await req("admin", "POST", "/api/admin/world/horde", { size: 20 });
+    const before = await req("admin", "GET", "/api/admin/world/locations");
+    const forestBefore = before.json.locations.find((l) => l.key === "forest").zombies;
+    const worldBefore = (await req("admin", "GET", "/api/admin/world")).json.hordeSize;
+
+    const ok = await req("admin", "POST", "/api/admin/world/zombies/splinter", { location: "forest" });
+    if (!ok.json?.ok) throw new Error(ok.json?.message || `status ${ok.status}`);
+
+    const after = await req("admin", "GET", "/api/admin/world/locations");
+    const forestAfter = after.json.locations.find((l) => l.key === "forest").zombies;
+    const worldAfter = (await req("admin", "GET", "/api/admin/world")).json.hordeSize;
+    if (forestAfter !== forestBefore + 1) throw new Error(`expected forest zombies ${forestBefore} -> ${forestBefore + 1}, got ${forestAfter}`);
+    if (worldAfter !== worldBefore - 1) throw new Error(`expected World horde ${worldBefore} -> ${worldBefore - 1}, got ${worldAfter}`);
+  });
+
+  await check("POST /api/admin/world/zombies/flowback (rejects an empty location, succeeds otherwise)", async () => {
+    const empty = await req("admin", "POST", "/api/admin/world/zombies/flowback", { location: "lake" });
+    if (empty.json?.ok || empty.status !== 409) throw new Error(`expected a 409 for an empty location, got ${empty.status} ${JSON.stringify(empty.json)}`);
+
+    const before = await req("admin", "GET", "/api/admin/world/locations");
+    const forestBefore = before.json.locations.find((l) => l.key === "forest").zombies;
+    const worldBefore = (await req("admin", "GET", "/api/admin/world")).json.hordeSize;
+
+    const ok = await req("admin", "POST", "/api/admin/world/zombies/flowback", { location: "forest" });
+    if (!ok.json?.ok) throw new Error(ok.json?.message || `status ${ok.status}`);
+
+    const after = await req("admin", "GET", "/api/admin/world/locations");
+    const forestAfter = after.json.locations.find((l) => l.key === "forest").zombies;
+    const worldAfter = (await req("admin", "GET", "/api/admin/world")).json.hordeSize;
+    if (forestAfter !== forestBefore - 1) throw new Error(`expected forest zombies ${forestBefore} -> ${forestBefore - 1}, got ${forestAfter}`);
+    if (worldAfter !== worldBefore + 1) throw new Error(`expected World horde ${worldBefore} -> ${worldBefore + 1}, got ${worldAfter}`);
+  });
+
+  await check("POST /api/admin/player/zombies/splinter + flowback (Location <-> that player's Nearby pool)", async () => {
+    // player1 sits at basecamp_outside (a ZOMBIE_LOCATIONS location) with
+    // zombie_near flushed to 0 by the earlier travel check. Seed the
+    // location's own pool first (horde is already >= z_wander from above).
+    const seed = await req("admin", "POST", "/api/admin/world/zombies/splinter", { location: "basecamp_outside" });
+    if (!seed.json?.ok) throw new Error(`seed basecamp_outside: ${seed.json?.message || seed.status}`);
+
+    const splinter = await req("admin", "POST", "/api/admin/player/zombies/splinter", { username: "player1" });
+    if (!splinter.json?.ok) throw new Error(splinter.json?.message || `status ${splinter.status}`);
+    const gs1 = await req("player1", "GET", "/api/game-state");
+    if (gs1.json?.nearbyZombies !== 1) throw new Error(`expected nearbyZombies 1 after splinter, got ${JSON.stringify(gs1.json?.nearbyZombies)}`);
+
+    const flowback = await req("admin", "POST", "/api/admin/player/zombies/flowback", { username: "player1" });
+    if (!flowback.json?.ok) throw new Error(flowback.json?.message || `status ${flowback.status}`);
+    const gs2 = await req("player1", "GET", "/api/game-state");
+    if (gs2.json?.nearbyZombies !== 0) throw new Error(`expected nearbyZombies 0 after flowback, got ${JSON.stringify(gs2.json?.nearbyZombies)}`);
+
+    const emptyFlowback = await req("admin", "POST", "/api/admin/player/zombies/flowback", { username: "player1" });
+    if (emptyFlowback.json?.ok || emptyFlowback.status !== 409) throw new Error(`expected a 409 with no nearby zombies, got ${emptyFlowback.status} ${JSON.stringify(emptyFlowback.json)}`);
+  });
+
+  console.log(paint(["bold", "cyan"], "\n== Stage 2e: Outbreak mechanics (total_z_pool invariant + reset) =="));
+
+  await check("total_z_pool invariant holds across a World<->Location splinter/flow-back round trip", async () => {
+    // Horde is already >= z_wander from the earlier splinter test in Stage 2d.
+    const before = (await req("admin", "GET", "/api/admin/world")).json.totalZPool;
+    const afterSplinter = await req("admin", "POST", "/api/admin/world/zombies/splinter", { location: "lake" });
+    if (!afterSplinter.json?.ok) throw new Error(afterSplinter.json?.message || `status ${afterSplinter.status}`);
+    const mid = (await req("admin", "GET", "/api/admin/world")).json.totalZPool;
+    if (mid !== before) throw new Error(`expected total_z_pool unchanged by a single splinter (a balanced transfer), ${before} -> ${mid}`);
+
+    const afterFlowback = await req("admin", "POST", "/api/admin/world/zombies/flowback", { location: "lake" });
+    if (!afterFlowback.json?.ok) throw new Error(afterFlowback.json?.message || `status ${afterFlowback.status}`);
+    const after = (await req("admin", "GET", "/api/admin/world")).json.totalZPool;
+    if (after !== before) throw new Error(`expected total_z_pool unchanged by the round trip, ${before} -> ${after}`);
+  });
+
+  await check("Experiment Reset zeroes total_z_pool, every zombies_<loc> column, and the outbreak flag", async () => {
+    const seed = await req("admin", "POST", "/api/admin/world/zombies/splinter", { location: "swamp" });
+    if (!seed.json?.ok) throw new Error(`seed swamp: ${seed.json?.message || seed.status}`);
+    const before = (await req("admin", "GET", "/api/admin/world")).json.totalZPool;
+    if (!(before > 0)) throw new Error(`expected a nonzero total_z_pool before reset, got ${before}`);
+
+    const reset = await req("admin", "POST", "/api/base/reset", {});
+    if (!reset.json?.ok) throw new Error(`reset: ${reset.json?.message || reset.status}`);
+
+    const world = await req("admin", "GET", "/api/admin/world");
+    if (world.json.totalZPool !== 0) throw new Error(`expected total_z_pool 0 after reset, got ${world.json.totalZPool}`);
+    if (world.json.outbreak) throw new Error("expected outbreak=false after reset");
+    if (world.json.hordeSize !== 0) throw new Error(`expected hordeSize 0 after reset, got ${world.json.hordeSize}`);
+
+    const locs = await req("admin", "GET", "/api/admin/world/locations");
+    const nonZero = locs.json.locations.filter((l) => l.zombie && l.zombies !== 0);
+    if (nonZero.length) throw new Error(`expected every zombie location at 0 after reset, found: ${JSON.stringify(nonZero)}`);
+  });
+
+  console.log(paint(["bold", "cyan"], "\n== Stage 2f: Outbreak UI wiring (non-trigger-dependent regression guards) =="));
+  // A real Outbreak trigger needs z_tic to actually fire (15s by default) —
+  // impractical inside this single fixed-config scratch server without
+  // risking other timing-sensitive checks above. The trigger-dependent
+  // behaviors (isZombieActive unlocking Mountains/River/Cave/Town, the
+  // hunt-toggle/vote 409 while active, Force End's zero-except-Forest split)
+  // are covered instead by a manual --dev -t pass with fast-forwarded
+  // zombie_config overrides (same approach used to verify Pass 1). These
+  // checks cover what's cheaply verifiable without a live trigger: the new
+  // field exists and defaults correctly, and the new guards don't break
+  // normal (non-Outbreak) operation.
+
+  await check("GET /api/game-state exposes outbreak (false by default, no active Outbreak)", async () => {
+    const r = await req("player1", "GET", "/api/game-state");
+    if (typeof r.json?.outbreak !== "boolean") throw new Error(`expected a boolean outbreak field, got ${JSON.stringify(r.json?.outbreak)}`);
+    if (r.json.outbreak !== false) throw new Error(`expected outbreak=false (no active Outbreak), got ${r.json.outbreak}`);
+  });
+
+  await check("POST /api/hunt/toggle and /api/hunt/vote/start still work normally with no active Outbreak", async () => {
+    const toggle = await req("admin", "POST", "/api/hunt/toggle", {});
+    if (!toggle.json?.ok) throw new Error(`toggle: ${toggle.json?.message || toggle.status}`);
+    // Restore hunt to enabled (the Experiment Reset above left it disabled) and confirm the vote route too.
+    if (!toggle.json.huntActive) {
+      const reToggle = await req("admin", "POST", "/api/hunt/toggle", {});
+      if (!reToggle.json?.ok) throw new Error(`re-toggle: ${reToggle.json?.message || reToggle.status}`);
+    }
+    const voteStart = await req("player1", "POST", "/api/hunt/vote/start", {});
+    if (!voteStart.json?.ok) throw new Error(`vote/start: ${voteStart.json?.message || voteStart.status}`);
+  });
+
+  await check("POST /api/admin/world/outbreak/forceend rejects when no Outbreak is active", async () => {
+    const r = await req("admin", "POST", "/api/admin/world/outbreak/forceend", {});
+    if (r.json?.ok || r.status !== 409) throw new Error(`expected a 409 with no active Outbreak, got ${r.status} ${JSON.stringify(r.json)}`);
+  });
+
+  console.log(paint(["bold", "cyan"], "\n== Stage 2g: API log-file split =="));
+
+  await check("regular /api/* traffic logs to logFile.api only, not the main log", async () => {
+    // A few plain /api/* hits generate a fresh, unambiguous marker line
+    // (the /api/game-state FULL log) to look for in both files.
+    await req("player1", "GET", "/api/game-state");
+    const main = readFileSync(path.join(scratchDir, "logs", "server.log"), "utf8");
+    const api = readFileSync(path.join(scratchDir, "logs", "server.log.api"), "utf8");
+    const marker = "API request for game state by user player1";
+    if (!api.includes(marker)) throw new Error("expected the game-state marker in server.log.api");
+    if (main.includes(marker)) throw new Error("game-state marker leaked into the main server.log");
+  });
+
+  await check("login/register traffic logs to BOTH the main log and logFile.api", async () => {
+    const main = readFileSync(path.join(scratchDir, "logs", "server.log"), "utf8");
+    const api = readFileSync(path.join(scratchDir, "logs", "server.log.api"), "utf8");
+    const loginMarker = "Login attempt for username=player1";
+    const registerMarker = `Registration attempt for username=${testUser}`;
+    for (const [label, marker] of [["login", loginMarker], ["register", registerMarker]]) {
+      if (!main.includes(marker)) throw new Error(`expected ${label} marker in the main server.log`);
+      if (!api.includes(marker)) throw new Error(`expected ${label} marker in server.log.api too`);
+    }
   });
 
   exitCode = results.every((r) => r.ok) ? 0 : 1;

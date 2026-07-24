@@ -1,14 +1,15 @@
-// db.js (ESM)
+// db_backbone.js (ESM)
 import Database from "better-sqlite3";
 import crypto from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { file_config, game_config } from "./config.js";
-import { STARTER_SPELLS } from "./magic.js";
+import { STARTER_SPELLS } from "./magic_backbone.js";
 import { QUESTS } from "./quest_backbone.js";
+import { ZOMBIE_LOCATIONS, OUTBREAK_LOCATIONS } from "./location_backbone.js";
 
 // Quests whose starter descriptor is `{ starter: true }` are granted from
-// character creation, the same convention as magic.js's STARTER_SPELLS.
+// character creation, the same convention as magic_backbone.js's STARTER_SPELLS.
 // Declared here (not beside the other quest functions further down) so the
 // startup backfill loop can reference it — a `const` isn't usable before its
 // own declaration line runs, unlike the hoisted function declarations below.
@@ -53,61 +54,6 @@ export function computeDbStamp() {
 const STAMP_DEFAULT_KEY = "0000000000000000000000000000000000000000000000000000000000000000";
 const STAMP_DEFAULT_ID = "00000";
 
-// Display names for the world map — the object keys are ALSO the canonical
-// list of valid location keys. basecamp_inside is entered via the base
-// toggle, never the map (and hides the map entirely while there).
-export const LOCATION_NAMES = {
-  basecamp_outside: "Basecamp",
-  basecamp_inside: "Inside the Base",
-  bunker: "Bunker",
-  forest: "Forest",
-  lake: "Lake",
-  mountains: "Mountains",
-  river: "River",
-  swamp: "Swamp",
-  cave: "Cave",
-  town: "Town",
-};
-
-export const OUTBREAK_LOCATIONS = new Set([
-  // safe areas that become unsafe
-  "mountains",
-  "river",
-  "cave",
-  "town",
-  // zombie areas should get outbreak included
-  "basecamp_outside",
-  "forest",
-  "lake",
-  "swamp",
-]);
-
-// Locations where the zombie pool is active — tick attacks and hunting only
-// happen here. Everywhere else is "safe" (the game page swaps Hunt Info for
-// Actions there). basecamp_inside counts: zombies besiege the base itself,
-// with player hits absorbed as base HP.
-export const ZOMBIE_LOCATIONS = new Set([
-  "basecamp_outside",
-  "forest",
-  "lake",
-  "swamp",
-]);
-
-// Travel graph: which locations connect. The Bunker hangs off Basecamp only;
-// the Forest is the hub that reaches every other named location.
-export const LOCATION_LINKS = {
-  basecamp_outside: ["bunker", "forest"],
-  basecamp_inside: [],
-  bunker: ["basecamp_outside"],
-  forest: ["basecamp_outside", "lake", "mountains", "river", "swamp", "cave", "town"],
-  lake: ["forest", "swamp"],
-  mountains: ["forest", "river", "cave", "town"],
-  river: ["forest", "cave", "town", "mountains"],
-  swamp: ["forest", "lake"],
-  cave: ["forest", "river", "mountains", "town"],
-  town: ["forest", "river", "cave", "mountains"],
-};
-
 // ----- Skills -----
 // Trainable skills; each has s_<key>_lvl / s_<key>_xp columns on players.
 // Skill XP comes from location actions and is SPENT on skill levels (same
@@ -128,159 +74,6 @@ export const SKILL_NAMES = {
   cooking: "Cooking"
 };
 export function skillLevelCost(targetLevel) { return Math.round(50 * Math.pow(targetLevel, 1.4)); }
-
-// ----- Location actions -----
-// The per-location action catalogue. Fields:
-//   key         unique id (posted back by the Do button)
-//   label       display name
-//   timer       seconds the action takes (player is busy until it resolves)
-//   skill       which skill it trains / gates it (see SKILLS)
-//   skillLevel  minimum skill level required
-//   successRate % chance the action succeeds when it resolves
-//   grants      inventory item given on success
-//   xp          skill XP awarded on success
-//   requires    inventory item (tool) that must be OWNED to attempt — not
-//               consumed. Omit for no requirement (mushrooms need nothing;
-//               mining copper needs a stone pickaxe).
-//   uses        inventory item CONSUMED (×1, up front) to attempt — fuel or
-//               feedstock; a failed roll still burns it (like craft inputs).
-//   station     "campfire" | "forge" | "beacon" — the action additionally
-//               needs that station usable, same check as RECIPES (campfire
-//               burning / Mountains forge fired / live beacon at the Bunker).
-//   activates   "forge" (success sets players.forge_fired) or "beacon"
-//               (success sets players.beacon_fired — cleared again when a
-//               beacon-station craft redeems the drop) instead of granting
-//               an item.
-//               Mutually exclusive with grants.
-//   drops       true = successful runs also roll the RANDOM_DROPS treasure
-//               table (item_backbone.js) for a bonus find.
-//
-// A row can instead be { recipe: "<RECIPES key>" } — a pointer that surfaces
-// an item_backbone.js recipe in this location's Actions card. Everything
-// (label/timer/skill/level/inputs/tool/station/xp) comes from the recipe, and
-// /api/action/do delegates to the craft flow (no success roll — crafts always
-// land). Use it instead of duplicating a recipe as a hand-rolled action.
-//
-// A row can also be { key, button: true, label } — a pure UI button in the
-// Actions card (no Do button, no timer, no gating): the page opens the
-// matching modal (magic_table -> the Magic Table). /api/action/do refuses
-// them; they exist so location-bound surfaces stay in this catalogue.
-//
-// Two more optional fields on plain action rows:
-//   trainOnly   true = the action grants NO item — success awards only the
-//               skill XP (Train Defense). Exempts the row from the
-//               "grants or activates" boot check; still requires xp.
-//   text        custom start-event line ("You begin climbing and jumping
-//               from trees") instead of the default "You started: <label>".
-export const LOCATION_ACTIONS = {
-  basecamp_outside: [
-    { key: "gather_firewood", label: "Gather Firewood", timer: 3, skill: "woodcutting", skillLevel: 1, successRate: 90, grants: "firewood", xp: 5, drops: true },
-    { key: "gather_mushrooms", label: "Gather Mushrooms", timer: 8, skill: "foraging", skillLevel: 1, successRate: 90, grants: "mushroom", xp: 5, drops: true },
-    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "foraging", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8, drops: true },
-    { key: "channel_leyline", label: "Channel the Ley Line", timer: 20, skill: "magic", skillLevel: 5, successRate: 70, grants: "mana shard", xp: 15 },
-  ],
-  bunker: [
-    { key: "tinker_radio", label: "Tinker with the Radio", timer: 15, skill: "crafting", skillLevel: 1, successRate: 60, grants: "radio part", xp: 10 },
-    { key: "repair_radio", label: "Repair the Radio", timer: 20, skill: "crafting", skillLevel: 3, successRate: 20, requires: "radio part", grants: "functional radio", xp: 15 },
-    { key: "attempt_supply_beacon", label: "Attempt Supply Beacon", timer: 30, skill: "crafting", skillLevel: 5, successRate: 25, requires: "functional radio", grants: "supply beacon", xp: 20 },
-    { key: "activate_supply_beacon", label: "Activate Supply Beacon", timer: 10, skill: "crafting", skillLevel: 5, successRate: 65, requires: "supply beacon", activates: "beacon", xp: 10 },
-    { recipe: "enable_supply_beacon" },
-    { recipe: "craft_base_repair_kit" },
-    { recipe: "craft_external_antenna" },
-    { recipe: "craft_signal_amplifier" },
-    { recipe: "craft_sentry_turret" },
-    { recipe: "craft_storage_locker" },
-    { recipe: "craft_supply_beacon" }
-  ],
-  forest: [
-    { key: "gather_mushrooms", label: "Gather Mushrooms", timer: 8, skill: "foraging", skillLevel: 1, successRate: 90, grants: "mushroom", xp: 5, drops: true },
-    { key: "chop_wood", label: "Chop Wood", timer: 15, skill: "woodcutting", skillLevel: 1, successRate: 80, grants: "wood log", requires: "axe", xp: 10, drops: true },
-    { key: "trap_rabbit", label: "Trap Rabbit", timer: 4, skill: "trapping", skillLevel: 1, successRate: 75, grants: "raw small meat", xp: 8 },
-    { key: "trap_game", label: "Trap Game", timer: 9, skill: "trapping", skillLevel: 2, successRate: 70, grants: "raw meat", xp: 8 },
-    { key: "train_defense", label: "Train Defense", timer: 10, skill: "defense", skillLevel: 1, successRate: 100, xp: 15, trainOnly: true, text: "You begin climbing and jumping from trees" },
-  ],
-  lake: [
-    { key: "fish_shallows", label: "Fish the Shallows", timer: 10, skill: "fishing", skillLevel: 1, successRate: 75, grants: "raw fish", requires: "fishing rod", xp: 10 },
-    { key: "fish_deep", label: "Fish the Deep", timer: 18, skill: "fishing", skillLevel: 3, successRate: 60, grants: "raw tuna", requires: "fishing rod", uses: "minnow", xp: 15 },
-    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 5, skill: "foraging", skillLevel: 1, successRate: 85, grants: "mushroom", xp: 6, drops: true },
-    { key: "gather herbs", label: "Gather Herbs", timer: 5, skill: "foraging", skillLevel: 2, successRate: 80, grants: "lake herb", xp: 8, drops: true },
-    { key: "dowse_ley_crystal", label: "Dowse for Ley Crystals", timer: 25, skill: "magic", skillLevel: 1, successRate: 60, grants: "ley crystal", xp: 15 },
-  ],
-  river: [
-    { key: "net_minnows", label: "Net Minnows", timer: 8, skill: "fishing", skillLevel: 1, successRate: 85, grants: "minnow", xp: 6 },
-    { key: "fish_river", label: "Fish the River", timer: 15, skill: "fishing", skillLevel: 1, successRate: 70, grants: "raw fish", requires: "fishing rod", xp: 12 },
-    { key: "gather herbs", label: "Gather Herbs", timer: 5, skill: "foraging", skillLevel: 2, successRate: 80, grants: "river herb", xp: 8, drops: true },
-    { key: "gather mushrooms", label: "Gather Mushrooms", timer: 5, skill: "foraging", skillLevel: 1, successRate: 85, grants: "raw mushroom", xp: 6, drops: true },
-    { key: "dowse_ley_crystal", label: "Dowse for Ley Crystals", timer: 25, skill: "magic", skillLevel: 3, successRate: 60, grants: "ley crystal", xp: 15 },
-  ],
-  mountains: [
-    { key: "fire_forge", label: "Get the Forge Going", timer: 10, skill: "smithing", skillLevel: 1, successRate: 70, activates: "forge", uses: "firewood", xp: 12 },
-    { key: "mine_iron", label: "Mine Iron", timer: 30, skill: "mining", skillLevel: 3, successRate: 60, grants: "iron ore", requires: "stone pickaxe", xp: 20 },
-    // Forge work — pointers into item_backbone.js RECIPES (see comment above).
-    { recipe: "smelt_copper" },
-    { recipe: "smelt_bronze" },
-    { recipe: "smelt_tin" },
-    { recipe: "smelt_iron" },
-    { recipe: "smelt_silver" },
-    { recipe: "smelt_gold" },
-    { recipe: "smelt_mythril" },
-    { recipe: "smelt_adamantite" },
-    { recipe: "smelt_syllic" },
-    { recipe: "smith_bronze_head" }, { recipe: "smith_bronze_torso" }, { recipe: "smith_bronze_legs" },
-    { recipe: "smith_bronze_boots" }, { recipe: "smith_bronze_hands" }, { recipe: "smith_bronze_shield" },
-    { recipe: "smith_iron_head" }, { recipe: "smith_iron_torso" }, { recipe: "smith_iron_legs" },
-    { recipe: "smith_iron_boots" }, { recipe: "smith_iron_hands" }, { recipe: "smith_iron_shield" },
-    { recipe: "smith_silver_head" }, { recipe: "smith_silver_torso" }, { recipe: "smith_silver_legs" },
-    { recipe: "smith_silver_boots" }, { recipe: "smith_silver_hands" }, { recipe: "smith_silver_shield" },
-    { recipe: "smith_gold_head" }, { recipe: "smith_gold_torso" }, { recipe: "smith_gold_legs" },
-    { recipe: "smith_gold_boots" }, { recipe: "smith_gold_hands" }, { recipe: "smith_gold_shield" },
-    { recipe: "smith_gold_and_silver_head" }, { recipe: "smith_gold_and_silver_torso" }, { recipe: "smith_gold_and_silver_legs" },
-    { recipe: "smith_gold_and_silver_boots" }, { recipe: "smith_gold_and_silver_hands" }, { recipe: "smith_gold_and_silver_shield" },
-    { recipe: "smith_mythril_head" }, { recipe: "smith_mythril_torso" }, { recipe: "smith_mythril_legs" },
-    { recipe: "smith_mythril_boots" }, { recipe: "smith_mythril_hands" }, { recipe: "smith_mythril_shield" },
-    { recipe: "smith_adamantite_head" }, { recipe: "smith_adamantite_torso" }, { recipe: "smith_adamantite_legs" },
-    { recipe: "smith_adamantite_boots" }, { recipe: "smith_adamantite_hands" }, { recipe: "smith_adamantite_shield" },
-    { recipe: "smith_syllic_head" }, { recipe: "smith_syllic_torso" }, { recipe: "smith_syllic_legs" },
-    { recipe: "smith_syllic_boots" }, { recipe: "smith_syllic_hands" }, { recipe: "smith_syllic_shield" },
-    { recipe: "crude_blade" },
-    { recipe: "magic_amulet" },
-    { recipe: "fishing_rod" },
-    { recipe: "gun_oil" },
-  ],
-  swamp: [
-    { key: "gather_herbs", label: "Gather Herbs", timer: 5, skill: "crafting", skillLevel: 1, successRate: 85, grants: "swamp herb", xp: 6, drops: true },
-    { key: "gather_mushrooms", lavel: "Gather Mushrooms", timer: 5, skill: "foraging", skillLevel: 1, successRate: 80, grants: "raw mushroom", xp: 6, drops: true },
-    { key: "net_minnows", label: "Net Minnows", timer: 8, skill: "fishing", skillLevel: 1, successRate: 85, grants: "minnow", xp: 6 },
-    { key: "fish_gator", label: "Fish for Aligators", timer: 20, skill: "fishing", skillLevel: 4, successRate: 75, grants: "raw gator meat", xp: 6, drops: true },
-    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "magic", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8, drops: true },
-    { key: "pick_spirit_blooms", label: "Pick Spirit Blooms", timer: 12, skill: "magic", skillLevel: 1, successRate: 75, grants: "spirit bloom", xp: 8 },
-  ],
-  cave: [
-    { key: "harvest_glowcaps", label: "Harvest Glowcaps", timer: 12, skill: "foraging", skillLevel: 1, successRate: 80, grants: "glowcap", xp: 8 },
-    { key: "channel_leyline", label: "Channel the Ley Line", timer: 20, skill: "magic", skillLevel: 1, successRate: 70, grants: "mana shard", xp: 15 },
-    { key: "sift_arcane_dust", label: "Sift Arcane Dust", timer: 15, skill: "magic", skillLevel: 2, successRate: 70, grants: "arcane dust", xp: 10 },
-    { key: "mine_copper", label: "Mine Copper", timer: 20, skill: "mining", skillLevel: 1, successRate: 75, grants: "copper ore", requires: "stone pickaxe", xp: 10 },
-    { key: "mine_tin", label: "Mine Tin", timer: 22, skill: "mining", skillLevel: 2, successRate: 70, grants: "tin ore", requires: "stone pickaxe", xp: 12 },
-    { key: "mine_silver", label: "Mine Silver", timer: 28, skill: "mining", skillLevel: 4, successRate: 65, grants: "silver ore", requires: "stone pickaxe", xp: 18 },
-    { key: "mine_gold", label: "Mine Gold", timer: 35, skill: "mining", skillLevel: 5, successRate: 60, grants: "gold ore", requires: "stone pickaxe", xp: 25 },
-    { key: "mine_coal", label: "Mine Coal", timer: 25, skill: "mining", skillLevel: 3, successRate: 70, grants: "coal", requires: "stone pickaxe", xp: 12 },
-    { key: "mine_mythril", label: "Mine Mythril", timer: 40, skill: "mining", skillLevel: 6, successRate: 55, grants: "mythril ore", requires: "iron pickaxe", xp: 30 },
-    { key: "mine_adamantite", label: "Mine Adamantite", timer: 50, skill: "mining", skillLevel: 7, successRate: 50, grants: "adamantite ore", requires: "mythril pickaxe", xp: 40 },
-    { key: "mine_syllic", label: "Mine Syllic", timer: 60, skill: "mining", skillLevel: 8, successRate: 45, grants: "syllic ore", requires: "adamantite pickaxe", xp: 50 },
-  ],
-  town: [
-    { key: "magic_table", button: true, label: "Learn at the Magic Table" },
-    { key: "craft_arcane_table", button: true, label: "Craft at the Arcane Table" },
-    { key: "activate_arcane_table", label: "Activate the Arcane Table", timer: 15, skill: "magic", skillLevel: 5, successRate: 70, uses: { "firewood": 2, "mana shard": 2 }, activates: "arcane_table", xp: 15 },
-    { key: "scavenge_scrap", label: "Scavenge Scrap", timer: 12, skill: "crafting", skillLevel: 1, successRate: 80, grants: "scrap metal", xp: 8 },
-    { key: "train_defense", label: "Train Defense", timer: 10, skill: "defense", skillLevel: 1, successRate: 100, xp: 15, trainOnly: true, text: "You begin climbing and jumping from trees" },
-    { recipe: "craft_weak_blade" },
-    { recipe: "craft_radio_part" },
-    { recipe: "craft_mana_potion" },
-    { recipe: "craft_healing_potion" },
-    { recipe: "craft_shield_potion" },
-  ],
-};
 
 import fs from "fs";
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -501,7 +294,7 @@ CREATE TABLE IF NOT EXISTS player_inventory (
 -- Per-player magic knowledge (spells learned at the Magic Table in Town).
 -- type is 'spell' for now — the column leaves room for future magic rows
 -- (enchantments, runes, ...) without another table. name = a MAGIC_SPELLS
--- key (magic.js). The unique index makes grants/learns idempotent.
+-- key (magic_backbone.js). The unique index makes grants/learns idempotent.
 CREATE TABLE IF NOT EXISTS player_magic (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -557,6 +350,7 @@ CREATE TABLE IF NOT EXISTS game_state (
   session_key TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
   session_id TEXT NOT NULL DEFAULT '00000',
   hunt_enabled TEXT NOT NULL DEFAULT 'false',
+  total_z_pool INTEGER NOT NULL DEFAULT 0, -- total number of zombies in the world (all locations)
   horde_size INTEGER NOT NULL DEFAULT 0,
   horde_status TEXT NOT NULL DEFAULT 'idle', -- idle, partial, full, raid
   raid_enabled TEXT NOT NULL DEFAULT 'false',
@@ -576,6 +370,8 @@ CREATE TABLE IF NOT EXISTS game_state (
   zombies_cave INTEGER NOT NULL DEFAULT 0,
   zombies_town INTEGER NOT NULL DEFAULT 0,
   zombie_break INTEGER NOT NULL DEFAULT 0, -- 0/1, a zombie break is in progress (zombies are spawning in safe locations)
+  z_break_falltime INTEGER NOT NULL DEFAULT 0, -- epoch ms the zombie break started (0 = no break)
+  z_break_defeated_at INTEGER NOT NULL DEFAULT 0, -- epoch ms the Outbreak duration expired and zombies won (0 = not applicable) — mirrors base_destroyed_at; the world freezes on this timer for zombie_config.z_break_reset hours before an Experiment Reset
   -- Timestamps (epoch ms)
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -619,7 +415,7 @@ if (!playerColumns.includes("hidden")) {
   `).run(seedNow, seedNow);
 }
 
-// Starter spells: every player knows the starter(s) (magic.js STARTER_SPELLS)
+// Starter spells: every player knows the starter(s) (magic_backbone.js STARTER_SPELLS)
 // from creation — this backfills players created before player_magic existed.
 // Idempotent via the unique (user_id, type, name) index, so it's safe to run
 // every boot.
@@ -830,13 +626,30 @@ export function setHuntEnabled(enabled) {
   `).run(enabled ? "true" : "false", Date.now());
 }
 
-// Add (or, with a negative delta, remove) zombies from the horde, floored at 0.
+// Add (or, with a negative delta, remove) zombies anywhere in the world,
+// floored at 0 — the single source of truth for "how many zombies exist,
+// period" (World + every Location pool + every player's Nearby pool).
+// Transfers between pools (splinter/flow-back/wander/travel-flush) call two
+// of these adjust* functions back-to-back with opposite deltas, which nets
+// to zero here automatically — only real spawns/kills/admin overrides show
+// up as a net change.
+export function adjustTotalZPool(delta) {
+  db.prepare(`UPDATE game_state SET total_z_pool = MAX(0, total_z_pool + ?), updated_at = ? WHERE key = 'main'`)
+    .run(delta, Date.now());
+}
+
+// Add (or, with a negative delta, remove) zombies from the horde, floored at
+// 0. Mirrors the *actual* (post-clamp) delta into total_z_pool in the same
+// statement — both expressions read the pre-update horde_size, so this is
+// exact even when the requested delta would have driven horde_size negative.
 export function adjustHordeSize(delta) {
   db.prepare(`
     UPDATE game_state
-    SET horde_size = MAX(0, horde_size + ?), updated_at = ?
+    SET total_z_pool = MAX(0, total_z_pool + (MAX(0, horde_size + ?) - horde_size)),
+        horde_size = MAX(0, horde_size + ?),
+        updated_at = ?
     WHERE key = 'main'
-  `).run(delta, Date.now());
+  `).run(delta, delta, Date.now());
 }
 
 export function setRaidEnabled(enabled) {
@@ -872,12 +685,21 @@ export function setBaseDestroyedAt(ts) {
 }
 
 // Full experiment reset: zombies die, hunt & raid off, base rebuilt to full.
+// Also wipes every zombie-location-pool/Outbreak column — both live and
+// reserved-for-Outbreak — so a reset (whether from a destroyed base or a
+// defeated Outbreak) never leaves stale zombie counts or a stuck outbreak
+// flag behind.
 export function resetGameState(baseMaxHealth) {
   db.prepare(`
     UPDATE game_state
     SET hunt_enabled = 'false', horde_size = 0, raid_enabled = 'false',
         horde_status = 'idle', base_health = ?, base_destroyed_at = 0,
-        base_repair_kits = 0, sentry_until = 0, updated_at = ?
+        base_repair_kits = 0, sentry_until = 0,
+        total_z_pool = 0,
+        zombies_basecamp_outside = 0, zombies_forest = 0, zombies_lake = 0, zombies_swamp = 0,
+        zombies_river = 0, zombies_mountains = 0, zombies_cave = 0, zombies_town = 0,
+        zombie_break = 0, z_break_falltime = 0, z_break_defeated_at = 0,
+        updated_at = ?
     WHERE key = 'main'
   `).run(baseMaxHealth, Date.now());
   db.prepare("DELETE FROM nuke_votes").run();
@@ -997,7 +819,7 @@ export function addMana(userId, amount) {
 // ----- Magic knowledge (player_magic) -----
 // Spells learned at the Magic Table in Town (plus the starters granted at
 // creation). type is 'spell' today; the column leaves room for future magic
-// rows without another table. name = a MAGIC_SPELLS key (magic.js).
+// rows without another table. name = a MAGIC_SPELLS key (magic_backbone.js).
 export function getPlayerMagic(userId, type = "spell") {
   return db.prepare(`SELECT name FROM player_magic WHERE user_id = ? AND type = ? ORDER BY id`)
     .all(userId, type).map((r) => r.name);
@@ -1125,6 +947,35 @@ export function recordQuestProgress(userId, objectiveType, matchKey, amount = 1)
   completeActiveQuestIfDone(userId);
 }
 
+// Shared reward-application helper — any { gold, tokens, xp, items, level,
+// grant_instant_level } bundle. Used by quest completion below and (from
+// server.js) the Outbreak early-end reward (zombie_config.z_break_reward).
+// `level` (a count of free instant levels via forceLevel) takes priority
+// over the legacy boolean grant_instant_level if a reward somehow carries
+// both, so end-users don't end up thinking the two stack. Returns a list of
+// human-readable bits (e.g. "+100 gold") for building a reward message.
+export function applyReward(userId, reward) {
+  if (!reward) return [];
+  const bits = [];
+  if (reward.gold) { updatePlayerGold(userId, reward.gold); bits.push(`+${reward.gold} gold`); }
+  if (reward.tokens) { addTokens(userId, reward.tokens); bits.push(`+${reward.tokens} tokens`); }
+  if (reward.xp) { updatePlayerStats(userId, reward.xp, 0); bits.push(`+${reward.xp} XP`); }
+  if (reward.items) {
+    for (const [item, qty] of Object.entries(reward.items)) {
+      giveInventoryItem(userId, item, qty);
+      bits.push(`${qty}x ${item}`);
+    }
+  }
+  if (reward.level > 0) {
+    forceLevel(userId, reward.level);
+    bits.push(`+${reward.level} level${reward.level === 1 ? "" : "s"}`);
+  } else if (reward.grant_instant_level) {
+    forceLevel(userId, 1);
+    bits.push(`+1 level`);
+  }
+  return bits;
+}
+
 // Grants the reward and advances quest_active to the next started-but-
 // incomplete quest (if any) once every objective of the current active
 // quest is satisfied. Returns the completed quest's key, or null. Cascades:
@@ -1140,8 +991,7 @@ export function completeActiveQuestIfDone(userId) {
   const done = quest.objectives.every((obj, i) => (progress[i] ?? 0) >= obj.qty);
   if (!done) return null;
 
-  if (quest.reward?.gold) updatePlayerGold(userId, quest.reward.gold);
-  if (quest.reward?.xp) updatePlayerStats(userId, quest.reward.xp, 0);
+  const rewardBits = applyReward(userId, quest.reward);
 
   const completed = questKeyList(player.quest_completed);
   completed.push(questKey);
@@ -1151,9 +1001,6 @@ export function completeActiveQuestIfDone(userId) {
   db.prepare(`UPDATE players SET quest_completed = ?, quest_active = 'NONE', quest_objectives = '', updated_at = ? WHERE user_id = ?`)
     .run(completed.join(","), Date.now(), userId);
 
-  const rewardBits = [];
-  if (quest.reward?.gold) rewardBits.push(`+${quest.reward.gold} gold`);
-  if (quest.reward?.xp) rewardBits.push(`+${quest.reward.xp} XP`);
   insertEvent("action", `Quest complete: ${quest.name}!${rewardBits.length ? " " + rewardBits.join(", ") : ""}`, "private", userId);
 
   if (nextKey !== "NONE") activateQuest(userId, nextKey);
@@ -1414,17 +1261,70 @@ export function setSelectedSlot(userId, slot) {
 
 // ----- Zombie Location Pool -----
 // Three-tier zombie pools: World (game_state.horde_size) -> Location
-// (game_state.zombies_<loc>, ZOMBIE_LOCATIONS only during normal play) ->
-// Nearby (players.zombie_near/zombie_near_health, personal per-player).
+// (game_state.zombies_<loc>) -> Nearby (players.zombie_near/zombie_near_health,
+// personal per-player). Location pools cover all 8 OUTBREAK_LOCATIONS now
+// (not just the 4 always-active ZOMBIE_LOCATIONS) — the other 4 columns sit
+// at 0 during normal play and only ever get written to during an Outbreak.
 
 // Add (or, with a negative delta, remove) zombies from a location's pool,
-// floored at 0. `location` is validated against ZOMBIE_LOCATIONS so the
-// column name can't be injected.
+// floored at 0. `location` is validated against OUTBREAK_LOCATIONS so the
+// column name can't be injected. Mirrors the actual (post-clamp) delta into
+// total_z_pool, same exact-under-clamping approach as adjustHordeSize.
 export function adjustLocationZombies(location, delta) {
-  if (!ZOMBIE_LOCATIONS.has(location)) throw new Error(`Invalid zombie location: ${location}`);
+  if (!OUTBREAK_LOCATIONS.has(location)) throw new Error(`Invalid zombie location: ${location}`);
   const col = `zombies_${location}`;
-  db.prepare(`UPDATE game_state SET ${col} = MAX(0, ${col} + ?), updated_at = ? WHERE key = 'main'`)
-    .run(delta, Date.now());
+  db.prepare(`
+    UPDATE game_state
+    SET total_z_pool = MAX(0, total_z_pool + (MAX(0, ${col} + ?) - ${col})),
+        ${col} = MAX(0, ${col} + ?),
+        updated_at = ?
+    WHERE key = 'main'
+  `).run(delta, delta, Date.now());
+}
+
+// Absolute set (rather than delta) for a location's pool — used by the
+// Outbreak trigger/split, which computes exact target values rather than
+// deltas. Same total_z_pool mirroring as adjustLocationZombies.
+export function setLocationZombies(location, count) {
+  if (!OUTBREAK_LOCATIONS.has(location)) throw new Error(`Invalid zombie location: ${location}`);
+  const col = `zombies_${location}`;
+  const clamped = Math.max(0, Math.round(count));
+  db.prepare(`
+    UPDATE game_state
+    SET total_z_pool = MAX(0, total_z_pool + (? - ${col})),
+        ${col} = ?,
+        updated_at = ?
+    WHERE key = 'main'
+  `).run(clamped, clamped, Date.now());
+}
+
+// ----- Outbreak state -----
+// zombie_break (0/1) is whether an Outbreak is actively running right now.
+// z_break_falltime is reused for two mutually-exclusive purposes across
+// time (the comment on the column explains why this is safe): while an
+// outbreak is active it's the epoch this outbreak STARTED (drives the
+// z_break_duration expiry check); once cleared, it's left untouched and
+// serves as the "time since the last outbreak" anchor for the z_break_interval
+// cooldown gate on the next roll. z_break_defeated_at is separate — it's only
+// ever set when zombies WIN (duration expired), mirroring base_destroyed_at's
+// "frozen, waiting on a reset timer" convention exactly.
+export function setZombieBreak(active) {
+  db.prepare(`UPDATE game_state SET zombie_break = ?, updated_at = ? WHERE key = 'main'`)
+    .run(active ? 1 : 0, Date.now());
+}
+export function setZombieBreakFalltime(ts) {
+  db.prepare(`UPDATE game_state SET z_break_falltime = ?, updated_at = ? WHERE key = 'main'`)
+    .run(ts, Date.now());
+}
+export function setZombieBreakDefeatedAt(ts) {
+  db.prepare(`UPDATE game_state SET z_break_defeated_at = ?, updated_at = ? WHERE key = 'main'`)
+    .run(ts, Date.now());
+}
+// Every player (any online status) currently carrying a nonzero Nearby
+// pool — used to sweep everyone's zombie_near into the split when an
+// Outbreak triggers (per the design, those zombies are included in the flow).
+export function getPlayersWithZombieNear() {
+  return db.prepare(`SELECT user_id, zombie_near FROM players WHERE zombie_near > 0`).all();
 }
 
 const TARGET_SCOPES = ["World", "Location", "Nearby"];
@@ -1437,9 +1337,18 @@ export function setTargetScope(userId, scope) {
 
 // Add (or, with a negative delta, remove) zombies from a player's "nearby"
 // pool, floored at 0.
+// Mirrors the actual (post-clamp) delta into total_z_pool — a separate
+// table from players, so unlike adjustHordeSize/adjustLocationZombies this
+// needs a read-then-write transaction rather than one atomic UPDATE.
 export function adjustZombieNear(userId, delta) {
-  db.prepare(`UPDATE players SET zombie_near = MAX(0, zombie_near + ?), updated_at = ? WHERE user_id = ?`)
-    .run(delta, Date.now(), userId);
+  db.transaction(() => {
+    const p = stmtPlayerByUserId.get(userId);
+    if (!p) return;
+    const applied = Math.max(0, p.zombie_near + delta) - p.zombie_near;
+    db.prepare(`UPDATE players SET zombie_near = ?, updated_at = ? WHERE user_id = ?`)
+      .run(p.zombie_near + applied, Date.now(), userId);
+    if (applied !== 0) adjustTotalZPool(applied);
+  })();
 }
 
 // Absolute set for zombie_near_health, floored at 0 — used both to refill to
@@ -1467,6 +1376,11 @@ export function damageNearbyZombie(userId, dmg, zHp) {
   }
   db.prepare(`UPDATE players SET zombie_near = ?, zombie_near_health = ?, updated_at = ? WHERE user_id = ?`)
     .run(zombieNear, zombieNearHealth, Date.now(), userId);
+  // This writes zombie_near directly (not through adjustZombieNear, since
+  // health needs to be updated atomically alongside it) — so a real kill
+  // here has to mirror into total_z_pool explicitly rather than getting it
+  // for free the way adjustZombieNear's callers do.
+  if (killed) adjustTotalZPool(-killed);
   return { killed, zombieNear, zombieNearHealth };
 }
 
@@ -1768,9 +1682,13 @@ export function updatePlayerLocation(userId, location) {
   // by the caller (server.js's /api/travel), before this ever runs.
   if (player.zombie_near > 0 && ZOMBIE_LOCATIONS.has(player.location)) {
     adjustLocationZombies(player.location, player.zombie_near);
+    // Routed through adjustZombieNear (not a raw zombie_near=0 write) so the
+    // total_z_pool mirror above is balanced by a matching -zombie_near here,
+    // instead of silently drifting the invariant on every travel.
+    adjustZombieNear(userId, -player.zombie_near);
     db.prepare(`
       UPDATE players
-      SET location = ?, zombie_near = 0, zombie_near_health = 0, updated_at = ?
+      SET location = ?, zombie_near_health = 0, updated_at = ?
       WHERE user_id = ?
     `).run(location, Date.now(), userId);
     return;

@@ -1,8 +1,8 @@
 // cli/parser.js
 // Command groups are lazy-loaded on first use: users/players/inventory import
-// db.js, which prepares all its statements at import and crashes against an
+// db_backbone.js, which prepares all its statements at import and crashes against an
 // outdated live DB — the database group (schema check/update) must still work
-// in exactly that state, so nothing may load db.js until its group is invoked.
+// in exactly that state, so nothing may load db_backbone.js until its group is invoked.
 const routes = {
   users: () => import("./commands/users.mjs"),
   inventory: () => import("./commands/inventory.mjs"),

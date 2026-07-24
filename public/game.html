@@ -93,8 +93,19 @@
     @keyframes gold-shimmer {
       to { background-position: -200% center; }
     }
+    /* Header banner while an Outbreak is active — a slow, urgent pulse. */
+    #outbreakBanner {
+      font-weight: 700;
+      letter-spacing: .03em;
+      animation: outbreak-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes outbreak-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .55; }
+    }
     @media (prefers-reduced-motion: reduce) {
       .shiny-name { animation: none; }
+      #outbreakBanner { animation: none; }
     }
 
     /* Level circle — ring color tier set by JS, same thresholds/palette as
@@ -200,9 +211,12 @@
       </a>
 
       <div class="d-flex align-items-center flex-wrap gap-2 py-1">
-        <span class="badge rounded-pill text-bg-success" id="huntBadge">HUNT ACTIVE</span>
-        <span class="badge rounded-pill text-bg-warning text-dark" id="hordeBadge">HORDE: NO</span>
-        <span class="badge rounded-pill badge-soft" id="zombieBadge">ZOMBIES: 1</span>
+        <span class="d-flex flex-wrap gap-2" id="statusPills">
+          <span class="badge rounded-pill text-bg-success" id="huntBadge">HUNT ACTIVE</span>
+          <span class="badge rounded-pill text-bg-warning text-dark" id="hordeBadge">HORDE: NO</span>
+          <span class="badge rounded-pill badge-soft" id="zombieBadge">ZOMBIES: 1</span>
+        </span>
+        <span class="badge rounded-pill text-bg-danger d-none" id="outbreakBanner">!!! Zombie Outbreak Active !!!</span>
         <span class="muted-mono">Logged in as <span class="text-white" id="meName">rvzm</span></span>
         <a class="btn btn-sm btn-outline-info" id="playercardLink" href="/playercard.html">Player Card</a>
         <button class="btn btn-sm btn-outline-warning d-none" id="btnFun" type="button">🎉 Fun</button>
@@ -906,6 +920,7 @@
       tickSeconds: 15,
       base: { health: 10000, max: 10000, destroyed: false, ap: 0, repairKits: 0, sentryActive: false },
       nuke: null,
+      outbreak: false,
       huntVote: null,
       online: [],
       leaderboard: [],
@@ -1032,19 +1047,27 @@
 
       $("zombieBadge").textContent = `ZOMBIES: ${state.zombies}`;
 
+      // While an Outbreak is active, the 3 status pills give way to a single
+      // urgent banner in the header.
+      $("statusPills").classList.toggle("d-none", state.outbreak);
+      $("outbreakBanner").classList.toggle("d-none", !state.outbreak);
+
       // Only admins can toggle the hunt directly — hide the button for
       // everyone else (they get the vote-to-toggle button/panel instead).
+      // Both the direct toggle and the vote-start are blocked entirely while
+      // an Outbreak is active — the world can't be saved from it by turning
+      // the hunt off.
       const huntBtn = $("btnHuntToggle");
       huntBtn.textContent = state.huntActive ? "Disable Hunt" : "Enable Hunt";
       huntBtn.className = "btn btn-sm " + (state.huntActive ? "btn-danger" : "btn-outline-success") + (state.me.isAdmin ? "" : " d-none");
-      huntBtn.disabled = false; // always clickable; postAction briefly disables mid-request
+      huntBtn.disabled = state.outbreak;
 
       // Vote-to-toggle: the start button (non-admins only, hidden mid-vote)
       // and the live Yes/No panel (everyone, only while a vote is running).
       const vote = state.huntVote;
       const voteStartBtn = $("btnHuntVoteStart");
       voteStartBtn.textContent = state.huntActive ? "Vote to Disable Hunt" : "Vote to Enable Hunt";
-      voteStartBtn.classList.toggle("d-none", state.me.isAdmin || Boolean(vote?.active));
+      voteStartBtn.classList.toggle("d-none", state.me.isAdmin || Boolean(vote?.active) || state.outbreak);
       $("huntVotePanel").classList.toggle("d-none", !vote?.active);
       if (vote?.active) {
         $("huntVoteBadge").textContent = `Vote: ${vote.toggleTo ? "Enable" : "Disable"} Hunt — ${vote.secondsLeft}s`;
@@ -1726,6 +1749,7 @@
           sentryActive: Boolean(data?.base?.sentryActive)
         },
         nuke: data?.nuke ?? null,
+        outbreak: Boolean(data?.outbreak),
         huntVote: data?.huntVote ? {
           active: true,
           toggleTo: Boolean(data.huntVote.toggleTo),

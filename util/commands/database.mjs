@@ -1,11 +1,11 @@
 // Database toolkit: backup / restore / schema check / migrate.
-// This module deliberately does NOT import db.js — db.js prepares all its
+// This module deliberately does NOT import db_backbone.js — db_backbone.js prepares all its
 // statements at import and would crash against an outdated live DB, which is
 // exactly the situation `check`/`update` exist for. The live DB path is
-// resolved the same way db.js resolves it (DB_PATH env, else config.js), and
-// the reference schema comes from a pristine DB that db.js builds at a temp
+// resolved the same way db_backbone.js resolves it (DB_PATH env, else config.js), and
+// the reference schema comes from a pristine DB that db_backbone.js builds at a temp
 // path in a child process — so the toolkit still self-updates as the schema
-// evolves without ever opening the live DB through db.js.
+// evolves without ever opening the live DB through db_backbone.js.
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 import { file_config } from "../../config.js";
 
 const BASE_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..");
-// Live DB path — mirrors db.js (env override, else config.js name under data/).
+// Live DB path — mirrors db_backbone.js (env override, else config.js name under data/).
 const DB_PATH = process.env.DB_PATH || path.join(BASE_DIR, "data", file_config.databaseFile || "zboe.sqlite");
 // Backups live under util/ (gitignored) so wiping data/ never touches them.
 const BACKUP_DIR = path.join(BASE_DIR, "util", "backups");
@@ -48,7 +48,7 @@ function columnsOf(handle) {
 }
 
 // Reference = the current, correct schema, introspected from a fresh DB that
-// db.js builds at a temp path (child process with DB_PATH overridden). Built
+// db_backbone.js builds at a temp path (child process with DB_PATH overridden). Built
 // once per run, on first use. We keep each table's columns AND its CREATE
 // statement (to recreate whole tables a migrating old DB is missing).
 let REF = null;
@@ -57,12 +57,12 @@ function reference() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "zboe-schema-"));
   const freshPath = path.join(tmpDir, "fresh.sqlite");
   try {
-    const dbUrl = pathToFileURL(path.join(BASE_DIR, "db.js")).href;
+    const dbUrl = pathToFileURL(path.join(BASE_DIR, "db_backbone.js")).href;
     const res = spawnSync(process.execPath,
       ["--input-type=module", "-e", `await import(${JSON.stringify(dbUrl)});`],
       { env: { ...process.env, DB_PATH: freshPath }, encoding: "utf8" });
     if (res.status !== 0) {
-      const reason = (res.stderr || "").trim().split("\n").pop() || "db.js failed";
+      const reason = (res.stderr || "").trim().split("\n").pop() || "db_backbone.js failed";
       throw new Error(`could not build the reference schema: ${reason}`);
     }
     const fresh = new Database(freshPath, { readonly: true, fileMustExist: true });

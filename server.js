@@ -8,8 +8,8 @@ import {
   updatePlayerStats,
   setGunJammed, unjamGun, updatePlayerGun, updatePlayerAccuracy,
   updatePlayerInventory,
-  updatePlayerLocation, updatePlayerHidden, LOCATION_NAMES, LOCATION_LINKS, ZOMBIE_LOCATIONS,
-  LOCATION_ACTIONS, SKILLS, SKILL_NAMES, skillLevelCost, addSkillXp, buySkillLevel,
+  updatePlayerLocation, updatePlayerHidden,
+  SKILLS, SKILL_NAMES, skillLevelCost, addSkillXp, buySkillLevel,
   increasePlayerCount, decreasePlayerCount,
   updateLastLogin, touchPlayerSeen,
   getGameState, setHuntEnabled, adjustHordeSize,
@@ -37,8 +37,9 @@ import {
   adjustWeaponCondition, addRangedAmmo, addThrowingAmmo,
   updateRangedMaxAmmo, updateThrowingMaxAmmo, setRangedJammed, clearRangedJam,
   equipWeaponSlot, setSelectedSlot,
-  adjustLocationZombies, setTargetScope, adjustZombieNear, setZombieNearHealth, damageNearbyZombie,
-} from "./db.js";
+  adjustLocationZombies, setLocationZombies, setTargetScope, adjustZombieNear, setZombieNearHealth, damageNearbyZombie,
+  adjustTotalZPool, setZombieBreak, setZombieBreakFalltime, setZombieBreakDefeatedAt, getPlayersWithZombieNear, applyReward,
+} from "./db_backbone.js";
 import express from "express";
 import cookieParser from "cookie-parser";
 import crypto from "crypto";
@@ -47,6 +48,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "node:child_process";
 import { styleText } from "node:util";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { game_config, file_config, zombie_config, ssl_config, app_version, account_config } from "./config.js";
 import https from "node:https";
 import http from "node:http";
@@ -55,8 +57,939 @@ import {
   MAGIC_SPELLS, MAGIC_SPELL_CATEGORIES, validateMagicSpells,
   SPELL_ARMOR_BUFFS, SPELL_ARMOR_BUFF_SECONDS, spellApOf,
   MEDITATE_SECONDS, MEDITATE_XP,
-} from "./magic.js";
+} from "./magic_backbone.js";
 import { QUESTS, QUEST_NAMES, QUEST_OBJECTIVE_TYPES } from "./quest_backbone.js";
+import { LOCATION_NAMES, LOCATION_LINKS, ZOMBIE_LOCATIONS, OUTBREAK_LOCATIONS, LOCATION_ACTIONS } from "./location_backbone.js";
+
+// ===================================================================
+// ===== Helpers =====
+// Reusable functions/consts used by the routes, the tick, and boot-time
+// validation below. Nothing in this section depends on anything in the
+// Server section further down -- keeping that invariant is what makes the
+// "declared before use" ordering safe throughout this file.
+// ===================================================================
+
+function hashPassword(password, salt) {
+  log("FULL", `Hashing password with salt=${salt}`, game_config, "Hashing password with salt=[redacted]");
+  return crypto.pbkdf2Sync(password, salt, 150000, 32, "sha256").toString("hex");
+}
+
+// ----- Very simple signed session cookie -----
+function sign(value) {
+  log("FULL", `Signing value: ${value}`, game_config, "Signing value: [redacted]");
+  return crypto.createHmac("sha256", game_config.sessionSecret).update(value).digest("hex");
+}
+function setSession(res, username) {
+  const payload = JSON.stringify({ u: username, t: Date.now() });
+  const b64 = Buffer.from(payload, "utf8").toString("base64url");
+  const sig = sign(b64);
+  log("FULL", `Setting session for ${username}`, game_config);
+  res.cookie("zboe_session", `${b64}.${sig}`, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: ssl_config.enabled, // Secure cookies whenever we're serving HTTPS
+  });
+}
+// ----- Server-side session pair (anti-hijack layer on top of the signed cookie) -----
+// On login we mint a random 25-char key + a UUID. The key is salted with
+// sessionSecret (HMAC-SHA256) before it's stored — the DB never holds the raw
+// value; the browser carries the raw key + UUID as cookies and every API call
+// re-verifies them against BOTH the users and players rows.
+const SESSION_KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+function makeRawSessionKey() {
+  const bytes = crypto.randomBytes(25);
+  return Array.from(bytes, (b) => SESSION_KEY_CHARS[b % SESSION_KEY_CHARS.length]).join("");
+}
+function saltSessionKey(raw) {
+  return crypto.createHmac("sha256", game_config.sessionSecret).update(raw).digest("hex");
+}
+// Mint + persist + set cookies. Called on login and register.
+function issueServerSession(res, userId) {
+  const rawKey = makeRawSessionKey();
+  const sessionId = crypto.randomUUID();
+  setUserSession(userId, saltSessionKey(rawKey), sessionId);
+  const opts = { httpOnly: true, sameSite: "lax", secure: ssl_config.enabled };
+  res.cookie("zboe_skey", rawKey, opts);
+  res.cookie("zboe_sid", sessionId, opts);
+  log("FULL", `Issued session pair for userId=${userId} (sid=${sessionId})`, game_config, `Issued session pair for userId=${userId} (sid=[redacted])`);
+}
+
+function getSession(req) {
+  const raw = req.cookies?.zboe_session;
+  log("FULL", `Retrieving session cookie: ${raw}`, game_config, "Retrieving session cookie: [redacted]");
+  if (!raw) return null;
+  const [b64, sig] = raw.split(".");
+  if (!b64 || !sig) return null;
+  if (sign(b64) !== sig) return null;
+  log("FULL", `Session valid for payload: ${b64}`, game_config, "Session valid for payload: [redacted]");
+  try {
+    return JSON.parse(Buffer.from(b64, "base64url").toString("utf8"));
+  } catch {
+    log("WARN", "Failed to parse session payload", game_config);
+    return null;
+  }
+}
+
+// Must run after requireAuth (needs req.userId). Rejects non-admins.
+function requireAdmin(req, res, next) {
+  if (!isUserAdmin(req.userId)) {
+    log("WARN", `Admin-only action denied for ${req.user}`, game_config);
+    return res.status(403).json({ ok: false, message: "Admin only." });
+  }
+  next();
+}
+
+// Same verification requireAuth does, but never redirects — for routes that
+// serve a valid response either way and just want to know "is there a
+// legitimately logged-in user here" (playercard.html's anonymous-vs-logged-in
+// view). Returns { userId, username } or null. Deliberately a separate
+// function rather than a requireAuth refactor — requireAuth's granular WARN
+// logging (which specific check failed, for hijack detection) is worth
+// keeping untouched rather than collapsing into a boolean.
+function tryAuth(req) {
+  const sess = getSession(req);
+  if (!sess?.u) return null;
+  const auth = getAuthRecord(sess.u);
+  if (!auth || auth.session_id === SESSION_LOGGED_OUT) return null;
+  const rawKey = req.cookies?.zboe_skey;
+  const sid = req.cookies?.zboe_sid;
+  if (!rawKey || !sid || sid !== auth.session_id || saltSessionKey(rawKey) !== auth.session_key) return null;
+  if (auth.session_key !== auth.p_session_key || auth.session_id !== auth.p_session_id) return null;
+  return { userId: auth.id, username: auth.username };
+}
+
+function requireAuth(req, res, next) {
+  const sess = getSession(req);
+  log("FULL", `Authenticating request, session=${JSON.stringify(sess)}`, game_config, `Authenticating request, session for user=${sess?.u ?? "?"}`);
+  if (!sess?.u) return res.redirect("/login.html?err=Please%20login");
+  const auth = getAuthRecord(sess.u);
+  log("FULL", `User lookup result for username=${sess.u}: ${auth ? `id=${auth.id}` : "undefined"}`, game_config);
+  if (!auth) return res.redirect("/login.html?err=Please%20login");
+
+  // Server-side session verification: the cookie pair must match the stored
+  // pair, and the users/players copies must agree with each other. Any
+  // mismatch is a possible hijack/tamper attempt — WARN and bounce.
+  if (auth.session_id === SESSION_LOGGED_OUT) {
+    log("WARN", `API auth: ${auth.username} presented a session but is logged out`, game_config);
+    return res.redirect("/login.html?err=Please%20login");
+  }
+  const rawKey = req.cookies?.zboe_skey;
+  const sid = req.cookies?.zboe_sid;
+  if (!rawKey || !sid || sid !== auth.session_id || saltSessionKey(rawKey) !== auth.session_key) {
+    log("WARN", `API auth MISMATCH for ${auth.username}: session key/ID rejected (ip=${req.ip})`, game_config);
+    return res.redirect("/login.html?err=Session%20invalid");
+  }
+  if (auth.session_key !== auth.p_session_key || auth.session_id !== auth.p_session_id) {
+    log("WARN", `API auth MISMATCH for ${auth.username}: users/players session records disagree (ip=${req.ip})`, game_config);
+    return res.redirect("/login.html?err=Session%20invalid");
+  }
+
+  // Ban/exile takes effect immediately, even mid-session — not just at the
+  // next login attempt. A verified-legitimate session for a now-banned/exiled
+  // account is voided right here, so every subsequent authenticated call
+  // (including the game-state poll) bounces to banned.html instead of
+  // continuing to act. API calls (fetch/XHR) get a JSON payload the client
+  // reacts to; full-page routes (/game, /admin) get a real redirect.
+  const banUntil = auth.login_res_set_time + auth.login_res_time * 1000;
+  if (auth.user_exiled || (auth.login_restricted && Date.now() < banUntil)) {
+    setUserLoggedOut(auth.id);
+    const exiled = Boolean(auth.user_exiled);
+    log("WARN", `${auth.username}'s active session was killed — currently ${exiled ? "exiled" : "banned"}`, game_config);
+    const redirect = `/banned.html?u=${encodeURIComponent(auth.username)}`;
+    if (req.path.startsWith("/api/")) {
+      return res.status(403).json({
+        ok: false, banned: true, exiled,
+        admin: exiled ? auth.user_exiled_admin : auth.login_res_admin,
+        reason: exiled ? auth.user_exiled_reason : auth.login_res_reason,
+        until: exiled ? null : banUntil,
+        redirect,
+      });
+    }
+    return res.redirect(redirect);
+  }
+
+  log("FULL", `Authenticated user ${auth.username} (id=${auth.id})`, game_config);
+  req.user = auth.username;
+  req.userId = auth.id;
+  // Chat/fun gates (users.adm_fun/chat_mute/chat_deaf/chat_strict) — fetched
+  // fresh every request alongside the session check above, so they're never
+  // stale within a request even though nothing else caches them.
+  req.gates = {
+    admFun: Boolean(auth.adm_fun),
+    chatMute: Boolean(auth.chat_mute),
+    chatDeaf: Boolean(auth.chat_deaf),
+    chatStrict: Boolean(auth.chat_strict),
+  };
+  next();
+}
+
+// Human-readable label for one quest objective, for the Quest Info UI.
+function questObjectiveLabel(obj) {
+  switch (obj.type) {
+    case "learn_spell": return `Learn ${MAGIC_SPELLS[obj.spell]?.name ?? obj.spell}`;
+    case "acquire_item": return `Acquire ${obj.qty}× ${ITEMS[obj.item]?.name ?? obj.item}`;
+    case "action": {
+      const label = Object.values(LOCATION_ACTIONS).flat().find((a) => a.key === obj.action)?.label;
+      return label ?? obj.action;
+    }
+    case "recipe": {
+      const r = RECIPES.find((rr) => rr.key === obj.recipe);
+      return r ? `Craft ${r.label}` : obj.recipe;
+    }
+    case "use_item": return `Use ${ITEMS[obj.item]?.name ?? obj.item}`;
+    case "break_horde": return "Break a zombie horde";
+    case "clear_raid": return "Clear a zombie raid";
+    default: return obj.type;
+  }
+}
+
+// Shapes the player's quest_active/quest_started/quest_completed/
+// quest_objectives columns (db_backbone.js) into a UI-friendly payload for the game
+// page's Quest Info box + completed-quests modal.
+function questsPayloadFor(player) {
+  const started = player.quest_started ? player.quest_started.split(",").filter(Boolean) : [];
+  const completed = player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : [];
+  const activeKey = player.quest_active;
+  const progress = player.quest_objectives ? JSON.parse(player.quest_objectives) : {};
+
+  const active = activeKey !== "NONE" && QUESTS[activeKey] ? {
+    key: activeKey,
+    name: QUESTS[activeKey].name,
+    desc: QUESTS[activeKey].desc,
+    objectives: QUESTS[activeKey].objectives.map((obj, i) => ({
+      label: questObjectiveLabel(obj),
+      have: progress[i] ?? 0,
+      need: obj.qty,
+      done: (progress[i] ?? 0) >= obj.qty,
+    })),
+    reward: QUESTS[activeKey].reward,
+  } : null;
+
+  const started_other = started
+    .filter((k) => k !== activeKey && !completed.includes(k) && QUESTS[k])
+    .map((k) => ({ key: k, name: QUESTS[k].name, desc: QUESTS[k].desc }));
+
+  const completedList = completed.filter((k) => QUESTS[k])
+    .map((k) => ({ key: k, name: QUESTS[k].name, reward: QUESTS[k].reward }));
+
+  return { active, started: started_other, completed: completedList };
+}
+
+// Richer variant for the playercard Quests tab — same active/started shape
+// as questsPayloadFor (reused so game.html's Quest Info card is untouched),
+// but completed quests carry full detail (long_desc/quest_level/objectives)
+// instead of just name+reward, since the card's completed-quests section is
+// an accordion meant to be read in full, not skimmed from a feed.
+function questsPayloadForCard(player) {
+  const base = questsPayloadFor(player);
+  const completed = player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : [];
+  const completedList = completed.filter((k) => QUESTS[k]).map((k) => {
+    const q = QUESTS[k];
+    return {
+      key: k,
+      name: q.name,
+      long_desc: q.long_desc ?? q.desc,
+      quest_level: q.quest_level ?? null,
+      reward: q.reward,
+      objectives: q.objectives.map(questObjectiveLabel),
+    };
+  });
+  return { active: base.active, started: base.started, completed: completedList };
+}
+
+const XP_PER_KILL = 10;
+const GOLD_PER_KILL = 5;
+
+// Leveling rules (nextLevelOf/levelCost) live in db_backbone.js as the source of truth.
+
+// ----- Horde status & base -----
+function hordeStatusOf(gs) {
+  if (gs.raid_enabled === "true") return "raiding";          // latched until horde hits 0
+  if (gs.hunt_enabled !== "true") return "hiding";
+  if (gs.horde_size >= zombie_config.z_horde) return "hunting";
+  return "wandering";
+}
+
+// Latch a raid ON once the horde reaches z_raid. Once latched, it stays until the
+// horde is fully cleared (handled where zombies are killed). Call after any spawn/add.
+function latchRaidIfNeeded() {
+  const gs = getGameState();
+  if (gs.raid_enabled !== "true" && gs.horde_size >= zombie_config.z_raid) {
+    setRaidEnabled(true);
+    insertEvent("system", "A RAID has begun — the horde swarms the base!", "public", "global");
+    log("INFO", `raid latched on (horde=${gs.horde_size} >= z_raid=${zombie_config.z_raid})`, game_config);
+    return true;
+  }
+  return false;
+}
+// ----- Zombie Location Pool helpers -----
+// World pool = gs.horde_size (existing). Location pools = gs.zombies_<loc>,
+// covering all 8 OUTBREAK_LOCATIONS now (the 4 outside ZOMBIE_LOCATIONS sit
+// at 0 outside of an active Outbreak). Nearby pool = the player's own
+// zombie_near/zombie_near_health.
+function locationZombiesOf(gs, location) {
+  if (!OUTBREAK_LOCATIONS.has(location)) return 0;
+  return gs[`zombies_${location}`] ?? 0;
+}
+
+// Is this location dangerous RIGHT NOW — always true for the 4 always-active
+// ZOMBIE_LOCATIONS, plus the other 4 OUTBREAK_LOCATIONS while an Outbreak is
+// live. The single source of truth for every player-facing "is this a zombie
+// location" check (panel swap, combat gates, map badges) — replaces bare
+// ZOMBIE_LOCATIONS.has(...) checks that would otherwise stay blind to
+// Outbreak mode.
+function isZombieActive(location, gs) {
+  return ZOMBIE_LOCATIONS.has(location) || (gs.zombie_break === 1 && OUTBREAK_LOCATIONS.has(location));
+}
+
+// The raw count of whichever pool a player currently has targeted.
+function targetedPoolCountOf(player, gs) {
+  const scope = player.target_scope;
+  if (scope === "Location") return locationZombiesOf(gs, locationOf(player));
+  if (scope === "Nearby") return player.zombie_near || 0;
+  return gs.horde_size; // "World" (and any unrecognized value defaults here)
+}
+
+// "Zombie force" — what actually attacks a player each tick, per a1: a
+// player's own Nearby pool always threatens them on top of whatever else
+// they're targeting. When Nearby IS the targeted scope, don't double it.
+function zombieForceOf(player, gs) {
+  const near = player.zombie_near || 0;
+  if (player.target_scope === "Nearby") return near;
+  return targetedPoolCountOf(player, gs) + near;
+}
+
+// Gate for switching target_scope: a player may only target a scope that
+// currently has zombies in it (mirrors the splintering gate).
+function hasZombiesInScope(player, gs, scope) {
+  if (scope === "World") return gs.horde_size > 0;
+  if (scope === "Location") return locationZombiesOf(gs, locationOf(player)) > 0;
+  if (scope === "Nearby") return (player.zombie_near || 0) > 0;
+  return false;
+}
+
+// A weapon's effective reach category: zombie-themed items resolve through
+// their underlying `class` (Melee/Ranged/Throwing/Fist) rather than their
+// display `section` ("Zombie"). Ranged and guns can hit at any target_scope;
+// Melee/Fist/Throwing can only reach a player's own Nearby pool.
+function weaponReachOf(item) {
+  return item.section === "Zombie" ? item.class : item.section;
+}
+const CLOSE_RANGE_REACH = new Set(["Melee", "Fist", "Throwing"]);
+
+function baseIsDestroyed(gs) { return gs.base_health <= 0; }
+
+// True once an Outbreak's z_break_duration has expired before it was quelled
+// (zombies won) — set via setZombieBreakDefeatedAt, cleared only by
+// experimentReset. Mirrors baseIsDestroyed's role (freeze the world on its
+// own reset timer) even though the underlying mechanism differs — base
+// health naturally stays at/below 0 until reset, but there's no equivalent
+// naturally-persistent field for a defeated Outbreak, hence the dedicated
+// timestamp column.
+function outbreakDefeated(gs) { return gs.z_break_defeated_at !== 0; }
+
+// Full experiment reset: zombies die, hunt/raid off, base rebuilt.
+function experimentReset(reason) {
+  resetGameState(game_config.baseMaxHealth);
+  insertEvent("system", `The Experiment Resets (${reason}).`, "public", "global");
+  log("WARN", `Experiment reset — ${reason}`, game_config);
+}
+
+// Nuke-vote tally over currently-active players.
+function nukeVoteStatus() {
+  const cutoff = Date.now() - game_config.timeout * 1000;
+  const activeIds = new Set(getActivePlayers(cutoff).map((p) => p.user_id));
+  const votes = getNukeVoterIds().filter((id) => activeIds.has(id)).length;
+  const needed = Math.floor(activeIds.size / 2) + 1;
+  return { active: activeIds.size, votes, needed };
+}
+
+// ----- Hunt vote -----
+// A player-triggered alternative to the admin's direct hunt toggle: any
+// online player can call a 30s Yes/No poll to flip hunt_enabled. One vote
+// globally at a time (the hunt is a single world toggle) — in-memory only,
+// same convention as ACTION_BUSY/CAMPFIRES/SPELL_ARMOR_BUFFS, so a restart
+// just drops whatever was in progress.
+let HUNT_VOTE = null; // { toggleTo, startedBy, expiresAt, ballots: Map<userId,'yes'|'no'>, timer }
+const HUNT_VOTE_SECONDS = 30;
+
+// Cancel any in-progress hunt vote (e.g. an admin overrode it directly via
+// /api/hunt/toggle) — clears the timer too, so the stale resolve is a no-op
+// (resolveHuntVote checks HUNT_VOTE === voteRef before acting).
+function cancelHuntVote() {
+  if (!HUNT_VOTE) return;
+  clearTimeout(HUNT_VOTE.timer);
+  HUNT_VOTE = null;
+}
+
+function resolveHuntVote(voteRef) {
+  if (HUNT_VOTE !== voteRef) return; // superseded/cancelled — ignore this stale timer
+  let yes = 0, no = 0;
+  for (const v of voteRef.ballots.values()) v === "yes" ? yes++ : no++;
+  // Passes with at least one Yes, and either no dissent or Yes outnumbers No.
+  const passed = yes >= 1 && (no === 0 || yes > no);
+  if (passed) {
+    setHuntEnabled(voteRef.toggleTo);
+    insertEvent("system", `The hunt vote passed (${yes}-${no}) — the hunt is now ${voteRef.toggleTo ? "enabled" : "disabled"}.`, "public", "global");
+    log("INFO", `Hunt vote passed ${yes}-${no} -> hunt_enabled=${voteRef.toggleTo}`, game_config);
+  } else {
+    insertEvent("system", "The vote was majority no.", "public", "global");
+    log("INFO", `Hunt vote failed ${yes}-${no}`, game_config);
+  }
+  HUNT_VOTE = null;
+}
+
+// The hunt-vote status for GET /api/game-state — reuses the caller's already
+// -queried active-player list (no extra DB round trip).
+function huntVoteStatus(userId, actives) {
+  if (!HUNT_VOTE) return null;
+  let yes = 0, no = 0;
+  for (const v of HUNT_VOTE.ballots.values()) v === "yes" ? yes++ : no++;
+  return {
+    active: true,
+    toggleTo: HUNT_VOTE.toggleTo,
+    secondsLeft: Math.max(0, Math.ceil((HUNT_VOTE.expiresAt - Date.now()) / 1000)),
+    yes, no,
+    myVote: HUNT_VOTE.ballots.get(userId) ?? null,
+    // Only meaningful to an admin viewer (drives the client's confirm-before-
+    // voting nudge when there are enough non-admins online to decide alone).
+    onlineNonAdminCount: actives.filter((p) => !isUserAdmin(p.user_id)).length,
+  };
+}
+
+// Pick up to n random distinct elements from arr.
+function sampleUpTo(arr, n) {
+  if (arr.length <= n) return arr.slice();
+  const copy = arr.slice();
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
+  return out;
+}
+
+// ----- Guns -----
+// Derived from the item registry: every ITEMS entry with type "gun" maps its
+// gunType to the per-gun stat columns (handgun_/rifle_/shotgun_/burstrifle_)
+// and the shooting behavior below.
+const GUNS = Object.fromEntries(
+  Object.entries(ITEMS)
+    .filter(([, item]) => item.type === "gun")
+    .map(([key, item]) => [key, { type: item.gunType }])
+);
+
+// ----- Armor -----
+// Derived from the registry: every ITEMS entry with type "armor". AP is a
+// 1-500 gauge of effectiveness — the equipped armor blocks ap/AP_GAUGE of the
+// damage tallied against the player each tick (the final hit calc). Players
+// inside the base pool their AP into "Base AP", which deflects base damage
+// the same way, capped at BASE_AP_MAX_BLOCK so the base is never invincible.
+const AP_GAUGE = 500;
+const BASE_AP_MAX_BLOCK = 0.9;
+const ARMORS = Object.fromEntries(
+  Object.entries(ITEMS).filter(([, item]) => item.type === "armor")
+);
+// True if itemName is equipped in ANY of the 6 paperdoll slots.
+function isArmorEquippedAnywhere(player, itemName) {
+  return ARMOR_PIECES.some((slot) => player[`a_${slot}`] === itemName);
+}
+// Sums AP across all 6 slots. A slot contributes 0 if its item is gone
+// (e.g. admin force-removed it) or BROKEN (condition 0) — condition gates AP
+// fully off rather than scaling it, matching the binary BROKEN convention
+// already shown in the Armor tab UI.
+function armorApOf(player) {
+  const owned = new Map(getInventory(player.user_id).map((i) => [i.item_name, i]));
+  const gearAp = ARMOR_PIECES.reduce((sum, slot) => {
+    const name = player[`a_${slot}`];
+    if (!name || !ARMORS[name]) return sum;
+    const row = owned.get(name);
+    if (!row || row.quantity <= 0 || row.condition <= 0) return sum;
+    return sum + ARMORS[name].ap;
+  }, 0);
+  // Gear + temporary spell buff + innate "Base AP" (players.ap_level, bought
+  // via the AP Base upgrade) — one total for the hit calc and Base AP pooling.
+  return gearAp + spellApOf(player.user_id) + (player.ap_level || 0);
+}
+// Damage deflected by an AP rating (never more than the damage itself).
+function apBlocked(damage, ap) {
+  return Math.min(damage, Math.round(damage * Math.min(ap, AP_GAUGE) / AP_GAUGE));
+}
+// The sentry turret shoots with Rifle logic at this fixed "accuracy rating"
+// (feeds both computeHitChance's condition scaling and the pierce roll).
+const SENTRY_ACCURACY = 75;
+
+// Base AP = summed AP of everyone sheltering inside (from an active-player list).
+function baseApOf(activePlayers) {
+  return activePlayers
+    .filter((p) => p.location === "basecamp_inside")
+    .reduce((sum, p) => sum + armorApOf(p), 0);
+}
+
+function equippedGunName(player) {
+  return GUNS[player.equipped_gun] ? player.equipped_gun : "Handgun";
+}
+function equippedType(player) {
+  return GUNS[equippedGunName(player)].type;
+}
+
+// Merges a gun's base WEAPON_FIREARM_EXPORT stats with its equipped item's
+// optional attack_mod. dmg/floor are additive offsets to the base object;
+// acc becomes accMod, a flat post-formula hit-chance delta (see
+// computeHitChance). No attack_mod on the item = returns the base object
+// untouched, so unmodded guns are byte-for-byte unaffected.
+function equippedGunConfig(player) {
+  const type = equippedType(player);
+  const base = WEAPON_FIREARM_EXPORT[type];
+  const mod = ITEMS[equippedGunName(player)]?.attack_mod;
+  if (!mod) return base;
+  return {
+    ...base,
+    dmg: base.dmg + (mod.dmg ?? 0),
+    floor: (base.floor ?? 5) + (mod.floor ?? 0),
+    accMod: mod.acc ?? 0,
+  };
+}
+
+// ----- Weapon wheel (melee/ranged/throwing/zombie slots) -----
+// Derived from the registry: every ITEMS entry with type "weapon". `section`
+// ("Melee"/"Ranged"/"Throwing"/"Fist") IS the type discriminator — matches
+// WEAPON_ATTACK_EXPORT's keys 1:1, so no separate weaponType field is needed.
+const WEAPONS = Object.fromEntries(
+  Object.entries(ITEMS).filter(([, item]) => item.type === "weapon")
+);
+// Zombie-themed weapons are eligible for the zombie slot regardless of their
+// natural section — identified by key prefix, which is 100% consistent
+// across the registry (no dedicated flag needed for this).
+function isZombieWeapon(name) {
+  return typeof name === "string" && name.startsWith("zombie ");
+}
+// Quiver-cap resolution: which of ranged_crossbow_max_ammo/ranged_bow_max_ammo/
+// ranged_slingshot_max_ammo applies right now. Falls back to whatever's in the
+// zombie slot (a zombie-themed crossbow/bow/slingshot is still that rangedType
+// mechanically) so the rangedAmmo effect verb never has nothing to resolve.
+function effectiveRangedType(player) {
+  return WEAPONS[player.equipped_ranged]?.rangedType ?? WEAPONS[player.equipped_zombie_weapon]?.rangedType ?? null;
+}
+function rangedCapFor(player) {
+  const rt = effectiveRangedType(player);
+  return rt ? player[`ranged_${rt}_max_ammo`] : player.ranged_ammo;
+}
+// Which condition column a weapon's section reads/writes.
+function weaponConditionColFor(item) {
+  if (item.section === "Melee") return "melee_condition";
+  if (item.section === "Fist") return "fist_weapon_condition";
+  if (item.section === "Ranged") return "ranged_condition";
+  if (item.section === "Throwing") return "throwing_condition";
+  return null;
+}
+
+// Player's current location key, hardened against unknown/legacy values
+// (rows from before the location system default to Basecamp).
+function locationOf(player) {
+  return LOCATION_NAMES[player.location] ? player.location : "basecamp_outside";
+}
+
+// Players mid-action: userId -> { until (ms), key }. In-memory on purpose —
+// a dev-server restart just cancels any running action.
+const ACTION_BUSY = new Map();
+function busyUntilOf(userId) {
+  const b = ACTION_BUSY.get(userId);
+  if (!b || b.until <= Date.now()) return 0;
+  return b.until;
+}
+
+// Campfires: userId -> expiry ms. Built from firewood (Adventure Panel),
+// enables campfire-station recipes until it burns out or is put out.
+// In-memory like ACTION_BUSY — a restart douses every fire.
+const CAMPFIRES = new Map();
+const CAMPFIRE_COST = 2;          // firewood consumed to build
+const CAMPFIRE_BURN_SECONDS = 300;
+function campfireUntilOf(userId) {
+  const t = CAMPFIRES.get(userId) || 0;
+  return t > Date.now() ? t : 0;
+}
+
+// The Town Arcane Table auto-expires ARCANE_TABLE_WINDOW_MS after activation
+// (unlike forge/beacon's persistent on/off toggle) — "active" means both the
+// flag is set AND the window hasn't elapsed.
+const ARCANE_TABLE_WINDOW_MS = 5 * 60 * 1000;
+function arcaneTableActiveOf(player) {
+  return Boolean(player.arcane_table) && (Date.now() - player.arcane_table_activated_at) < ARCANE_TABLE_WINDOW_MS;
+}
+
+// Can this player use a crafting station right now? Gates both RECIPES and
+// LOCATION_ACTIONS that carry a `station`. The forge is the player's own, up
+// at the Mountains — fired via the fire_forge action (players.forge_fired),
+// persistent until put out.
+function stationOk(player, locKey, station) {
+  if (!station) return true;
+  if (station === "campfire") return campfireUntilOf(player.user_id) > 0;
+  if (station === "forge") return locKey === "mountains" && Boolean(player.forge_fired);
+  if (station === "beacon") return locKey === "bunker" && Boolean(player.beacon_fired);
+  if (station === "arcane_table") return locKey === "town" && arcaneTableActiveOf(player);
+  return false;
+}
+const STATION_MESSAGES = {
+  campfire: "You need a campfire burning — build one first.",
+  forge: "The forge is cold — get it going at the Mountains first.",
+  beacon: "The beacon is not activated — activate it at the Bunker first.",
+  arcane_table: "The Arcane Table isn't active — activate it in Town first.",
+};
+
+// Antenna/amplifier are passive base_items: OWNING them boosts the supply
+// beacon activation roll (+10% / +15%, stacking, capped at 100). `has` is an
+// item-name → owned predicate.
+function beaconBoost(has) {
+  return (has("external antenna") ? 10 : 0) + (has("signal amplifier") ? 15 : 0);
+}
+
+// Display string for a recipe's output — a single name, or an { item: qty }
+// bundle ("3× cooked meat, 5× firewood"), plus a teaser when the recipe also
+// rolls the supply-drop table.
+function fmtOutput(r) {
+  const base = typeof r.output === "string"
+    ? r.output
+    : Object.entries(r.output).map(([item, qty]) => `${qty}× ${item}`).join(", ");
+  return r.roll === "supply" ? `${base} + a mystery bonus` : base;
+}
+
+// The current location's actions, annotated with whether THIS player can run
+// each one right now (skill level + required tool). Rows that are recipe
+// pointers ({ recipe: key }) expand into action-shaped entries built from the
+// item_backbone.js recipe — no success roll (crafts always land), and the
+// inputs ride along so the page can show/gate them like /api/craft does.
+function actionsFor(player, locKey) {
+  const defs = LOCATION_ACTIONS[locKey] || [];
+  if (!defs.length) return [];
+  const ownedQty = Object.fromEntries(getInventory(player.user_id).map((i) => [i.item_name, i.quantity]));
+  const has = (name) => (ownedQty[name] ?? 0) > 0;
+  return defs.map((a) => {
+    // Pure UI button rows (Magic Table) — always visible at their location,
+    // no gating; the page opens the matching modal instead of posting a Do.
+    if (a.button) return { key: a.key, button: true, label: a.label };
+    if (a.recipe) {
+      const r = RECIPES.find((x) => x.key === a.recipe); // existence boot-validated
+      return {
+        key: r.key, recipe: r.key, label: r.label, timer: devTimerOf(r.timer),
+        skill: r.skill, skillName: SKILL_NAMES[r.skill], skillLevel: r.level,
+        successRate: 100, grants: fmtOutput(r), xp: r.xp,
+        requires: r.requires ?? null, uses: null, inputs: r.inputs,
+        station: r.station ?? null, activates: null,
+        lvlOk: player[`s_${r.skill}_lvl`] >= r.level,
+        toolOk: !r.requires || has(r.requires),
+        useOk: true,
+        inputsOk: Object.entries(r.inputs).every(([item, qty]) => (ownedQty[item] ?? 0) >= qty),
+        stationOk: stationOk(player, locKey, r.station),
+      };
+    }
+    return {
+      key: a.key,
+      label: a.label,
+      timer: devTimerOf(a.timer),
+      skill: a.skill,
+      skillName: SKILL_NAMES[a.skill],
+      skillLevel: a.skillLevel,
+      // Beacon activation shows the antenna/amplifier-boosted odds.
+      successRate: a.activates === "beacon" ? Math.min(100, a.successRate + beaconBoost(has)) : a.successRate,
+      grants: a.grants ?? null,
+      trainOnly: Boolean(a.trainOnly),
+      xp: a.xp,
+      requires: a.requires ?? null,
+      uses: a.uses ?? null,
+      inputs: null,
+      station: a.station ?? null,
+      activates: a.activates ?? null,
+      lvlOk: player[`s_${a.skill}_lvl`] >= a.skillLevel,
+      toolOk: !a.requires || has(a.requires),
+      // uses accepts a single item name (qty 1, implicit) or a { item: qty }
+      // map (multi-item fuel, e.g. activate_arcane_table's firewood + mana shard).
+      useOk: !a.uses ? true : typeof a.uses === "string" ? has(a.uses) : Object.entries(a.uses).every(([item, qty]) => (ownedQty[item] ?? 0) >= qty),
+      inputsOk: true,
+      stationOk: stationOk(player, locKey, a.station),
+    };
+  })
+  // Only actions the player can actually run right now reach the page —
+  // locked ones (skill/tool/materials/station, or an already-lit station)
+  // stay hidden until unlocked. The do-handler still enforces every gate.
+  .filter((x) =>
+    x.button ||
+    (x.lvlOk && x.toolOk && x.useOk && x.inputsOk && x.stationOk &&
+      !(x.activates === "forge" && player.forge_fired) &&
+      !(x.activates === "beacon" && player.beacon_fired) &&
+      !(x.activates === "arcane_table" && arcaneTableActiveOf(player)))
+  );
+}
+
+const SHOT_WEAR_CHANCE = 15; // % chance a shot wears the gun
+const SHOT_WEAR_AMOUNT = 2;  // condition points lost when it does
+// Jam chance per shot = missing condition × JAM_FACTOR (%). A pristine gun
+// never jams; at condition 60 → 10%, at 0 → 25%. Keep guns oiled.
+const JAM_FACTOR = 0.25;
+
+// Percent chance a shot connects, based on the gun's condition (0-100). Guns
+// without an explicit floor (only "player"-model handgun today) default to 5.
+// behavior.accMod (from an equipped item's attack_mod.acc — see
+// equippedGunConfig) is a flat post-formula handicap/bonus, clamped so the
+// final chance always stays in [0, 100]. Shared by both World/Location and
+// Nearby-scope shooting, plus the sentry turret (base WEAPON_FIREARM_EXPORT
+// object, no accMod, unaffected).
+function computeHitChance(player, behavior, gunCondition) {
+  const floor = behavior.floor ?? 5;
+  let chance;
+  if (behavior.accuracyModel === "condition") {
+    // Rifle: high base, impaired only by gun condition.
+    chance = Math.max(5, Math.round(floor * (gunCondition / 100)));
+  } else {
+    // Handgun / Shotgun: player accuracy stat scaled by gun condition, floored.
+    chance = Math.max(floor, Math.round(player.accuracy * (gunCondition / 100)));
+  }
+  return Math.min(100, Math.max(0, chance + (behavior.accMod ?? 0)));
+}
+
+// Shotgun: how many zombies a hit drops, scaled by accuracy and gun condition (1–5).
+function shotgunTargets(player, gunCondition) {
+  const scaled = Math.round(5 * (player.accuracy / 100) * (gunCondition / 100));
+  return Math.max(1, Math.min(5, scaled));
+}
+
+// Rifle: in a thick horde (> RIFLE_PIERCE_MIN_HORDE zombies) a round can punch
+// clean through and drop a second zombie. Chance scales linearly with player
+// accuracy: RIFLE_PIERCE_MIN% at 0 acc → RIFLE_PIERCE_MAX% at 100.
+const RIFLE_PIERCE_MIN_HORDE = 5;
+const RIFLE_PIERCE_MIN = 15;
+const RIFLE_PIERCE_MAX = 65;
+function riflePierces(player, hordeSize) {
+  if (hordeSize <= RIFLE_PIERCE_MIN_HORDE) return false;
+  const chance = RIFLE_PIERCE_MIN + (RIFLE_PIERCE_MAX - RIFLE_PIERCE_MIN) * (player.accuracy / 100);
+  return Math.random() * 100 < chance;
+}
+
+// ----- Weapon wheel combat math -----
+// Fighting skill drives non-gun weapon accuracy the way player.accuracy
+// drives guns. 40% at level 1, up to a 95% plateau at level 30+, linear
+// between — a starting baseline, easy to retune later.
+const FIGHTING_ACC_MIN = 40, FIGHTING_ACC_MAX = 95, FIGHTING_ACC_MAX_LEVEL = 30;
+function fightingAccuracyOf(player) {
+  const t = Math.min(player.s_fighting_lvl - 1, FIGHTING_ACC_MAX_LEVEL - 1) / (FIGHTING_ACC_MAX_LEVEL - 1);
+  return Math.round(FIGHTING_ACC_MIN + (FIGHTING_ACC_MAX - FIGHTING_ACC_MIN) * Math.max(0, t));
+}
+
+// Same two branches as computeHitChance; floor comes from WEAPON_ATTACK_EXPORT
+// keyed by the item's own section — condition is 0-100 (the zombie slot
+// substitutes a flat 100, since nothing tracks its wear).
+function computeWeaponHitChance(player, section, attack, condition) {
+  const floor = WEAPON_ATTACK_EXPORT[section].floor;
+  if (attack.acc_model === "condition")
+    return Math.max(5, Math.round(floor * (condition / 100)));
+  return Math.max(floor, Math.round(fightingAccuracyOf(player) * (condition / 100)));
+}
+
+// targets_max absent => a hit always drops exactly 1 zombie. When present,
+// scales between 1 and targets_max by fighting accuracy x condition —
+// mirrors shotgunTargets()'s shape.
+function weaponTargetsHit(player, attack, condition) {
+  if (!attack.targets_max) return 1;
+  const scaled = 1 + (attack.targets_max - 1) * (fightingAccuracyOf(player) / 100) * (condition / 100);
+  return Math.max(1, Math.min(attack.targets_max, Math.round(scaled)));
+}
+
+// ----- Chat censor -----
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function loadCensorWords() {
+  try {
+    const file = path.join(__dirname, file_config.censorFile || "censor.txt");
+    return fs.readFileSync(file, "utf8")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"));
+  } catch (err) {
+    log("WARN", `Could not read censor file: ${err.message}`, game_config);
+    return [];
+  }
+}
+const CENSOR_WORDS = loadCensorWords();
+// Whole-word, case-insensitive match; each hit becomes ****.
+const CENSOR_REGEX = CENSOR_WORDS.length
+  ? new RegExp(`\\b(?:${CENSOR_WORDS.map(escapeRegex).join("|")})\\b`, "gi")
+  : null;
+function censorText(text) {
+  return CENSOR_REGEX ? text.replace(CENSOR_REGEX, "****") : text;
+}
+
+// ----- Static shop upgrades (hardcoded; distinct from the item registry's shop) -----
+// `category` decides which game-page tab it appears on: "upgrade" (permanent
+// gun/character boosts) or "item" (consumables & one-time buys, shown on the Shop
+// tab alongside registry `shop` items). 'type' still drives buy handling:
+// 'stat'/'instant' apply immediately; 'consumable'/'gun' drop into inventory.
+const STATIC_UPGRADES = [
+  { key: "extended_mag", label: "Extended Magazine", desc: "+2 max ammo (equipped gun)",  cost: 150, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxAmmo(uid, gun, 2) },
+  // Mana-priced + material inputs + Defense-gated, and repeatable (no owned
+  // flag): each buy permanently raises players.ap_level (see armorApOf).
+  { key: "ap_base", label: "AP Base", desc: "+10 Base AP (permanent, stacks)", cost: 25, currency: "mana", type: "instant", category: "upgrade",
+    inputs: { "firewood": 10, "copper ore": 5, "glowcap": 3 }, defense: 2,
+    apply: (uid) => setPlayerStat(uid, "ap_level", (getPlayerByUserId(uid).ap_level || 0) + 10) },
+  { key: "clip_holster", label: "Clip Holster",      desc: "+1 max clips (equipped gun)", cost: 120, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxClips(uid, gun, 1) },
+  { key: "quiver_expansion", label: "Quiver Expansion", desc: "+3 max Quiver ammo (equipped ranged weapon)", cost: 140, type: "stat", category: "upgrade",
+    apply: (uid) => { const rt = effectiveRangedType(getPlayerByUserId(uid)); if (rt) updateRangedMaxAmmo(uid, rt, 3); } },
+  { key: "pouch_expansion", label: "Pouch Expansion", desc: "+3 max Pouch ammo (throwing weapons)", cost: 140, type: "stat", category: "upgrade",
+    apply: (uid) => updateThrowingMaxAmmo(uid, 3) },
+  { key: "laser_sight",  label: "Accuracy Potion",   desc: "+5% accuracy",                cost: 200, type: "stat", category: "upgrade", apply: (uid) => updatePlayerAccuracy(uid, 5) },
+  { key: "spare_clip",   label: "Spare Clip",        desc: "+1 clip (equipped gun)",      cost: 5,   type: "stat", category: "item", apply: (uid, gun) => updateGunAmmo(uid, gun, 0, 1) },
+  { key: "gun_oil",      label: "Gun Oil",           desc: "consumable · restores condition", cost: 25, type: "consumable", category: "item", item: "gun oil" },
+  // Gold consumables (drop into inventory, used later).
+  { key: "heal_potion",  label: "Healing Potion",    desc: "consumable · +50 health",  cost: 25, type: "consumable", category: "item", item: "healing potion" },
+  { key: "shield_potion",label: "Shield Potion",     desc: "consumable · +50 shield",  cost: 60, type: "consumable", category: "item", item: "shield potion" },
+  // One-time gun unlocks: bought once, land in inventory, then equippable.
+  { key: "buy_rifle",    label: "Rifle",             desc: "one-time · unlocks the Rifle",   cost: 300, type: "gun", category: "item", item: "Rifle" },
+  { key: "buy_shotgun",  label: "Shotgun",           desc: "one-time · unlocks the Shotgun", cost: 550, type: "gun", category: "item", item: "Shotgun" },
+  { key: "buy_burstrifle",label: "Burst Rifle",     desc: "one-time · unlocks the Burst Rifle", cost: 2500, type: "gun", category: "item", item: "Burst Rifle" },
+  // Token-purchased (horde/raid tokens), applied instantly.
+  { key: "shield_booster", label: "Shield Booster",  desc: "+50 shield capacity",            cost: 5,  currency: "token", type: "instant", category: "item", apply: (uid) => increaseMaxShield(uid, 50) },
+  { key: "golden_gun",     label: "Golden Gun",      desc: "power-up · 25 perfect shots",    cost: 25, currency: "token", type: "instant", category: "item", apply: (uid) => grantGoldenShots(uid, 25) },
+  // Token → gold exchange; rate is game_config.tokenExchangeGold (--set-able per run).
+  { key: "exchange_token", label: "Exchange Token",  desc: `1 token → ${game_config.tokenExchangeGold} gold`, cost: 1, currency: "token", type: "instant", category: "item", msg: `Exchanged 1 token for ${game_config.tokenExchangeGold} gold`, apply: (uid) => updatePlayerGold(uid, game_config.tokenExchangeGold) },
+];
+
+// ----- Item effect interpreter -----
+// Applies a registry item's declarative `use` block (item_backbone.js). One
+// verb → one handler; add a verb here once and every item can use it. Each
+// handler returns the human note for the feed message.
+const EFFECT_VERBS = {
+  heal:         (uid, n) => { healPlayer(uid, n);            return `+${n} health`; },
+  shield:       (uid, n) => { addShield(uid, n);             return `+${n} shield`; },
+  mana:         (uid, n) => { addMana(uid, n);                return `+${n} mana`; },
+  maxShield:    (uid, n) => { increaseMaxShield(uid, n);     return `+${n} max shield`; },
+  gunCondition: (uid, n) => { adjustGunCondition(uid, equippedType(getPlayerByUserId(uid)), n); return `+${n} equipped gun condition`; },
+  // Restores condition to every currently-equipped non-gun slot at once
+  // (melee/fist share one column depending on which subtype's equipped) —
+  // the zombie slot is excluded, it has no tracked condition column.
+  weaponCondition: (uid, n) => {
+    const p = getPlayerByUserId(uid);
+    const cols = new Set();
+    for (const slotItem of [p.equipped_melee, p.equipped_ranged, p.equipped_throwing]) {
+      const item = WEAPONS[slotItem];
+      if (item) cols.add(weaponConditionColFor(item));
+    }
+    for (const col of cols) adjustWeaponCondition(uid, col, n);
+    return `+${n} equipped weapon condition`;
+  },
+  rangedAmmo:   (uid, n) => { addRangedAmmo(uid, n, rangedCapFor(getPlayerByUserId(uid))); return `+${n} Quiver`; },
+  throwingAmmo: (uid, n) => { addThrowingAmmo(uid, n);       return `+${n} Pouch`; },
+  railgunAmmo:  (uid, n) => {
+    const { ammo, maxAmmo } = gunAmmoOf(getPlayerByUserId(uid), "railgun");
+    const add = Math.max(0, Math.min(n, maxAmmo - ammo));
+    updateGunAmmo(uid, "railgun", add, 0);
+    return `+${add} Railgun ammo`;
+  },
+  bfgAmmo:      (uid, n) => {
+    const { ammo, maxAmmo } = gunAmmoOf(getPlayerByUserId(uid), "bfg2000");
+    const add = Math.max(0, Math.min(n, maxAmmo - ammo));
+    updateGunAmmo(uid, "bfg2000", add, 0);
+    return `+${add} BFG 2000 ammo`;
+  },
+  gold:         (uid, n) => { updatePlayerGold(uid, n);      return `+${n} gold`; },
+  accuracy:     (uid, n) => { updatePlayerAccuracy(uid, n);  return `+${n} accuracy`; },
+  goldenShots:  (uid, n) => { grantGoldenShots(uid, n);      return `+${n} golden shots`; },
+  tokens:       (uid, n) => { addTokens(uid, n);             return `+${n} tokens`; },
+  // World-scoped verbs (base systems — /api/inventory/use gates these items
+  // to the Bunker):
+  stockRepairKits: (_uid, n) => {
+    const total = adjustRepairKits(n);
+    insertEvent("system", `A base repair kit was stocked at the Bunker (${total} ready).`, "public", "global");
+    return `stocked ${n} repair kit (${total} ready at the base)`;
+  },
+  sentryHours: (_uid, n) => {
+    setSentryUntil(Date.now() + n * 3600 * 1000);
+    insertEvent("system", `🤖 A sentry turret hums to life on the base perimeter (${n}h).`, "public", "global");
+    return `sentry turret online for ${n}h`;
+  },
+};
+function applyItemEffects(userId, use) {
+  return Object.entries(use).map(([verb, amount]) => EFFECT_VERBS[verb](userId, amount)).join(", ");
+}
+
+// Zombie Bits kill drop: a chance per kill EVENT (not per zombie in a
+// multi-kill shot) to drop one random crafting material from the Zombie Bits
+// pool (item_backbone.js) — the raw material for the zombie-tier armor recipes.
+const ZOMBIE_BITS = Object.keys(ITEMS).filter((k) => ITEMS[k].section === "Zombie Bits");
+const ZOMBIE_BIT_DROP_CHANCE = 15; // % — tunable
+
+// Shared reward tail — XP/gold, the zombie-bit drop roll, and the public
+// "kill" event. Every kill path uses this (guns, weapon-wheel, spells, and
+// Nearby-scope combat); it never touches a zombie pool — callers own that.
+// `sourceLabel` is the human text for "dropped N zombies with <sourceLabel>".
+// Returns the bit-drop note ("" if nothing dropped).
+function grantKillRewards(userId, username, killed, sourceLabel) {
+  updatePlayerStats(userId, XP_PER_KILL * killed, killed);
+  updatePlayerGold(userId, GOLD_PER_KILL * killed);
+
+  let bitNote = "";
+  if (Math.random() * 100 < ZOMBIE_BIT_DROP_CHANCE) {
+    const bit = ZOMBIE_BITS[Math.floor(Math.random() * ZOMBIE_BITS.length)];
+    giveInventoryItem(userId, bit, 1);
+    bitNote = ` …a ${ITEMS[bit].name} drops from the pile.`;
+  }
+  const noun = killed === 1 ? "a zombie" : `${killed} zombies`;
+  insertEvent("kill", `${username} dropped ${noun} with ${sourceLabel} (+${XP_PER_KILL * killed} XP, +${GOLD_PER_KILL * killed} gold)${bitNote}`, "public", "global");
+  return bitNote;
+}
+
+// Broad (World/Location) kill resolution — the reward tail plus decrementing
+// whichever pool the kill came from. The horde-broken/raid-cleared token
+// bonus only ever evaluates for World-scope kills (Location kills grant
+// normal rewards, never the bonus — see plan §1). `scope` defaults to
+// "World" for callers that don't target Location (e.g. attack spells, which
+// have no Nearby-mode path — see plan §4).
+function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "World", location = null) {
+  const bonus0 = grantKillRewards(userId, username, killed, sourceLabel);
+  let bonus = bonus0;
+
+  if (scope === "Location") {
+    adjustLocationZombies(location, -killed);
+    return bonus;
+  }
+
+  const hordeBefore = gameState.horde_size;
+  const hordeAfter = hordeBefore - killed;
+  const wasRaiding = gameState.raid_enabled === "true";
+  adjustHordeSize(-killed);
+
+  if (wasRaiding && hordeAfter <= 0) {
+    addTokens(userId, 3);
+    setRaidEnabled(false);
+    insertEvent("system", `${username} ended the raid! (+3 tokens)`, "public", "global");
+    bonus += " Raid ended — +3 tokens!";
+    recordQuestProgress(userId, "clear_raid", null, 1);
+  } else if (!wasRaiding && hordeBefore >= zombie_config.z_horde && hordeAfter < zombie_config.z_horde) {
+    addTokens(userId, 1);
+    insertEvent("system", `${username} broke the horde (+1 token)`, "public", "global");
+    bonus += " Horde broken — +1 token!";
+    recordQuestProgress(userId, "break_horde", null, 1);
+  }
+  return bonus;
+}
+
+// Nearby-scope kill reward: same reward tail, no pool decrement (the caller
+// already resolved the HP cascade via damageNearbyZombie) and never the
+// horde-broken/raid-cleared token bonus.
+function grantNearbyKillRewards(userId, username, killed, sourceLabel) {
+  return grantKillRewards(userId, username, killed, sourceLabel);
+}
+
+const WEAPON_SLOT_KEYS = ["melee", "fist", "ranged", "throwing", "zombie"];
+
+const adminReq = [requireAuth, requireAdmin];
+// A sub-permission within admin — the 🎉 Fun modal/API needs users.adm_fun in
+// addition to is_admin (the rest of the panel doesn't).
+const adminFunReq = [requireAuth, requireAdmin, (req, res, next) => {
+  if (!req.gates.admFun) return res.status(403).json({ ok: false, message: "You don't have Fun access." });
+  next();
+}];
+const uidOf = (username) => getUserIdByName(String(username || "").trim())?.id ?? null;
+
+// ===================================================================
+// ===== Server =====
+// CLI/daemon lifecycle, Express app + middleware, boot-time registry
+// validation, every route, the zombie tick, and final startup bootstrap.
+// ===================================================================
 
 // Colorize text for a given stream only when that stream actually supports color.
 // util.styleText no-ops to plain text for non-TTYs, pipes/redirects, and when
@@ -94,7 +1027,18 @@ const LOG_COLORS = {
 };
 
 const LOG_FILE = path.join("logs/", file_config.logFile || "server.log");
+// Every API request's log() calls are routed here instead of LOG_FILE (login/
+// register are the one exception — see logFileContext/the request-tagging
+// middleware below, and the destination switch inside log() itself).
+const LOG_FILE_API = LOG_FILE + ".api";
 fs.mkdirSync("logs/", { recursive: true });
+// Tracks, for the request currently being handled, which log file(s) a
+// log() call should land in — set once per request by the requestLogContext
+// middleware and read back inside log() itself. AsyncLocalStorage carries
+// this through the whole request's async continuation (including a busy
+// action's later setTimeout resolution), so no individual log() call site
+// needs to know it's part of an API request.
+const logFileContext = new AsyncLocalStorage();
 // PID of a backgrounded server, written by the parent when it daemonizes and
 // removed by the daemon on exit. Used by --stop.
 const PID_FILE = path.join("logs", "zboe.pid");
@@ -287,21 +1231,23 @@ if (game_config.dev && game_config.debugLevel === "NONE") {
 // and again before every log() file write.
 const LOG_MAX_BYTES = (file_config.logMaxMB || 3) * 1024 * 1024;
 const ROTATED_LOG_FILE = LOG_FILE.replace(/\.log$/, "") + ".old.log";
-function rotateLogIfNeeded() {
+const ROTATED_LOG_FILE_API = LOG_FILE_API + ".old";
+function rotateLogIfNeeded(file = LOG_FILE, rotated = ROTATED_LOG_FILE) {
     let size;
-    try { size = fs.statSync(LOG_FILE).size; } catch { return; } // no file yet
+    try { size = fs.statSync(file).size; } catch { return; } // no file yet
     if (size < LOG_MAX_BYTES) return;
 
     if (game_config.verbose) {
         console.warn(paint(["bold", "yellow"],
-            `WARNING: log file is full (${(size / 1024 / 1024).toFixed(1)}MB >= ${file_config.logMaxMB || 3}MB cap) — rotating to ${path.basename(ROTATED_LOG_FILE)}.`,
+            `WARNING: log file is full (${(size / 1024 / 1024).toFixed(1)}MB >= ${file_config.logMaxMB || 3}MB cap) — rotating to ${path.basename(rotated)}.`,
             process.stderr));
     }
-    fs.renameSync(LOG_FILE, ROTATED_LOG_FILE); // replaces the previous .old.log
-    fs.appendFileSync(LOG_FILE,
-        `${new Date().toISOString()} [WARN] - Log rotated: previous log moved to ${path.basename(ROTATED_LOG_FILE)}\n`);
+    fs.renameSync(file, rotated); // replaces the previous rotation
+    fs.appendFileSync(file,
+        `${new Date().toISOString()} [WARN] - Log rotated: previous log moved to ${path.basename(rotated)}\n`);
 }
 rotateLogIfNeeded();
+rotateLogIfNeeded(LOG_FILE_API, ROTATED_LOG_FILE_API);
 
 // Sanity halt: the default sessionSecret must be changed for a real deployment.
 // In dev we only warn and continue; anything else is a hard FATAL exit. Printed
@@ -317,6 +1263,17 @@ if (game_config.sessionSecret === "changeme") {
     fs.appendFileSync(LOG_FILE, `${stamp} [FATAL] - ${msg}\n`);
     process.exit(1);
   }
+}
+
+// Sanity WARN (not a FATAL — this is a balance knob, not a broken config):
+// z_break_fall is the % of z_break that must be killed to end an Outbreak
+// early. The user's own dev value (50) is deliberately below the 75 they
+// want flagged, so this always warns regardless of dev/production mode.
+if (zombie_config.z_break_fall < 75) {
+  const msg = `zombie_config.z_break_fall is ${zombie_config.z_break_fall} (below the recommended 75) — Outbreaks may end early too easily.`;
+  const zStamp = new Date().toISOString();
+  console.warn(paint(["bold", "yellow"], `WARNING: ${msg}`, process.stderr));
+  fs.appendFileSync(LOG_FILE, `${zStamp} [WARN] - ${msg}\n`);
 }
 
 // Both the --rotate-keys action and the normal provenance check below need
@@ -360,7 +1317,7 @@ if (game_config.rotateKeys) {
 }
 
 // DB provenance check: verify (or, on a never-stamped row, establish) this
-// DB's stamp — see computeDbStamp/ensureDbStamp in db.js. Run here, AFTER the
+// DB's stamp — see computeDbStamp/ensureDbStamp in db_backbone.js. Run here, AFTER the
 // CLI --set overrides above have already been applied, so a run started with
 // --set game_config.sessionSecret=... is checked/stamped against the actual
 // secret this run is using, not config.js's unmodified default. A mismatch
@@ -394,8 +1351,20 @@ function log(level, message, game_config, fileMessage) {
     const prefix = `${timestamp} [${level}] - `;
 
     if (game_config.dev || level === "ERROR" || level === "FATAL") {
-        rotateLogIfNeeded();
-        fs.appendFileSync(LOG_FILE, `${prefix}${fileMessage ?? message}\n`);
+        const line = `${prefix}${fileMessage ?? message}\n`;
+        // Which file(s) this line lands in depends on the request currently
+        // being handled (set by the requestLogContext middleware below):
+        // "api" -> LOG_FILE_API only, "both" -> LOG_FILE_API + LOG_FILE
+        // (login/register), undefined (no request, or a non-API page) -> LOG_FILE.
+        const dest = logFileContext.getStore();
+        if (dest !== "api") {
+            rotateLogIfNeeded();
+            fs.appendFileSync(LOG_FILE, line);
+        }
+        if (dest === "api" || dest === "both") {
+            rotateLogIfNeeded(LOG_FILE_API, ROTATED_LOG_FILE_API);
+            fs.appendFileSync(LOG_FILE_API, line);
+        }
     }
 
     if (
@@ -434,66 +1403,20 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function hashPassword(password, salt) {
-  log("FULL", `Hashing password with salt=${salt}`, game_config, "Hashing password with salt=[redacted]");
-  return crypto.pbkdf2Sync(password, salt, 150000, 32, "sha256").toString("hex");
-}
-
-// ----- Very simple signed session cookie -----
-function sign(value) {
-  log("FULL", `Signing value: ${value}`, game_config, "Signing value: [redacted]");
-  return crypto.createHmac("sha256", game_config.sessionSecret).update(value).digest("hex");
-}
-function setSession(res, username) {
-  const payload = JSON.stringify({ u: username, t: Date.now() });
-  const b64 = Buffer.from(payload, "utf8").toString("base64url");
-  const sig = sign(b64);
-  log("FULL", `Setting session for ${username}`, game_config);
-  res.cookie("zboe_session", `${b64}.${sig}`, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: ssl_config.enabled, // Secure cookies whenever we're serving HTTPS
-  });
-}
-// ----- Server-side session pair (anti-hijack layer on top of the signed cookie) -----
-// On login we mint a random 25-char key + a UUID. The key is salted with
-// sessionSecret (HMAC-SHA256) before it's stored — the DB never holds the raw
-// value; the browser carries the raw key + UUID as cookies and every API call
-// re-verifies them against BOTH the users and players rows.
-const SESSION_KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-function makeRawSessionKey() {
-  const bytes = crypto.randomBytes(25);
-  return Array.from(bytes, (b) => SESSION_KEY_CHARS[b % SESSION_KEY_CHARS.length]).join("");
-}
-function saltSessionKey(raw) {
-  return crypto.createHmac("sha256", game_config.sessionSecret).update(raw).digest("hex");
-}
-// Mint + persist + set cookies. Called on login and register.
-function issueServerSession(res, userId) {
-  const rawKey = makeRawSessionKey();
-  const sessionId = crypto.randomUUID();
-  setUserSession(userId, saltSessionKey(rawKey), sessionId);
-  const opts = { httpOnly: true, sameSite: "lax", secure: ssl_config.enabled };
-  res.cookie("zboe_skey", rawKey, opts);
-  res.cookie("zboe_sid", sessionId, opts);
-  log("FULL", `Issued session pair for userId=${userId} (sid=${sessionId})`, game_config, `Issued session pair for userId=${userId} (sid=[redacted])`);
-}
-
-function getSession(req) {
-  const raw = req.cookies?.zboe_session;
-  log("FULL", `Retrieving session cookie: ${raw}`, game_config, "Retrieving session cookie: [redacted]");
-  if (!raw) return null;
-  const [b64, sig] = raw.split(".");
-  if (!b64 || !sig) return null;
-  if (sign(b64) !== sig) return null;
-  log("FULL", `Session valid for payload: ${b64}`, game_config, "Session valid for payload: [redacted]");
-  try {
-    return JSON.parse(Buffer.from(b64, "base64url").toString("utf8"));
-  } catch {
-    log("WARN", "Failed to parse session payload", game_config);
-    return null;
+// Registered first so every downstream middleware/route runs inside the
+// AsyncLocalStorage context it sets: /api/* requests log to LOG_FILE_API only,
+// login/register (auth's entry points, though not under /api/) log to BOTH
+// files, and everything else (static assets, /game, /admin, ...) is untouched
+// and keeps logging to LOG_FILE alone.
+app.use((req, res, next) => {
+  if (req.path === "/login" || req.path === "/register") {
+    logFileContext.run("both", next);
+  } else if (req.path.startsWith("/api/")) {
+    logFileContext.run("api", next);
+  } else {
+    next();
   }
-}
+});
 
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -504,97 +1427,181 @@ app.use(cookieParser());
 // a given player's data an anonymous viewer gets (see tryAuth there).
 app.use(express.static(path.join(__dirname, "public")));
 
-// Must run after requireAuth (needs req.userId). Rejects non-admins.
-function requireAdmin(req, res, next) {
-  if (!isUserAdmin(req.userId)) {
-    log("WARN", `Admin-only action denied for ${req.user}`, game_config);
-    return res.status(403).json({ ok: false, message: "Admin only." });
-  }
-  next();
-}
-
-// Same verification requireAuth does, but never redirects — for routes that
-// serve a valid response either way and just want to know "is there a
-// legitimately logged-in user here" (playercard.html's anonymous-vs-logged-in
-// view). Returns { userId, username } or null. Deliberately a separate
-// function rather than a requireAuth refactor — requireAuth's granular WARN
-// logging (which specific check failed, for hijack detection) is worth
-// keeping untouched rather than collapsing into a boolean.
-function tryAuth(req) {
-  const sess = getSession(req);
-  if (!sess?.u) return null;
-  const auth = getAuthRecord(sess.u);
-  if (!auth || auth.session_id === SESSION_LOGGED_OUT) return null;
-  const rawKey = req.cookies?.zboe_skey;
-  const sid = req.cookies?.zboe_sid;
-  if (!rawKey || !sid || sid !== auth.session_id || saltSessionKey(rawKey) !== auth.session_key) return null;
-  if (auth.session_key !== auth.p_session_key || auth.session_id !== auth.p_session_id) return null;
-  return { userId: auth.id, username: auth.username };
-}
-
-function requireAuth(req, res, next) {
-  const sess = getSession(req);
-  log("FULL", `Authenticating request, session=${JSON.stringify(sess)}`, game_config, `Authenticating request, session for user=${sess?.u ?? "?"}`);
-  if (!sess?.u) return res.redirect("/login.html?err=Please%20login");
-  const auth = getAuthRecord(sess.u);
-  log("FULL", `User lookup result for username=${sess.u}: ${auth ? `id=${auth.id}` : "undefined"}`, game_config);
-  if (!auth) return res.redirect("/login.html?err=Please%20login");
-
-  // Server-side session verification: the cookie pair must match the stored
-  // pair, and the users/players copies must agree with each other. Any
-  // mismatch is a possible hijack/tamper attempt — WARN and bounce.
-  if (auth.session_id === SESSION_LOGGED_OUT) {
-    log("WARN", `API auth: ${auth.username} presented a session but is logged out`, game_config);
-    return res.redirect("/login.html?err=Please%20login");
-  }
-  const rawKey = req.cookies?.zboe_skey;
-  const sid = req.cookies?.zboe_sid;
-  if (!rawKey || !sid || sid !== auth.session_id || saltSessionKey(rawKey) !== auth.session_key) {
-    log("WARN", `API auth MISMATCH for ${auth.username}: session key/ID rejected (ip=${req.ip})`, game_config);
-    return res.redirect("/login.html?err=Session%20invalid");
-  }
-  if (auth.session_key !== auth.p_session_key || auth.session_id !== auth.p_session_id) {
-    log("WARN", `API auth MISMATCH for ${auth.username}: users/players session records disagree (ip=${req.ip})`, game_config);
-    return res.redirect("/login.html?err=Session%20invalid");
-  }
-
-  // Ban/exile takes effect immediately, even mid-session — not just at the
-  // next login attempt. A verified-legitimate session for a now-banned/exiled
-  // account is voided right here, so every subsequent authenticated call
-  // (including the game-state poll) bounces to banned.html instead of
-  // continuing to act. API calls (fetch/XHR) get a JSON payload the client
-  // reacts to; full-page routes (/game, /admin) get a real redirect.
-  const banUntil = auth.login_res_set_time + auth.login_res_time * 1000;
-  if (auth.user_exiled || (auth.login_restricted && Date.now() < banUntil)) {
-    setUserLoggedOut(auth.id);
-    const exiled = Boolean(auth.user_exiled);
-    log("WARN", `${auth.username}'s active session was killed — currently ${exiled ? "exiled" : "banned"}`, game_config);
-    const redirect = `/banned.html?u=${encodeURIComponent(auth.username)}`;
-    if (req.path.startsWith("/api/")) {
-      return res.status(403).json({
-        ok: false, banned: true, exiled,
-        admin: exiled ? auth.user_exiled_admin : auth.login_res_admin,
-        reason: exiled ? auth.user_exiled_reason : auth.login_res_reason,
-        until: exiled ? null : banUntil,
-        redirect,
-      });
+// ----- Item registry sanity (boot-time) -----
+// Every item name referenced anywhere must exist in ITEMS, every type must be
+// valid, and every `use` verb must have an interpreter. This is what makes
+// "adding an item is adding a row" safe: a typo dies here, loudly, at boot.
+{
+  const bad = [];
+  for (const [key, item] of Object.entries(ITEMS)) {
+    if (!ITEM_TYPES.includes(item.type)) bad.push(`ITEMS["${key}"] has invalid type "${item.type}"`);
+    if (!item.section) bad.push(`ITEMS["${key}"] has no section (used by the admin panel's Item Registry tabs)`);
+    for (const verb of Object.keys(item.use || {}))
+      if (!EFFECT_VERBS[verb]) bad.push(`ITEMS["${key}"] uses unknown effect verb "${verb}"`);
+    if (item.type === "gun" && !item.gunType) bad.push(`ITEMS["${key}"] is a gun with no gunType`);
+    if (item.type === "gun" && item.gunType && !WEAPON_FIREARM_TYPES.includes(item.gunType))
+      bad.push(`ITEMS["${key}"].gunType "${item.gunType}" is not a valid WEAPON_FIREARM_TYPES entry`);
+    if (item.attack_mod && item.type !== "gun") bad.push(`ITEMS["${key}"] has attack_mod but isn't a gun`);
+    if (item.attack_mod) {
+      const m = item.attack_mod;
+      for (const f of ["dmg", "acc", "floor"])
+        if (m[f] !== undefined && !Number.isFinite(m[f])) bad.push(`ITEMS["${key}"].attack_mod.${f} must be a number when present`);
+      const base = WEAPON_FIREARM_EXPORT[item.gunType];
+      if (base && Number.isFinite(m.dmg) && base.dmg + m.dmg < 0)
+        bad.push(`ITEMS["${key}"].attack_mod.dmg would drive effective dmg negative`);
     }
-    return res.redirect(redirect);
+    if (item.type === "armor" && !(Number.isFinite(item.ap) && item.ap >= 1 && item.ap <= 500))
+      bad.push(`ITEMS["${key}"] is an armor with no valid ap (1-500)`);
+    if (item.ap !== undefined && item.type !== "armor") bad.push(`ITEMS["${key}"] has ap but isn't an armor`);
+    if (item.type === "armor" && !(Number.isInteger(item.defense) && item.defense >= 1))
+      bad.push(`ITEMS["${key}"] is an armor with no valid defense level (int >= 1)`);
+    if (item.type === "armor" && !ARMOR_PIECES.includes(item.piece))
+      bad.push(`ITEMS["${key}"] is an armor with invalid/missing piece "${item.piece}" (${ARMOR_PIECES.join("/")})`);
+    if (item.type === "weapon") {
+      if (!WEAPON_TYPES.includes(item.section)) bad.push(`ITEMS["${key}"] is a weapon with invalid section "${item.section}" (${WEAPON_TYPES.join("/")})`);
+      if (item.section === "Ranged" && !WEAPON_RANGED_OPTIONS.includes(item.rangedType))
+        bad.push(`ITEMS["${key}"] is a Ranged weapon with invalid/missing rangedType "${item.rangedType}" (${WEAPON_RANGED_OPTIONS.join("/")})`);
+      const at = item.attack;
+      if (!at || !(Number.isFinite(at.dmg) && at.dmg >= 0)) bad.push(`ITEMS["${key}"] is a weapon with no valid attack.dmg`);
+      if (at && at.targets_max !== undefined && !(Number.isInteger(at.targets_max) && at.targets_max >= 1))
+        bad.push(`ITEMS["${key}"].attack.targets_max must be an integer >= 1 when present`);
+      if (at && !["player", "condition"].includes(at.acc_model))
+        bad.push(`ITEMS["${key}"].attack.acc_model must be "player" or "condition"`);
+    }
   }
+  for (const section of WEAPON_TYPES)
+    if (!Number.isFinite(WEAPON_ATTACK_EXPORT[section]?.floor)) bad.push(`WEAPON_ATTACK_EXPORT["${section}"] has no valid floor`);
+  // WEAPON_FIREARM_EXPORT — the single gun accuracy/damage/target model,
+  // shared by both World/Location (Broad) and Nearby-scope combat. `floor` is
+  // optional (only required for "condition"-model guns; computeHitChance()
+  // defaults missing floors to 5 for "player"-model guns).
+  for (const type of WEAPON_FIREARM_TYPES) {
+    const cfg = WEAPON_FIREARM_EXPORT[type];
+    if (!cfg) { bad.push(`WEAPON_FIREARM_EXPORT is missing an entry for "${type}"`); continue; }
+    if (!(Number.isFinite(cfg.dmg) && cfg.dmg >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid dmg`);
+    if (!(Number.isFinite(cfg.ammo) && cfg.ammo >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid ammo`);
+    if (!(Number.isFinite(cfg.clips) && cfg.clips >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid clips`);
+    if (!(Number.isFinite(cfg.maxTargets) && cfg.maxTargets >= 1)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid maxTargets`);
+    if (!["player", "condition"].includes(cfg.accuracyModel)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"].accuracyModel must be "player" or "condition"`);
+    if (cfg.floor !== undefined && !Number.isFinite(cfg.floor)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"].floor must be a number when present`);
+  }
+  const check = (name, where) => { if (name && !ITEMS[name]) bad.push(`${where} references unknown item "${name}"`); };
+  for (const [loc, actions] of Object.entries(LOCATION_ACTIONS))
+    for (const a of actions) {
+      if (a.button) {
+        // A pure UI button row (e.g. the Magic Table) — nothing to cross-check
+        // against the registry beyond its own shape.
+        if (!a.key || !a.label) bad.push(`LOCATION_ACTIONS.${loc} has a button row missing key/label`);
+        continue;
+      }
+      if (a.recipe) {
+        // A recipe pointer: everything else comes from the (separately
+        // validated) recipe, so only the reference itself can be wrong.
+        if (!RECIPES.find((r) => r.key === a.recipe)) bad.push(`LOCATION_ACTIONS.${loc} references unknown recipe "${a.recipe}"`);
+        continue;
+      }
+      if (!a.key) { bad.push(`LOCATION_ACTIONS.${loc} has an action with no key (typo?): ${JSON.stringify(a).slice(0, 60)}`); continue; }
+      if (!SKILLS.includes(a.skill)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} trains unknown skill "${a.skill}"`);
+      check(a.grants, `LOCATION_ACTIONS.${loc}.${a.key}.grants`);
+      check(a.requires, `LOCATION_ACTIONS.${loc}.${a.key}.requires`);
+      // uses: a single item name (qty 1, implicit), or a { item: qty } map
+      // (multi-item fuel consumed atomically up front, committed even on a
+      // failed roll) — extended from the single-item-only form to support
+      // activate_arcane_table's firewood + mana shard cost.
+      if (a.uses !== undefined) {
+        if (typeof a.uses === "string") check(a.uses, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
+        else if (a.uses && typeof a.uses === "object" && !Array.isArray(a.uses)) {
+          for (const item of Object.keys(a.uses)) check(item, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
+        } else bad.push(`LOCATION_ACTIONS.${loc}.${a.key}.uses must be a single item name or a { item: qty } map`);
+      }
+      if (a.station && !["campfire", "forge", "beacon", "arcane_table"].includes(a.station)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} has unknown station "${a.station}"`);
+      if (a.activates && !["forge", "beacon", "arcane_table"].includes(a.activates)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} activates unknown station "${a.activates}"`);
+      // trainOnly rows award only skill XP — no grant/activate required (but xp is).
+      if (a.trainOnly && !(Number.isFinite(a.xp) && a.xp > 0)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} is trainOnly with no xp`);
+      if (!a.grants && !a.activates && !a.trainOnly) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} neither grants nor activates anything`);
+    }
+  const FORGE_SECTIONS = ["Ingredients", "Guns", "Tools", "Bronze", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
+  // Admin-panel Recipes tabs (see RECIPE_CATEGORIES/RECIPE_METAL_TYPES below).
+  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc", "weapon", "armor"];
+  const RECIPE_METAL_TYPES = ["armor", "crafting", "tools"];
+  for (const r of RECIPES) {
+    // output: a single item name, or an { item: qty } bundle.
+    if (typeof r.output === "string") check(r.output, `RECIPES.${r.key}.output`);
+    else for (const out of Object.keys(r.output || {})) check(out, `RECIPES.${r.key}.output`);
+    check(r.requires, `RECIPES.${r.key}.requires`);
+    for (const input of Object.keys(r.inputs || {})) check(input, `RECIPES.${r.key}.inputs`);
+    if (!SKILLS.includes(r.skill)) bad.push(`RECIPES.${r.key} trains unknown skill "${r.skill}"`);
+    if (r.station && !["campfire", "forge", "beacon", "arcane_table"].includes(r.station)) bad.push(`RECIPES.${r.key} has unknown station "${r.station}"`);
+    if (r.station === "forge" && !FORGE_SECTIONS.includes(r.section)) bad.push(`RECIPES.${r.key} is a forge recipe with no valid section (${FORGE_SECTIONS.join("/")})`);
+    if (r.roll && r.roll !== "supply") bad.push(`RECIPES.${r.key} has unknown roll table "${r.roll}"`);
+    if (!RECIPE_CATEGORIES.includes(r.category)) bad.push(`RECIPES.${r.key} has unknown category "${r.category}" (${RECIPE_CATEGORIES.join("/")})`);
+    if (r.category === "metal") {
+      if (!SMELT_TYPES.includes(r.metal)) bad.push(`RECIPES.${r.key} has category "metal" but invalid metal "${r.metal}" (${SMELT_TYPES.join("/")})`);
+      if (!RECIPE_METAL_TYPES.includes(r.metalType)) bad.push(`RECIPES.${r.key} has category "metal" but invalid metalType "${r.metalType}" (${RECIPE_METAL_TYPES.join("/")})`);
+    } else if (r.metal || r.metalType) {
+      bad.push(`RECIPES.${r.key} has metal/metalType but category isn't "metal"`);
+    }
+  }
+  // The supply-drop table references existing registry items only.
+  for (const d of SUPPLY_DROP_ROLL) check(d.key, "SUPPLY_DROP_ROLL");
+  for (const u of STATIC_UPGRADES) {
+    check(u.item, `STATIC_UPGRADES.${u.key}.item`);
+    for (const input of Object.keys(u.inputs || {})) check(input, `STATIC_UPGRADES.${u.key}.inputs`);
+  }
+  if (bad.length) {
+    // Printed ungated (like the sessionSecret halt) so it's visible even
+    // without --verbose, then FATAL-logged (which exits).
+    console.error(paint(["bold", "red"], `FATAL: item registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
+    log("FATAL", `Item registry validation failed: ${bad.join("; ")}`, game_config);
+  }
+}
 
-  log("FULL", `Authenticated user ${auth.username} (id=${auth.id})`, game_config);
-  req.user = auth.username;
-  req.userId = auth.id;
-  // Chat/fun gates (users.adm_fun/chat_mute/chat_deaf/chat_strict) — fetched
-  // fresh every request alongside the session check above, so they're never
-  // stale within a request even though nothing else caches them.
-  req.gates = {
-    admFun: Boolean(auth.adm_fun),
-    chatMute: Boolean(auth.chat_mute),
-    chatDeaf: Boolean(auth.chat_deaf),
-    chatStrict: Boolean(auth.chat_strict),
-  };
-  next();
+// ----- Magic spell registry sanity (boot-time) -----
+// magic_backbone.js is data plus its own helpers (see "Magic Backbone" in that file)
+// — a typo here dies at boot, not mid-cast.
+{
+  const bad = validateMagicSpells(LOCATION_NAMES, ITEMS);
+  if (bad.length) {
+    console.error(paint(["bold", "red"], `FATAL: magic spell registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
+    log("FATAL", `Magic spell registry validation failed: ${bad.join("; ")}`, game_config);
+  }
+}
+
+// ----- Quest registry sanity (boot-time) -----
+// quest_backbone.js is data-only, no imports of its own — every reference it
+// makes into the real registries (items/actions/recipes/spells/locations/
+// other quests) is checked here, same "typos die at boot" convention as the
+// item/magic blocks above.
+{
+  const bad = [];
+  const allActionKeys = new Set(Object.values(LOCATION_ACTIONS).flatMap((rows) => rows.map((r) => r.key).filter(Boolean)));
+  const recipeKeys = new Set(RECIPES.map((r) => r.key));
+  for (const [key, quest] of Object.entries(QUESTS)) {
+    const s = quest.starter;
+    if (!s) bad.push(`QUESTS["${key}"] has no starter trigger`);
+    else if (s.starter !== true && !s.enter_location && !s.quest && !(s.type === "action" && s.action)) {
+      bad.push(`QUESTS["${key}"].starter is an unrecognized shape: ${JSON.stringify(s)}`);
+    } else {
+      if (s.enter_location && !LOCATION_NAMES[s.enter_location]) bad.push(`QUESTS["${key}"].starter references unknown location "${s.enter_location}"`);
+      if (s.type === "action" && !allActionKeys.has(s.action)) bad.push(`QUESTS["${key}"].starter references unknown action "${s.action}"`);
+      if (s.quest && !QUESTS[s.quest]) bad.push(`QUESTS["${key}"].starter references unknown quest "${s.quest}"`);
+    }
+    if (!Array.isArray(quest.objectives) || !quest.objectives.length) bad.push(`QUESTS["${key}"] has no objectives`);
+    for (const [i, obj] of (quest.objectives || []).entries()) {
+      const where = `QUESTS["${key}"].objectives[${i}]`;
+      if (!QUEST_OBJECTIVE_TYPES.includes(obj.type)) { bad.push(`${where} has unknown type "${obj.type}"`); continue; }
+      if (!(Number.isFinite(obj.qty) && obj.qty > 0)) bad.push(`${where} (${obj.type}) has no valid qty`);
+      if (obj.type === "acquire_item" || obj.type === "use_item") { if (!ITEMS[obj.item]) bad.push(`${where} (${obj.type}) references unknown item "${obj.item}"`); }
+      else if (obj.type === "action") { if (!allActionKeys.has(obj.action)) bad.push(`${where} references unknown action "${obj.action}"`); }
+      else if (obj.type === "recipe") { if (!recipeKeys.has(obj.recipe)) bad.push(`${where} references unknown recipe "${obj.recipe}"`); }
+      else if (obj.type === "learn_spell") { if (!MAGIC_SPELLS[obj.spell]) bad.push(`${where} references unknown spell "${obj.spell}"`); }
+    }
+    if (!Number.isFinite(quest.reward?.gold) && !Number.isFinite(quest.reward?.xp)) bad.push(`QUESTS["${key}"] has no gold/xp reward`);
+  }
+  if (bad.length) {
+    console.error(paint(["bold", "red"], `FATAL: quest registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
+    log("FATAL", `Quest registry validation failed: ${bad.join("; ")}`, game_config);
+  }
 }
 
 // Routes
@@ -786,80 +1793,6 @@ app.get("/api/ban-status", (req, res) => {
   return res.json({ ok: false });
 });
 
-// Human-readable label for one quest objective, for the Quest Info UI.
-function questObjectiveLabel(obj) {
-  switch (obj.type) {
-    case "learn_spell": return `Learn ${MAGIC_SPELLS[obj.spell]?.name ?? obj.spell}`;
-    case "acquire_item": return `Acquire ${obj.qty}× ${ITEMS[obj.item]?.name ?? obj.item}`;
-    case "action": {
-      const label = Object.values(LOCATION_ACTIONS).flat().find((a) => a.key === obj.action)?.label;
-      return label ?? obj.action;
-    }
-    case "recipe": {
-      const r = RECIPES.find((rr) => rr.key === obj.recipe);
-      return r ? `Craft ${r.label}` : obj.recipe;
-    }
-    case "use_item": return `Use ${ITEMS[obj.item]?.name ?? obj.item}`;
-    case "break_horde": return "Break a zombie horde";
-    case "clear_raid": return "Clear a zombie raid";
-    default: return obj.type;
-  }
-}
-
-// Shapes the player's quest_active/quest_started/quest_completed/
-// quest_objectives columns (db.js) into a UI-friendly payload for the game
-// page's Quest Info box + completed-quests modal.
-function questsPayloadFor(player) {
-  const started = player.quest_started ? player.quest_started.split(",").filter(Boolean) : [];
-  const completed = player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : [];
-  const activeKey = player.quest_active;
-  const progress = player.quest_objectives ? JSON.parse(player.quest_objectives) : {};
-
-  const active = activeKey !== "NONE" && QUESTS[activeKey] ? {
-    key: activeKey,
-    name: QUESTS[activeKey].name,
-    desc: QUESTS[activeKey].desc,
-    objectives: QUESTS[activeKey].objectives.map((obj, i) => ({
-      label: questObjectiveLabel(obj),
-      have: progress[i] ?? 0,
-      need: obj.qty,
-      done: (progress[i] ?? 0) >= obj.qty,
-    })),
-    reward: QUESTS[activeKey].reward,
-  } : null;
-
-  const started_other = started
-    .filter((k) => k !== activeKey && !completed.includes(k) && QUESTS[k])
-    .map((k) => ({ key: k, name: QUESTS[k].name, desc: QUESTS[k].desc }));
-
-  const completedList = completed.filter((k) => QUESTS[k])
-    .map((k) => ({ key: k, name: QUESTS[k].name, reward: QUESTS[k].reward }));
-
-  return { active, started: started_other, completed: completedList };
-}
-
-// Richer variant for the playercard Quests tab — same active/started shape
-// as questsPayloadFor (reused so game.html's Quest Info card is untouched),
-// but completed quests carry full detail (long_desc/quest_level/objectives)
-// instead of just name+reward, since the card's completed-quests section is
-// an accordion meant to be read in full, not skimmed from a feed.
-function questsPayloadForCard(player) {
-  const base = questsPayloadFor(player);
-  const completed = player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : [];
-  const completedList = completed.filter((k) => QUESTS[k]).map((k) => {
-    const q = QUESTS[k];
-    return {
-      key: k,
-      name: q.name,
-      long_desc: q.long_desc ?? q.desc,
-      quest_level: q.quest_level ?? null,
-      reward: q.reward,
-      objectives: q.objectives.map(questObjectiveLabel),
-    };
-  });
-  return { active: base.active, started: base.started, completed: completedList };
-}
-
 app.get("/api/game-state", requireAuth, (req, res) => {
   log("FULL", `API request for game state by user ${req.user}`, game_config);
   touchPlayerSeen(req.userId);
@@ -903,6 +1836,7 @@ app.get("/api/game-state", requireAuth, (req, res) => {
     },
     nuke: baseDestroyed ? nukeVoteStatus() : null,
     huntVote: huntVoteStatus(req.userId, actives),
+    outbreak: gameState.zombie_break === 1,
     zombies,
     locationZombies: locationZombiesOf(gameState, locKey),
     nearbyZombies: player.zombie_near,
@@ -947,7 +1881,7 @@ app.get("/api/game-state", requireAuth, (req, res) => {
       locationName: LOCATION_NAMES[locKey],
       inside: locKey === "basecamp_inside",
       atBase: locKey === "basecamp_outside" || locKey === "basecamp_inside",
-      zombieZone: ZOMBIE_LOCATIONS.has(locKey),
+      zombieZone: isZombieActive(locKey, gameState),
       busyUntil: busyUntilOf(req.userId),
       campfireUntil: campfireUntilOf(req.userId),
       forgeFired: Boolean(player.forge_fired),   // the Mountains forge (persistent)
@@ -966,8 +1900,8 @@ app.get("/api/game-state", requireAuth, (req, res) => {
       // Locations reachable from here (empty inside the base — no map there),
       // flagged safe/zombie for the map's color-coded pills.
       map: (LOCATION_LINKS[locKey] || []).map((k) => ({
-        key: k, name: LOCATION_NAMES[k], zombie: ZOMBIE_LOCATIONS.has(k),
-        zombieCount: ZOMBIE_LOCATIONS.has(k) ? locationZombiesOf(gameState, k) : null,
+        key: k, name: LOCATION_NAMES[k], zombie: isZombieActive(k, gameState),
+        zombieCount: isZombieActive(k, gameState) ? locationZombiesOf(gameState, k) : null,
       })),
       isAdmin: isUserAdmin(req.userId),
       admFun: req.gates.admFun, // sub-permission within admin — gates the 🎉 Fun button specifically
@@ -1009,7 +1943,7 @@ app.get("/api/game-state", requireAuth, (req, res) => {
 });
 
 // Switch which started-but-incomplete quest is the tracked/active one (see
-// setActiveQuest in db.js — objective progress is freshly re-seeded on
+// setActiveQuest in db_backbone.js — objective progress is freshly re-seeded on
 // activation, not restored from an earlier stint as active).
 app.post("/api/quest/activate", requireAuth, (req, res) => {
   const key = String(req.body.key || "");
@@ -1029,822 +1963,6 @@ app.post("/api/quest/activate", requireAuth, (req, res) => {
   return res.json({ ok: true, message: `Now tracking: ${quest.name}` });
 });
 
-const XP_PER_KILL = 10;
-const GOLD_PER_KILL = 5;
-
-// Leveling rules (nextLevelOf/levelCost) live in db.js as the source of truth.
-
-// ----- Horde status & base -----
-function hordeStatusOf(gs) {
-  if (gs.raid_enabled === "true") return "raiding";          // latched until horde hits 0
-  if (gs.hunt_enabled !== "true") return "hiding";
-  if (gs.horde_size >= zombie_config.z_horde) return "hunting";
-  return "wandering";
-}
-
-// Latch a raid ON once the horde reaches z_raid. Once latched, it stays until the
-// horde is fully cleared (handled where zombies are killed). Call after any spawn/add.
-function latchRaidIfNeeded() {
-  const gs = getGameState();
-  if (gs.raid_enabled !== "true" && gs.horde_size >= zombie_config.z_raid) {
-    setRaidEnabled(true);
-    insertEvent("system", "A RAID has begun — the horde swarms the base!", "public", "global");
-    log("INFO", `raid latched on (horde=${gs.horde_size} >= z_raid=${zombie_config.z_raid})`, game_config);
-    return true;
-  }
-  return false;
-}
-// ----- Zombie Location Pool helpers -----
-// World pool = gs.horde_size (existing). Location pools = gs.zombies_<loc>,
-// scoped to ZOMBIE_LOCATIONS during normal play. Nearby pool = the player's
-// own zombie_near/zombie_near_health.
-function locationZombiesOf(gs, location) {
-  if (!ZOMBIE_LOCATIONS.has(location)) return 0;
-  return gs[`zombies_${location}`] ?? 0;
-}
-
-// The raw count of whichever pool a player currently has targeted.
-function targetedPoolCountOf(player, gs) {
-  const scope = player.target_scope;
-  if (scope === "Location") return locationZombiesOf(gs, locationOf(player));
-  if (scope === "Nearby") return player.zombie_near || 0;
-  return gs.horde_size; // "World" (and any unrecognized value defaults here)
-}
-
-// "Zombie force" — what actually attacks a player each tick, per a1: a
-// player's own Nearby pool always threatens them on top of whatever else
-// they're targeting. When Nearby IS the targeted scope, don't double it.
-function zombieForceOf(player, gs) {
-  const near = player.zombie_near || 0;
-  if (player.target_scope === "Nearby") return near;
-  return targetedPoolCountOf(player, gs) + near;
-}
-
-// Gate for switching target_scope: a player may only target a scope that
-// currently has zombies in it (mirrors the splintering gate).
-function hasZombiesInScope(player, gs, scope) {
-  if (scope === "World") return gs.horde_size > 0;
-  if (scope === "Location") return locationZombiesOf(gs, locationOf(player)) > 0;
-  if (scope === "Nearby") return (player.zombie_near || 0) > 0;
-  return false;
-}
-
-// A weapon's effective reach category: zombie-themed items resolve through
-// their underlying `class` (Melee/Ranged/Throwing/Fist) rather than their
-// display `section` ("Zombie"). Ranged and guns can hit at any target_scope;
-// Melee/Fist/Throwing can only reach a player's own Nearby pool.
-function weaponReachOf(item) {
-  return item.section === "Zombie" ? item.class : item.section;
-}
-const CLOSE_RANGE_REACH = new Set(["Melee", "Fist", "Throwing"]);
-
-function baseIsDestroyed(gs) { return gs.base_health <= 0; }
-
-// Full experiment reset: zombies die, hunt/raid off, base rebuilt.
-function experimentReset(reason) {
-  resetGameState(game_config.baseMaxHealth);
-  insertEvent("system", `The Experiment Resets (${reason}).`, "public", "global");
-  log("WARN", `Experiment reset — ${reason}`, game_config);
-}
-
-// Nuke-vote tally over currently-active players.
-function nukeVoteStatus() {
-  const cutoff = Date.now() - game_config.timeout * 1000;
-  const activeIds = new Set(getActivePlayers(cutoff).map((p) => p.user_id));
-  const votes = getNukeVoterIds().filter((id) => activeIds.has(id)).length;
-  const needed = Math.floor(activeIds.size / 2) + 1;
-  return { active: activeIds.size, votes, needed };
-}
-
-// ----- Hunt vote -----
-// A player-triggered alternative to the admin's direct hunt toggle: any
-// online player can call a 30s Yes/No poll to flip hunt_enabled. One vote
-// globally at a time (the hunt is a single world toggle) — in-memory only,
-// same convention as ACTION_BUSY/CAMPFIRES/SPELL_ARMOR_BUFFS, so a restart
-// just drops whatever was in progress.
-let HUNT_VOTE = null; // { toggleTo, startedBy, expiresAt, ballots: Map<userId,'yes'|'no'>, timer }
-const HUNT_VOTE_SECONDS = 30;
-
-// Cancel any in-progress hunt vote (e.g. an admin overrode it directly via
-// /api/hunt/toggle) — clears the timer too, so the stale resolve is a no-op
-// (resolveHuntVote checks HUNT_VOTE === voteRef before acting).
-function cancelHuntVote() {
-  if (!HUNT_VOTE) return;
-  clearTimeout(HUNT_VOTE.timer);
-  HUNT_VOTE = null;
-}
-
-function resolveHuntVote(voteRef) {
-  if (HUNT_VOTE !== voteRef) return; // superseded/cancelled — ignore this stale timer
-  let yes = 0, no = 0;
-  for (const v of voteRef.ballots.values()) v === "yes" ? yes++ : no++;
-  // Passes with at least one Yes, and either no dissent or Yes outnumbers No.
-  const passed = yes >= 1 && (no === 0 || yes > no);
-  if (passed) {
-    setHuntEnabled(voteRef.toggleTo);
-    insertEvent("system", `The hunt vote passed (${yes}-${no}) — the hunt is now ${voteRef.toggleTo ? "enabled" : "disabled"}.`, "public", "global");
-    log("INFO", `Hunt vote passed ${yes}-${no} -> hunt_enabled=${voteRef.toggleTo}`, game_config);
-  } else {
-    insertEvent("system", "The vote was majority no.", "public", "global");
-    log("INFO", `Hunt vote failed ${yes}-${no}`, game_config);
-  }
-  HUNT_VOTE = null;
-}
-
-// The hunt-vote status for GET /api/game-state — reuses the caller's already
-// -queried active-player list (no extra DB round trip).
-function huntVoteStatus(userId, actives) {
-  if (!HUNT_VOTE) return null;
-  let yes = 0, no = 0;
-  for (const v of HUNT_VOTE.ballots.values()) v === "yes" ? yes++ : no++;
-  return {
-    active: true,
-    toggleTo: HUNT_VOTE.toggleTo,
-    secondsLeft: Math.max(0, Math.ceil((HUNT_VOTE.expiresAt - Date.now()) / 1000)),
-    yes, no,
-    myVote: HUNT_VOTE.ballots.get(userId) ?? null,
-    // Only meaningful to an admin viewer (drives the client's confirm-before-
-    // voting nudge when there are enough non-admins online to decide alone).
-    onlineNonAdminCount: actives.filter((p) => !isUserAdmin(p.user_id)).length,
-  };
-}
-
-// Pick up to n random distinct elements from arr.
-function sampleUpTo(arr, n) {
-  if (arr.length <= n) return arr.slice();
-  const copy = arr.slice();
-  const out = [];
-  for (let i = 0; i < n; i++) out.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
-  return out;
-}
-
-// ----- Guns -----
-// Derived from the item registry: every ITEMS entry with type "gun" maps its
-// gunType to the per-gun stat columns (handgun_/rifle_/shotgun_/burstrifle_)
-// and the shooting behavior below.
-const GUNS = Object.fromEntries(
-  Object.entries(ITEMS)
-    .filter(([, item]) => item.type === "gun")
-    .map(([key, item]) => [key, { type: item.gunType }])
-);
-
-// ----- Armor -----
-// Derived from the registry: every ITEMS entry with type "armor". AP is a
-// 1-500 gauge of effectiveness — the equipped armor blocks ap/AP_GAUGE of the
-// damage tallied against the player each tick (the final hit calc). Players
-// inside the base pool their AP into "Base AP", which deflects base damage
-// the same way, capped at BASE_AP_MAX_BLOCK so the base is never invincible.
-const AP_GAUGE = 500;
-const BASE_AP_MAX_BLOCK = 0.9;
-const ARMORS = Object.fromEntries(
-  Object.entries(ITEMS).filter(([, item]) => item.type === "armor")
-);
-// True if itemName is equipped in ANY of the 6 paperdoll slots.
-function isArmorEquippedAnywhere(player, itemName) {
-  return ARMOR_PIECES.some((slot) => player[`a_${slot}`] === itemName);
-}
-// Sums AP across all 6 slots. A slot contributes 0 if its item is gone
-// (e.g. admin force-removed it) or BROKEN (condition 0) — condition gates AP
-// fully off rather than scaling it, matching the binary BROKEN convention
-// already shown in the Armor tab UI.
-function armorApOf(player) {
-  const owned = new Map(getInventory(player.user_id).map((i) => [i.item_name, i]));
-  const gearAp = ARMOR_PIECES.reduce((sum, slot) => {
-    const name = player[`a_${slot}`];
-    if (!name || !ARMORS[name]) return sum;
-    const row = owned.get(name);
-    if (!row || row.quantity <= 0 || row.condition <= 0) return sum;
-    return sum + ARMORS[name].ap;
-  }, 0);
-  // Gear + temporary spell buff + innate "Base AP" (players.ap_level, bought
-  // via the AP Base upgrade) — one total for the hit calc and Base AP pooling.
-  return gearAp + spellApOf(player.user_id) + (player.ap_level || 0);
-}
-// Damage deflected by an AP rating (never more than the damage itself).
-function apBlocked(damage, ap) {
-  return Math.min(damage, Math.round(damage * Math.min(ap, AP_GAUGE) / AP_GAUGE));
-}
-// The sentry turret shoots with Rifle logic at this fixed "accuracy rating"
-// (feeds both computeHitChance's condition scaling and the pierce roll).
-const SENTRY_ACCURACY = 75;
-
-// Base AP = summed AP of everyone sheltering inside (from an active-player list).
-function baseApOf(activePlayers) {
-  return activePlayers
-    .filter((p) => p.location === "basecamp_inside")
-    .reduce((sum, p) => sum + armorApOf(p), 0);
-}
-
-// accuracyModel: "player"  → player accuracy stat (+ gun condition, TBD), floored.
-//                "condition" → base floor scaled by condition only (rifle).
-// maxTargets: zombies a single successful shot can drop.
-const GUN_BEHAVIOR = {
-  handgun:     { accuracyModel: "player",    floor: 5,  maxTargets: 1 },
-  rifle:       { accuracyModel: "condition", floor: 60, maxTargets: 1 },
-  shotgun:     { accuracyModel: "player",    floor: 5,  maxTargets: 5 },
-  burstrifle: { accuracyModel: "player",    floor: 30, maxTargets: 3 },
-};
-
-function equippedGunName(player) {
-  return GUNS[player.equipped_gun] ? player.equipped_gun : "Handgun";
-}
-function equippedType(player) {
-  return GUNS[equippedGunName(player)].type;
-}
-
-// ----- Weapon wheel (melee/ranged/throwing/zombie slots) -----
-// Derived from the registry: every ITEMS entry with type "weapon". `section`
-// ("Melee"/"Ranged"/"Throwing"/"Fist") IS the type discriminator — matches
-// WEAPON_ATTACK_EXPORT's keys 1:1, so no separate weaponType field is needed.
-const WEAPONS = Object.fromEntries(
-  Object.entries(ITEMS).filter(([, item]) => item.type === "weapon")
-);
-// Zombie-themed weapons are eligible for the zombie slot regardless of their
-// natural section — identified by key prefix, which is 100% consistent
-// across the registry (no dedicated flag needed for this).
-function isZombieWeapon(name) {
-  return typeof name === "string" && name.startsWith("zombie ");
-}
-// Quiver-cap resolution: which of ranged_crossbow_max_ammo/ranged_bow_max_ammo/
-// ranged_slingshot_max_ammo applies right now. Falls back to whatever's in the
-// zombie slot (a zombie-themed crossbow/bow/slingshot is still that rangedType
-// mechanically) so the rangedAmmo effect verb never has nothing to resolve.
-function effectiveRangedType(player) {
-  return WEAPONS[player.equipped_ranged]?.rangedType ?? WEAPONS[player.equipped_zombie_weapon]?.rangedType ?? null;
-}
-function rangedCapFor(player) {
-  const rt = effectiveRangedType(player);
-  return rt ? player[`ranged_${rt}_max_ammo`] : player.ranged_ammo;
-}
-// Which condition column a weapon's section reads/writes.
-function weaponConditionColFor(item) {
-  if (item.section === "Melee") return "melee_condition";
-  if (item.section === "Fist") return "fist_weapon_condition";
-  if (item.section === "Ranged") return "ranged_condition";
-  if (item.section === "Throwing") return "throwing_condition";
-  return null;
-}
-
-// Player's current location key, hardened against unknown/legacy values
-// (rows from before the location system default to Basecamp).
-function locationOf(player) {
-  return LOCATION_NAMES[player.location] ? player.location : "basecamp_outside";
-}
-
-// Players mid-action: userId -> { until (ms), key }. In-memory on purpose —
-// a dev-server restart just cancels any running action.
-const ACTION_BUSY = new Map();
-function busyUntilOf(userId) {
-  const b = ACTION_BUSY.get(userId);
-  if (!b || b.until <= Date.now()) return 0;
-  return b.until;
-}
-
-// Campfires: userId -> expiry ms. Built from firewood (Adventure Panel),
-// enables campfire-station recipes until it burns out or is put out.
-// In-memory like ACTION_BUSY — a restart douses every fire.
-const CAMPFIRES = new Map();
-const CAMPFIRE_COST = 2;          // firewood consumed to build
-const CAMPFIRE_BURN_SECONDS = 300;
-function campfireUntilOf(userId) {
-  const t = CAMPFIRES.get(userId) || 0;
-  return t > Date.now() ? t : 0;
-}
-
-// The Town Arcane Table auto-expires ARCANE_TABLE_WINDOW_MS after activation
-// (unlike forge/beacon's persistent on/off toggle) — "active" means both the
-// flag is set AND the window hasn't elapsed.
-const ARCANE_TABLE_WINDOW_MS = 5 * 60 * 1000;
-function arcaneTableActiveOf(player) {
-  return Boolean(player.arcane_table) && (Date.now() - player.arcane_table_activated_at) < ARCANE_TABLE_WINDOW_MS;
-}
-
-// Can this player use a crafting station right now? Gates both RECIPES and
-// LOCATION_ACTIONS that carry a `station`. The forge is the player's own, up
-// at the Mountains — fired via the fire_forge action (players.forge_fired),
-// persistent until put out.
-function stationOk(player, locKey, station) {
-  if (!station) return true;
-  if (station === "campfire") return campfireUntilOf(player.user_id) > 0;
-  if (station === "forge") return locKey === "mountains" && Boolean(player.forge_fired);
-  if (station === "beacon") return locKey === "bunker" && Boolean(player.beacon_fired);
-  if (station === "arcane_table") return locKey === "town" && arcaneTableActiveOf(player);
-  return false;
-}
-const STATION_MESSAGES = {
-  campfire: "You need a campfire burning — build one first.",
-  forge: "The forge is cold — get it going at the Mountains first.",
-  beacon: "The beacon is not activated — activate it at the Bunker first.",
-  arcane_table: "The Arcane Table isn't active — activate it in Town first.",
-};
-
-// Antenna/amplifier are passive base_items: OWNING them boosts the supply
-// beacon activation roll (+10% / +15%, stacking, capped at 100). `has` is an
-// item-name → owned predicate.
-function beaconBoost(has) {
-  return (has("external antenna") ? 10 : 0) + (has("signal amplifier") ? 15 : 0);
-}
-
-// Display string for a recipe's output — a single name, or an { item: qty }
-// bundle ("3× cooked meat, 5× firewood"), plus a teaser when the recipe also
-// rolls the supply-drop table.
-function fmtOutput(r) {
-  const base = typeof r.output === "string"
-    ? r.output
-    : Object.entries(r.output).map(([item, qty]) => `${qty}× ${item}`).join(", ");
-  return r.roll === "supply" ? `${base} + a mystery bonus` : base;
-}
-
-// The current location's actions, annotated with whether THIS player can run
-// each one right now (skill level + required tool). Rows that are recipe
-// pointers ({ recipe: key }) expand into action-shaped entries built from the
-// item_backbone.js recipe — no success roll (crafts always land), and the
-// inputs ride along so the page can show/gate them like /api/craft does.
-function actionsFor(player, locKey) {
-  const defs = LOCATION_ACTIONS[locKey] || [];
-  if (!defs.length) return [];
-  const ownedQty = Object.fromEntries(getInventory(player.user_id).map((i) => [i.item_name, i.quantity]));
-  const has = (name) => (ownedQty[name] ?? 0) > 0;
-  return defs.map((a) => {
-    // Pure UI button rows (Magic Table) — always visible at their location,
-    // no gating; the page opens the matching modal instead of posting a Do.
-    if (a.button) return { key: a.key, button: true, label: a.label };
-    if (a.recipe) {
-      const r = RECIPES.find((x) => x.key === a.recipe); // existence boot-validated
-      return {
-        key: r.key, recipe: r.key, label: r.label, timer: devTimerOf(r.timer),
-        skill: r.skill, skillName: SKILL_NAMES[r.skill], skillLevel: r.level,
-        successRate: 100, grants: fmtOutput(r), xp: r.xp,
-        requires: r.requires ?? null, uses: null, inputs: r.inputs,
-        station: r.station ?? null, activates: null,
-        lvlOk: player[`s_${r.skill}_lvl`] >= r.level,
-        toolOk: !r.requires || has(r.requires),
-        useOk: true,
-        inputsOk: Object.entries(r.inputs).every(([item, qty]) => (ownedQty[item] ?? 0) >= qty),
-        stationOk: stationOk(player, locKey, r.station),
-      };
-    }
-    return {
-      key: a.key,
-      label: a.label,
-      timer: devTimerOf(a.timer),
-      skill: a.skill,
-      skillName: SKILL_NAMES[a.skill],
-      skillLevel: a.skillLevel,
-      // Beacon activation shows the antenna/amplifier-boosted odds.
-      successRate: a.activates === "beacon" ? Math.min(100, a.successRate + beaconBoost(has)) : a.successRate,
-      grants: a.grants ?? null,
-      trainOnly: Boolean(a.trainOnly),
-      xp: a.xp,
-      requires: a.requires ?? null,
-      uses: a.uses ?? null,
-      inputs: null,
-      station: a.station ?? null,
-      activates: a.activates ?? null,
-      lvlOk: player[`s_${a.skill}_lvl`] >= a.skillLevel,
-      toolOk: !a.requires || has(a.requires),
-      // uses accepts a single item name (qty 1, implicit) or a { item: qty }
-      // map (multi-item fuel, e.g. activate_arcane_table's firewood + mana shard).
-      useOk: !a.uses ? true : typeof a.uses === "string" ? has(a.uses) : Object.entries(a.uses).every(([item, qty]) => (ownedQty[item] ?? 0) >= qty),
-      inputsOk: true,
-      stationOk: stationOk(player, locKey, a.station),
-    };
-  })
-  // Only actions the player can actually run right now reach the page —
-  // locked ones (skill/tool/materials/station, or an already-lit station)
-  // stay hidden until unlocked. The do-handler still enforces every gate.
-  .filter((x) =>
-    x.button ||
-    (x.lvlOk && x.toolOk && x.useOk && x.inputsOk && x.stationOk &&
-      !(x.activates === "forge" && player.forge_fired) &&
-      !(x.activates === "beacon" && player.beacon_fired) &&
-      !(x.activates === "arcane_table" && arcaneTableActiveOf(player)))
-  );
-}
-
-const SHOT_WEAR_CHANCE = 15; // % chance a shot wears the gun
-const SHOT_WEAR_AMOUNT = 2;  // condition points lost when it does
-// Jam chance per shot = missing condition × JAM_FACTOR (%). A pristine gun
-// never jams; at condition 60 → 10%, at 0 → 25%. Keep guns oiled.
-const JAM_FACTOR = 0.25;
-
-// Percent chance a shot connects, based on the gun's condition (0-100).
-function computeHitChance(player, behavior, gunCondition) {
-  if (behavior.accuracyModel === "condition") {
-    // Rifle: high base, impaired only by gun condition.
-    return Math.max(5, Math.round(behavior.floor * (gunCondition / 100)));
-  }
-  // Handgun / Shotgun: player accuracy stat scaled by gun condition, floored.
-  return Math.max(behavior.floor, Math.round(player.accuracy * (gunCondition / 100)));
-}
-
-// Shotgun: how many zombies a hit drops, scaled by accuracy and gun condition (1–5).
-function shotgunTargets(player, gunCondition) {
-  const scaled = Math.round(5 * (player.accuracy / 100) * (gunCondition / 100));
-  return Math.max(1, Math.min(5, scaled));
-}
-
-// Rifle: in a thick horde (> RIFLE_PIERCE_MIN_HORDE zombies) a round can punch
-// clean through and drop a second zombie. Chance scales linearly with player
-// accuracy: RIFLE_PIERCE_MIN% at 0 acc → RIFLE_PIERCE_MAX% at 100.
-const RIFLE_PIERCE_MIN_HORDE = 5;
-const RIFLE_PIERCE_MIN = 15;
-const RIFLE_PIERCE_MAX = 65;
-function riflePierces(player, hordeSize) {
-  if (hordeSize <= RIFLE_PIERCE_MIN_HORDE) return false;
-  const chance = RIFLE_PIERCE_MIN + (RIFLE_PIERCE_MAX - RIFLE_PIERCE_MIN) * (player.accuracy / 100);
-  return Math.random() * 100 < chance;
-}
-
-// Nearby-scope gun hit chance — deliberately a separate accuracy model from
-// GUN_BEHAVIOR/computeHitChance (World/Location), built on WEAPON_FIREARM_EXPORT
-// instead. Guns without an explicit floor (only "player"-model handgun today)
-// default to 5, matching GUN_BEHAVIOR's own floor for player-model guns.
-function nearbyGunHitChance(player, type, gunCondition) {
-  const cfg = WEAPON_FIREARM_EXPORT[type];
-  const floor = cfg.floor ?? 5;
-  if (cfg.acc_model === "condition")
-    return Math.max(5, Math.round(floor * (gunCondition / 100)));
-  return Math.max(floor, Math.round(player.accuracy * (gunCondition / 100)));
-}
-
-// ----- Weapon wheel combat math -----
-// Fighting skill drives non-gun weapon accuracy the way player.accuracy
-// drives guns. 40% at level 1, up to a 95% plateau at level 30+, linear
-// between — a starting baseline, easy to retune later.
-const FIGHTING_ACC_MIN = 40, FIGHTING_ACC_MAX = 95, FIGHTING_ACC_MAX_LEVEL = 30;
-function fightingAccuracyOf(player) {
-  const t = Math.min(player.s_fighting_lvl - 1, FIGHTING_ACC_MAX_LEVEL - 1) / (FIGHTING_ACC_MAX_LEVEL - 1);
-  return Math.round(FIGHTING_ACC_MIN + (FIGHTING_ACC_MAX - FIGHTING_ACC_MIN) * Math.max(0, t));
-}
-
-// Same two branches as computeHitChance; floor comes from WEAPON_ATTACK_EXPORT
-// keyed by the item's own section — condition is 0-100 (the zombie slot
-// substitutes a flat 100, since nothing tracks its wear).
-function computeWeaponHitChance(player, section, attack, condition) {
-  const floor = WEAPON_ATTACK_EXPORT[section].floor;
-  if (attack.acc_model === "condition")
-    return Math.max(5, Math.round(floor * (condition / 100)));
-  return Math.max(floor, Math.round(fightingAccuracyOf(player) * (condition / 100)));
-}
-
-// targets_max absent => a hit always drops exactly 1 zombie. When present,
-// scales between 1 and targets_max by fighting accuracy x condition —
-// mirrors shotgunTargets()'s shape.
-function weaponTargetsHit(player, attack, condition) {
-  if (!attack.targets_max) return 1;
-  const scaled = 1 + (attack.targets_max - 1) * (fightingAccuracyOf(player) / 100) * (condition / 100);
-  return Math.max(1, Math.min(attack.targets_max, Math.round(scaled)));
-}
-
-// ----- Chat censor -----
-function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-function loadCensorWords() {
-  try {
-    const file = path.join(__dirname, file_config.censorFile || "censor.txt");
-    return fs.readFileSync(file, "utf8")
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith("#"));
-  } catch (err) {
-    log("WARN", `Could not read censor file: ${err.message}`, game_config);
-    return [];
-  }
-}
-const CENSOR_WORDS = loadCensorWords();
-// Whole-word, case-insensitive match; each hit becomes ****.
-const CENSOR_REGEX = CENSOR_WORDS.length
-  ? new RegExp(`\\b(?:${CENSOR_WORDS.map(escapeRegex).join("|")})\\b`, "gi")
-  : null;
-function censorText(text) {
-  return CENSOR_REGEX ? text.replace(CENSOR_REGEX, "****") : text;
-}
-
-// ----- Static shop upgrades (hardcoded; distinct from the item registry's shop) -----
-// `category` decides which game-page tab it appears on: "upgrade" (permanent
-// gun/character boosts) or "item" (consumables & one-time buys, shown on the Shop
-// tab alongside registry `shop` items). 'type' still drives buy handling:
-// 'stat'/'instant' apply immediately; 'consumable'/'gun' drop into inventory.
-const STATIC_UPGRADES = [
-  { key: "extended_mag", label: "Extended Magazine", desc: "+2 max ammo (equipped gun)",  cost: 150, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxAmmo(uid, gun, 2) },
-  // Mana-priced + material inputs + Defense-gated, and repeatable (no owned
-  // flag): each buy permanently raises players.ap_level (see armorApOf).
-  { key: "ap_base", label: "AP Base", desc: "+10 Base AP (permanent, stacks)", cost: 25, currency: "mana", type: "instant", category: "upgrade",
-    inputs: { "firewood": 10, "copper ore": 5, "glowcap": 3 }, defense: 2,
-    apply: (uid) => setPlayerStat(uid, "ap_level", (getPlayerByUserId(uid).ap_level || 0) + 10) },
-  { key: "clip_holster", label: "Clip Holster",      desc: "+1 max clips (equipped gun)", cost: 120, type: "stat", category: "upgrade", apply: (uid, gun) => updateGunMaxClips(uid, gun, 1) },
-  { key: "quiver_expansion", label: "Quiver Expansion", desc: "+3 max Quiver ammo (equipped ranged weapon)", cost: 140, type: "stat", category: "upgrade",
-    apply: (uid) => { const rt = effectiveRangedType(getPlayerByUserId(uid)); if (rt) updateRangedMaxAmmo(uid, rt, 3); } },
-  { key: "pouch_expansion", label: "Pouch Expansion", desc: "+3 max Pouch ammo (throwing weapons)", cost: 140, type: "stat", category: "upgrade",
-    apply: (uid) => updateThrowingMaxAmmo(uid, 3) },
-  { key: "laser_sight",  label: "Accuracy Potion",   desc: "+5% accuracy",                cost: 200, type: "stat", category: "upgrade", apply: (uid) => updatePlayerAccuracy(uid, 5) },
-  { key: "spare_clip",   label: "Spare Clip",        desc: "+1 clip (equipped gun)",      cost: 5,   type: "stat", category: "item", apply: (uid, gun) => updateGunAmmo(uid, gun, 0, 1) },
-  { key: "gun_oil",      label: "Gun Oil",           desc: "consumable · restores condition", cost: 25, type: "consumable", category: "item", item: "gun oil" },
-  // Gold consumables (drop into inventory, used later).
-  { key: "heal_potion",  label: "Healing Potion",    desc: "consumable · +50 health",  cost: 25, type: "consumable", category: "item", item: "healing potion" },
-  { key: "shield_potion",label: "Shield Potion",     desc: "consumable · +50 shield",  cost: 60, type: "consumable", category: "item", item: "shield potion" },
-  // One-time gun unlocks: bought once, land in inventory, then equippable.
-  { key: "buy_rifle",    label: "Rifle",             desc: "one-time · unlocks the Rifle",   cost: 300, type: "gun", category: "item", item: "Rifle" },
-  { key: "buy_shotgun",  label: "Shotgun",           desc: "one-time · unlocks the Shotgun", cost: 550, type: "gun", category: "item", item: "Shotgun" },
-  { key: "buy_burstrifle",label: "Burst Rifle",     desc: "one-time · unlocks the Burst Rifle", cost: 2500, type: "gun", category: "item", item: "Burst Rifle" },
-  // Token-purchased (horde/raid tokens), applied instantly.
-  { key: "shield_booster", label: "Shield Booster",  desc: "+50 shield capacity",            cost: 5,  currency: "token", type: "instant", category: "item", apply: (uid) => increaseMaxShield(uid, 50) },
-  { key: "golden_gun",     label: "Golden Gun",      desc: "power-up · 25 perfect shots",    cost: 25, currency: "token", type: "instant", category: "item", apply: (uid) => grantGoldenShots(uid, 25) },
-  // Token → gold exchange; rate is game_config.tokenExchangeGold (--set-able per run).
-  { key: "exchange_token", label: "Exchange Token",  desc: `1 token → ${game_config.tokenExchangeGold} gold`, cost: 1, currency: "token", type: "instant", category: "item", msg: `Exchanged 1 token for ${game_config.tokenExchangeGold} gold`, apply: (uid) => updatePlayerGold(uid, game_config.tokenExchangeGold) },
-];
-
-// ----- Item effect interpreter -----
-// Applies a registry item's declarative `use` block (item_backbone.js). One
-// verb → one handler; add a verb here once and every item can use it. Each
-// handler returns the human note for the feed message.
-const EFFECT_VERBS = {
-  heal:         (uid, n) => { healPlayer(uid, n);            return `+${n} health`; },
-  shield:       (uid, n) => { addShield(uid, n);             return `+${n} shield`; },
-  mana:         (uid, n) => { addMana(uid, n);                return `+${n} mana`; },
-  maxShield:    (uid, n) => { increaseMaxShield(uid, n);     return `+${n} max shield`; },
-  gunCondition: (uid, n) => { adjustGunCondition(uid, equippedType(getPlayerByUserId(uid)), n); return `+${n} equipped gun condition`; },
-  // Restores condition to every currently-equipped non-gun slot at once
-  // (melee/fist share one column depending on which subtype's equipped) —
-  // the zombie slot is excluded, it has no tracked condition column.
-  weaponCondition: (uid, n) => {
-    const p = getPlayerByUserId(uid);
-    const cols = new Set();
-    for (const slotItem of [p.equipped_melee, p.equipped_ranged, p.equipped_throwing]) {
-      const item = WEAPONS[slotItem];
-      if (item) cols.add(weaponConditionColFor(item));
-    }
-    for (const col of cols) adjustWeaponCondition(uid, col, n);
-    return `+${n} equipped weapon condition`;
-  },
-  rangedAmmo:   (uid, n) => { addRangedAmmo(uid, n, rangedCapFor(getPlayerByUserId(uid))); return `+${n} Quiver`; },
-  throwingAmmo: (uid, n) => { addThrowingAmmo(uid, n);       return `+${n} Pouch`; },
-  railgunAmmo:  (uid, n) => {
-    const { ammo, maxAmmo } = gunAmmoOf(getPlayerByUserId(uid), "railgun");
-    const add = Math.max(0, Math.min(n, maxAmmo - ammo));
-    updateGunAmmo(uid, "railgun", add, 0);
-    return `+${add} Railgun ammo`;
-  },
-  bfgAmmo:      (uid, n) => {
-    const { ammo, maxAmmo } = gunAmmoOf(getPlayerByUserId(uid), "bfg2000");
-    const add = Math.max(0, Math.min(n, maxAmmo - ammo));
-    updateGunAmmo(uid, "bfg2000", add, 0);
-    return `+${add} BFG 2000 ammo`;
-  },
-  gold:         (uid, n) => { updatePlayerGold(uid, n);      return `+${n} gold`; },
-  accuracy:     (uid, n) => { updatePlayerAccuracy(uid, n);  return `+${n} accuracy`; },
-  goldenShots:  (uid, n) => { grantGoldenShots(uid, n);      return `+${n} golden shots`; },
-  tokens:       (uid, n) => { addTokens(uid, n);             return `+${n} tokens`; },
-  // World-scoped verbs (base systems — /api/inventory/use gates these items
-  // to the Bunker):
-  stockRepairKits: (_uid, n) => {
-    const total = adjustRepairKits(n);
-    insertEvent("system", `A base repair kit was stocked at the Bunker (${total} ready).`, "public", "global");
-    return `stocked ${n} repair kit (${total} ready at the base)`;
-  },
-  sentryHours: (_uid, n) => {
-    setSentryUntil(Date.now() + n * 3600 * 1000);
-    insertEvent("system", `🤖 A sentry turret hums to life on the base perimeter (${n}h).`, "public", "global");
-    return `sentry turret online for ${n}h`;
-  },
-};
-function applyItemEffects(userId, use) {
-  return Object.entries(use).map(([verb, amount]) => EFFECT_VERBS[verb](userId, amount)).join(", ");
-}
-
-// ----- Item registry sanity (boot-time) -----
-// Every item name referenced anywhere must exist in ITEMS, every type must be
-// valid, and every `use` verb must have an interpreter. This is what makes
-// "adding an item is adding a row" safe: a typo dies here, loudly, at boot.
-{
-  const bad = [];
-  for (const [key, item] of Object.entries(ITEMS)) {
-    if (!ITEM_TYPES.includes(item.type)) bad.push(`ITEMS["${key}"] has invalid type "${item.type}"`);
-    if (!item.section) bad.push(`ITEMS["${key}"] has no section (used by the admin panel's Item Registry tabs)`);
-    for (const verb of Object.keys(item.use || {}))
-      if (!EFFECT_VERBS[verb]) bad.push(`ITEMS["${key}"] uses unknown effect verb "${verb}"`);
-    if (item.type === "gun" && !item.gunType) bad.push(`ITEMS["${key}"] is a gun with no gunType`);
-    if (item.type === "armor" && !(Number.isFinite(item.ap) && item.ap >= 1 && item.ap <= 500))
-      bad.push(`ITEMS["${key}"] is an armor with no valid ap (1-500)`);
-    if (item.ap !== undefined && item.type !== "armor") bad.push(`ITEMS["${key}"] has ap but isn't an armor`);
-    if (item.type === "armor" && !(Number.isInteger(item.defense) && item.defense >= 1))
-      bad.push(`ITEMS["${key}"] is an armor with no valid defense level (int >= 1)`);
-    if (item.type === "armor" && !ARMOR_PIECES.includes(item.piece))
-      bad.push(`ITEMS["${key}"] is an armor with invalid/missing piece "${item.piece}" (${ARMOR_PIECES.join("/")})`);
-    if (item.type === "weapon") {
-      if (!WEAPON_TYPES.includes(item.section)) bad.push(`ITEMS["${key}"] is a weapon with invalid section "${item.section}" (${WEAPON_TYPES.join("/")})`);
-      if (item.section === "Ranged" && !WEAPON_RANGED_OPTIONS.includes(item.rangedType))
-        bad.push(`ITEMS["${key}"] is a Ranged weapon with invalid/missing rangedType "${item.rangedType}" (${WEAPON_RANGED_OPTIONS.join("/")})`);
-      const at = item.attack;
-      if (!at || !(Number.isFinite(at.dmg) && at.dmg >= 0)) bad.push(`ITEMS["${key}"] is a weapon with no valid attack.dmg`);
-      if (at && at.targets_max !== undefined && !(Number.isInteger(at.targets_max) && at.targets_max >= 1))
-        bad.push(`ITEMS["${key}"].attack.targets_max must be an integer >= 1 when present`);
-      if (at && !["player", "condition"].includes(at.acc_model))
-        bad.push(`ITEMS["${key}"].attack.acc_model must be "player" or "condition"`);
-    }
-  }
-  for (const section of WEAPON_TYPES)
-    if (!Number.isFinite(WEAPON_ATTACK_EXPORT[section]?.floor)) bad.push(`WEAPON_ATTACK_EXPORT["${section}"] has no valid floor`);
-  // WEAPON_FIREARM_EXPORT — the Nearby-scope gun accuracy/damage model
-  // (deliberately separate from GUN_BEHAVIOR, see plan §1). `floor` is
-  // optional (only required for "condition"-model guns; nearbyGunHitChance
-  // defaults missing floors to 5 for "player"-model guns).
-  for (const type of WEAPON_FIREARM_TYPES) {
-    const cfg = WEAPON_FIREARM_EXPORT[type];
-    if (!cfg) { bad.push(`WEAPON_FIREARM_EXPORT is missing an entry for "${type}"`); continue; }
-    if (!(Number.isFinite(cfg.dmg) && cfg.dmg >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid dmg`);
-    if (!(Number.isFinite(cfg.ammo) && cfg.ammo >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid ammo`);
-    if (!(Number.isFinite(cfg.clips) && cfg.clips >= 0)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"] has no valid clips`);
-    if (!["player", "condition"].includes(cfg.acc_model)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"].acc_model must be "player" or "condition"`);
-    if (cfg.floor !== undefined && !Number.isFinite(cfg.floor)) bad.push(`WEAPON_FIREARM_EXPORT["${type}"].floor must be a number when present`);
-  }
-  const check = (name, where) => { if (name && !ITEMS[name]) bad.push(`${where} references unknown item "${name}"`); };
-  for (const [loc, actions] of Object.entries(LOCATION_ACTIONS))
-    for (const a of actions) {
-      if (a.button) {
-        // A pure UI button row (e.g. the Magic Table) — nothing to cross-check
-        // against the registry beyond its own shape.
-        if (!a.key || !a.label) bad.push(`LOCATION_ACTIONS.${loc} has a button row missing key/label`);
-        continue;
-      }
-      if (a.recipe) {
-        // A recipe pointer: everything else comes from the (separately
-        // validated) recipe, so only the reference itself can be wrong.
-        if (!RECIPES.find((r) => r.key === a.recipe)) bad.push(`LOCATION_ACTIONS.${loc} references unknown recipe "${a.recipe}"`);
-        continue;
-      }
-      if (!a.key) { bad.push(`LOCATION_ACTIONS.${loc} has an action with no key (typo?): ${JSON.stringify(a).slice(0, 60)}`); continue; }
-      if (!SKILLS.includes(a.skill)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} trains unknown skill "${a.skill}"`);
-      check(a.grants, `LOCATION_ACTIONS.${loc}.${a.key}.grants`);
-      check(a.requires, `LOCATION_ACTIONS.${loc}.${a.key}.requires`);
-      // uses: a single item name (qty 1, implicit), or a { item: qty } map
-      // (multi-item fuel consumed atomically up front, committed even on a
-      // failed roll) — extended from the single-item-only form to support
-      // activate_arcane_table's firewood + mana shard cost.
-      if (a.uses !== undefined) {
-        if (typeof a.uses === "string") check(a.uses, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
-        else if (a.uses && typeof a.uses === "object" && !Array.isArray(a.uses)) {
-          for (const item of Object.keys(a.uses)) check(item, `LOCATION_ACTIONS.${loc}.${a.key}.uses`);
-        } else bad.push(`LOCATION_ACTIONS.${loc}.${a.key}.uses must be a single item name or a { item: qty } map`);
-      }
-      if (a.station && !["campfire", "forge", "beacon", "arcane_table"].includes(a.station)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} has unknown station "${a.station}"`);
-      if (a.activates && !["forge", "beacon", "arcane_table"].includes(a.activates)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} activates unknown station "${a.activates}"`);
-      // trainOnly rows award only skill XP — no grant/activate required (but xp is).
-      if (a.trainOnly && !(Number.isFinite(a.xp) && a.xp > 0)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} is trainOnly with no xp`);
-      if (!a.grants && !a.activates && !a.trainOnly) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} neither grants nor activates anything`);
-    }
-  const FORGE_SECTIONS = ["Ingredients", "Guns", "Tools", "Bronze", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
-  // Admin-panel Recipes tabs (see RECIPE_CATEGORIES/RECIPE_METAL_TYPES below).
-  const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc", "weapon", "armor"];
-  const RECIPE_METAL_TYPES = ["armor", "crafting", "tools"];
-  for (const r of RECIPES) {
-    // output: a single item name, or an { item: qty } bundle.
-    if (typeof r.output === "string") check(r.output, `RECIPES.${r.key}.output`);
-    else for (const out of Object.keys(r.output || {})) check(out, `RECIPES.${r.key}.output`);
-    check(r.requires, `RECIPES.${r.key}.requires`);
-    for (const input of Object.keys(r.inputs || {})) check(input, `RECIPES.${r.key}.inputs`);
-    if (!SKILLS.includes(r.skill)) bad.push(`RECIPES.${r.key} trains unknown skill "${r.skill}"`);
-    if (r.station && !["campfire", "forge", "beacon", "arcane_table"].includes(r.station)) bad.push(`RECIPES.${r.key} has unknown station "${r.station}"`);
-    if (r.station === "forge" && !FORGE_SECTIONS.includes(r.section)) bad.push(`RECIPES.${r.key} is a forge recipe with no valid section (${FORGE_SECTIONS.join("/")})`);
-    if (r.roll && r.roll !== "supply") bad.push(`RECIPES.${r.key} has unknown roll table "${r.roll}"`);
-    if (!RECIPE_CATEGORIES.includes(r.category)) bad.push(`RECIPES.${r.key} has unknown category "${r.category}" (${RECIPE_CATEGORIES.join("/")})`);
-    if (r.category === "metal") {
-      if (!SMELT_TYPES.includes(r.metal)) bad.push(`RECIPES.${r.key} has category "metal" but invalid metal "${r.metal}" (${SMELT_TYPES.join("/")})`);
-      if (!RECIPE_METAL_TYPES.includes(r.metalType)) bad.push(`RECIPES.${r.key} has category "metal" but invalid metalType "${r.metalType}" (${RECIPE_METAL_TYPES.join("/")})`);
-    } else if (r.metal || r.metalType) {
-      bad.push(`RECIPES.${r.key} has metal/metalType but category isn't "metal"`);
-    }
-  }
-  // The supply-drop table references existing registry items only.
-  for (const d of SUPPLY_DROP_ROLL) check(d.key, "SUPPLY_DROP_ROLL");
-  for (const u of STATIC_UPGRADES) {
-    check(u.item, `STATIC_UPGRADES.${u.key}.item`);
-    for (const input of Object.keys(u.inputs || {})) check(input, `STATIC_UPGRADES.${u.key}.inputs`);
-  }
-  if (bad.length) {
-    // Printed ungated (like the sessionSecret halt) so it's visible even
-    // without --verbose, then FATAL-logged (which exits).
-    console.error(paint(["bold", "red"], `FATAL: item registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
-    log("FATAL", `Item registry validation failed: ${bad.join("; ")}`, game_config);
-  }
-}
-
-// ----- Magic spell registry sanity (boot-time) -----
-// magic.js is data plus its own helpers (see "Magic Backbone" in that file)
-// — a typo here dies at boot, not mid-cast.
-{
-  const bad = validateMagicSpells(LOCATION_NAMES, ITEMS);
-  if (bad.length) {
-    console.error(paint(["bold", "red"], `FATAL: magic spell registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
-    log("FATAL", `Magic spell registry validation failed: ${bad.join("; ")}`, game_config);
-  }
-}
-
-// ----- Quest registry sanity (boot-time) -----
-// quest_backbone.js is data-only, no imports of its own — every reference it
-// makes into the real registries (items/actions/recipes/spells/locations/
-// other quests) is checked here, same "typos die at boot" convention as the
-// item/magic blocks above.
-{
-  const bad = [];
-  const allActionKeys = new Set(Object.values(LOCATION_ACTIONS).flatMap((rows) => rows.map((r) => r.key).filter(Boolean)));
-  const recipeKeys = new Set(RECIPES.map((r) => r.key));
-  for (const [key, quest] of Object.entries(QUESTS)) {
-    const s = quest.starter;
-    if (!s) bad.push(`QUESTS["${key}"] has no starter trigger`);
-    else if (s.starter !== true && !s.enter_location && !s.quest && !(s.type === "action" && s.action)) {
-      bad.push(`QUESTS["${key}"].starter is an unrecognized shape: ${JSON.stringify(s)}`);
-    } else {
-      if (s.enter_location && !LOCATION_NAMES[s.enter_location]) bad.push(`QUESTS["${key}"].starter references unknown location "${s.enter_location}"`);
-      if (s.type === "action" && !allActionKeys.has(s.action)) bad.push(`QUESTS["${key}"].starter references unknown action "${s.action}"`);
-      if (s.quest && !QUESTS[s.quest]) bad.push(`QUESTS["${key}"].starter references unknown quest "${s.quest}"`);
-    }
-    if (!Array.isArray(quest.objectives) || !quest.objectives.length) bad.push(`QUESTS["${key}"] has no objectives`);
-    for (const [i, obj] of (quest.objectives || []).entries()) {
-      const where = `QUESTS["${key}"].objectives[${i}]`;
-      if (!QUEST_OBJECTIVE_TYPES.includes(obj.type)) { bad.push(`${where} has unknown type "${obj.type}"`); continue; }
-      if (!(Number.isFinite(obj.qty) && obj.qty > 0)) bad.push(`${where} (${obj.type}) has no valid qty`);
-      if (obj.type === "acquire_item" || obj.type === "use_item") { if (!ITEMS[obj.item]) bad.push(`${where} (${obj.type}) references unknown item "${obj.item}"`); }
-      else if (obj.type === "action") { if (!allActionKeys.has(obj.action)) bad.push(`${where} references unknown action "${obj.action}"`); }
-      else if (obj.type === "recipe") { if (!recipeKeys.has(obj.recipe)) bad.push(`${where} references unknown recipe "${obj.recipe}"`); }
-      else if (obj.type === "learn_spell") { if (!MAGIC_SPELLS[obj.spell]) bad.push(`${where} references unknown spell "${obj.spell}"`); }
-    }
-    if (!Number.isFinite(quest.reward?.gold) && !Number.isFinite(quest.reward?.xp)) bad.push(`QUESTS["${key}"] has no gold/xp reward`);
-  }
-  if (bad.length) {
-    console.error(paint(["bold", "red"], `FATAL: quest registry validation failed:\n  - ${bad.join("\n  - ")}`, process.stderr));
-    log("FATAL", `Quest registry validation failed: ${bad.join("; ")}`, game_config);
-  }
-}
-
-// Zombie Bits kill drop: a chance per kill EVENT (not per zombie in a
-// multi-kill shot) to drop one random crafting material from the Zombie Bits
-// pool (item_backbone.js) — the raw material for the zombie-tier armor recipes.
-const ZOMBIE_BITS = Object.keys(ITEMS).filter((k) => ITEMS[k].section === "Zombie Bits");
-const ZOMBIE_BIT_DROP_CHANCE = 15; // % — tunable
-
-// Shared reward tail — XP/gold, the zombie-bit drop roll, and the public
-// "kill" event. Every kill path uses this (guns, weapon-wheel, spells, and
-// Nearby-scope combat); it never touches a zombie pool — callers own that.
-// `sourceLabel` is the human text for "dropped N zombies with <sourceLabel>".
-// Returns the bit-drop note ("" if nothing dropped).
-function grantKillRewards(userId, username, killed, sourceLabel) {
-  updatePlayerStats(userId, XP_PER_KILL * killed, killed);
-  updatePlayerGold(userId, GOLD_PER_KILL * killed);
-
-  let bitNote = "";
-  if (Math.random() * 100 < ZOMBIE_BIT_DROP_CHANCE) {
-    const bit = ZOMBIE_BITS[Math.floor(Math.random() * ZOMBIE_BITS.length)];
-    giveInventoryItem(userId, bit, 1);
-    bitNote = ` …a ${ITEMS[bit].name} drops from the pile.`;
-  }
-  const noun = killed === 1 ? "a zombie" : `${killed} zombies`;
-  insertEvent("kill", `${username} dropped ${noun} with ${sourceLabel} (+${XP_PER_KILL * killed} XP, +${GOLD_PER_KILL * killed} gold)${bitNote}`, "public", "global");
-  return bitNote;
-}
-
-// Broad (World/Location) kill resolution — the reward tail plus decrementing
-// whichever pool the kill came from. The horde-broken/raid-cleared token
-// bonus only ever evaluates for World-scope kills (Location kills grant
-// normal rewards, never the bonus — see plan §1). `scope` defaults to
-// "World" for callers that don't target Location (e.g. attack spells, which
-// have no Nearby-mode path — see plan §4).
-function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "World", location = null) {
-  const bonus0 = grantKillRewards(userId, username, killed, sourceLabel);
-  let bonus = bonus0;
-
-  if (scope === "Location") {
-    adjustLocationZombies(location, -killed);
-    return bonus;
-  }
-
-  const hordeBefore = gameState.horde_size;
-  const hordeAfter = hordeBefore - killed;
-  const wasRaiding = gameState.raid_enabled === "true";
-  adjustHordeSize(-killed);
-
-  if (wasRaiding && hordeAfter <= 0) {
-    addTokens(userId, 3);
-    setRaidEnabled(false);
-    insertEvent("system", `${username} ended the raid! (+3 tokens)`, "public", "global");
-    bonus += " Raid ended — +3 tokens!";
-    recordQuestProgress(userId, "clear_raid", null, 1);
-  } else if (!wasRaiding && hordeBefore >= zombie_config.z_horde && hordeAfter < zombie_config.z_horde) {
-    addTokens(userId, 1);
-    insertEvent("system", `${username} broke the horde (+1 token)`, "public", "global");
-    bonus += " Horde broken — +1 token!";
-    recordQuestProgress(userId, "break_horde", null, 1);
-  }
-  return bonus;
-}
-
-// Nearby-scope kill reward: same reward tail, no pool decrement (the caller
-// already resolved the HP cascade via damageNearbyZombie) and never the
-// horde-broken/raid-cleared token bonus.
-function grantNearbyKillRewards(userId, username, killed, sourceLabel) {
-  return grantKillRewards(userId, username, killed, sourceLabel);
-}
-
 app.post("/api/action/shoot", requireAuth, (req, res) => {
   const player = ensurePlayer(req.userId);
   const gameState = getGameState();
@@ -1852,7 +1970,7 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
 
   // Server-side guards. The client disables the button in these cases, but the
   // client is never trusted — re-check everything here.
-  if (!ZOMBIE_LOCATIONS.has(locationOf(player)))
+  if (!isZombieActive(locationOf(player), gameState))
     return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
   if (gameState.hunt_enabled !== "true")
     return res.status(409).json({ ok: false, message: "The hunt isn't active." });
@@ -1873,7 +1991,7 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
       dmg = Number.MAX_SAFE_INTEGER; // perfect shot — always a kill
     } else {
       const type = equippedType(player);
-      const cfg = WEAPON_FIREARM_EXPORT[type];
+      const cfg = equippedGunConfig(player);
       const { ammo, condition: gunCondition, jammed } = gunAmmoOf(player, type);
       gunLabel = equippedGunName(player);
       if (jammed)
@@ -1893,7 +2011,7 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
         log("INFO", `${req.user} ${gunLabel} jammed (cond=${gunCondition} chance=${jamChance.toFixed(1)}%)`, game_config);
         return res.json({ ok: true, result: "jam", message: `The ${gunLabel} jammed! Clear it to keep shooting.` });
       }
-      const hitChance = nearbyGunHitChance(player, type, gunCondition);
+      const hitChance = computeHitChance(player, cfg, gunCondition);
       const roll = Math.random() * 100;
       if (roll >= hitChance) {
         insertEvent("shoot", `You fired the ${gunLabel} and missed`, "private", req.userId);
@@ -1928,7 +2046,7 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
     killed = Math.min(1, poolCount);
   } else {
     const type = equippedType(player);
-    const behavior = GUN_BEHAVIOR[type];
+    const behavior = equippedGunConfig(player);
     const { ammo, condition: gunCondition, jammed } = gunAmmoOf(player, type);
     gunLabel = equippedGunName(player);
     if (jammed)
@@ -2003,7 +2121,7 @@ app.post("/api/action/attack", requireAuth, (req, res) => {
   const slot = String(req.body.slot || "").trim();
   if (!WEAPON_SLOT_KEYS.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown weapon slot." });
 
-  if (!ZOMBIE_LOCATIONS.has(locationOf(player)))
+  if (!isZombieActive(locationOf(player), gameState))
     return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
   if (gameState.hunt_enabled !== "true")
     return res.status(409).json({ ok: false, message: "The hunt isn't active." });
@@ -2135,7 +2253,7 @@ app.post("/api/action/reload", requireAuth, (req, res) => {
 });
 
 // Clear a jammed gun: ejects the stuck clip and loads a fresh one — costs 1
-// clip and refills ammo (see unjamGun in db.js). Jams are per gun type.
+// clip and refills ammo (see unjamGun in db_backbone.js). Jams are per gun type.
 app.post("/api/action/unjam", requireAuth, (req, res) => {
   const player = ensurePlayer(req.userId);
   const gunName = equippedGunName(player);
@@ -2160,6 +2278,8 @@ app.post("/api/action/unjam", requireAuth, (req, res) => {
 // Flip the global hunt on/off. Admin only.
 app.post("/api/hunt/toggle", requireAuth, requireAdmin, (req, res) => {
   const gameState = getGameState();
+  if (gameState.zombie_break === 1)
+    return res.status(409).json({ ok: false, message: "An Outbreak is active — it must end before the hunt can be toggled." });
   const enabled = gameState.hunt_enabled !== "true";
   setHuntEnabled(enabled);
   cancelHuntVote(); // a direct admin override supersedes any in-progress vote
@@ -2172,7 +2292,10 @@ app.post("/api/hunt/toggle", requireAuth, requireAdmin, (req, res) => {
 // (flip whatever the current state is). One vote globally at a time.
 app.post("/api/hunt/vote/start", requireAuth, (req, res) => {
   if (HUNT_VOTE) return res.status(409).json({ ok: false, message: "A hunt vote is already in progress." });
-  const toggleTo = getGameState().hunt_enabled !== "true";
+  const gameState = getGameState();
+  if (gameState.zombie_break === 1)
+    return res.status(409).json({ ok: false, message: "An Outbreak is active — it must end before the hunt can be toggled." });
+  const toggleTo = gameState.hunt_enabled !== "true";
   const voteRef = { toggleTo, startedBy: req.user, expiresAt: Date.now() + HUNT_VOTE_SECONDS * 1000, ballots: new Map(), timer: null };
   voteRef.timer = setTimeout(() => resolveHuntVote(voteRef), HUNT_VOTE_SECONDS * 1000);
   HUNT_VOTE = voteRef;
@@ -2402,6 +2525,7 @@ app.get("/api/playercard", (req, res) => {
   if (!uid) return res.status(404).json({ ok: false, message: "No such player." });
   const authenticated = tryAuth(req) !== null;
   const player = ensurePlayer(uid);
+  const gameState = getGameState();
   const { rank, total } = getLeaderboardRank(uid);
 
   const payload = {
@@ -2473,7 +2597,7 @@ app.get("/api/playercard", (req, res) => {
       lifetimeXp: player.lifetime_xp,
       gunOil: ownedQty["gun oil"] ?? 0,
       gold: player.c_gold, tokens: player.c_tokens,
-      location: locKey, locationName: LOCATION_NAMES[locKey], zombieZone: ZOMBIE_LOCATIONS.has(locKey),
+      location: locKey, locationName: LOCATION_NAMES[locKey], zombieZone: isZombieActive(locKey, gameState),
       gunsOwned: GUN_NAMES.filter((g) => ownedQty[g] > 0),
       guns, armors, weapons,
       quests: questsPayloadForCard(player),
@@ -2553,7 +2677,7 @@ app.post("/api/inventory/equip", requireAuth, (req, res) => {
 // regardless of its natural section. Every successful call (equip or clear)
 // also makes this slot the active one for combat (players.selected_equip_slot)
 // — picking a weapon through this route is how a player "switches to" it.
-const WEAPON_SLOT_KEYS = ["melee", "fist", "ranged", "throwing", "zombie"];
+
 app.post("/api/weapon/equip", requireAuth, (req, res) => {
   const slot = String(req.body.slot || "").trim();
   if (!WEAPON_SLOT_KEYS.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown weapon slot." });
@@ -2672,7 +2796,7 @@ app.post("/api/chat", requireAuth, (req, res) => {
 // Manually add a zombie to the horde, independent of the spawn ticker.
 // Requires the hunt to be active (same rule as the spawn ticker).
 app.post("/api/hunt/call-zombie", requireAuth, (req, res) => {
-  if (!ZOMBIE_LOCATIONS.has(locationOf(ensurePlayer(req.userId))))
+  if (!isZombieActive(locationOf(ensurePlayer(req.userId)), getGameState()))
     return res.status(409).json({ ok: false, message: "It's quiet here — nothing answers your call." });
   if (getGameState().hunt_enabled !== "true")
     return res.status(409).json({ ok: false, message: "The hunt isn't active." });
@@ -2723,7 +2847,7 @@ app.post("/api/level/max", requireAuth, (req, res) => {
 
 // ----- Base: go inside / outside -----
 // Travel between world locations (the Map modal). Adjacency comes from
-// LOCATION_LINKS in db.js; you can't consult the map from inside the base.
+// LOCATION_LINKS in db_backbone.js; you can't consult the map from inside the base.
 app.post("/api/travel", requireAuth, (req, res) => {
   const player = ensurePlayer(req.userId);
   const from = locationOf(player);
@@ -3004,7 +3128,7 @@ app.post("/api/craft", requireAuth, handleCraft);
 // Meditate on Magical Theory: a safe-zone timed action granting magic XP.
 app.post("/api/meditate", requireAuth, (req, res) => {
   const player = ensurePlayer(req.userId);
-  if (ZOMBIE_LOCATIONS.has(locationOf(player)))
+  if (isZombieActive(locationOf(player), getGameState()))
     return res.status(409).json({ ok: false, message: "Too dangerous to meditate here." });
   const busy = busyUntilOf(req.userId);
   if (busy) return res.status(409).json({ ok: false, message: `You're busy for another ${Math.ceil((busy - Date.now()) / 1000)}s.` });
@@ -3024,7 +3148,7 @@ app.post("/api/meditate", requireAuth, (req, res) => {
   return res.json({ ok: true, message: `Meditating — ${timerS}s…`, busyUntil: until });
 });
 
-// The spellbook (registry-driven, magic.js), annotated for THIS player:
+// The spellbook (registry-driven, magic_backbone.js), annotated for THIS player:
 // `learned` (player_magic), `lvlOk` (Magic skill), and each learn-map
 // ingredient with need/have counts. Feeds three surfaces — the Spells cast
 // modal (learned only), the Magic Table learn menu (everything, tabbed by
@@ -3049,7 +3173,7 @@ app.get("/api/spells", requireAuth, (req, res) => {
 });
 
 // Learn a spell at the Magic Table (Town only): consumes the spell's `learn`
-// ingredients (magic.js), requires the Magic level the spell itself needs,
+// ingredients (magic_backbone.js), requires the Magic level the spell itself needs,
 // and records it in player_magic. Instant — no timer, shop-style.
 app.post("/api/spell/learn", requireAuth, (req, res) => {
   const key = String(req.body.key || "");
@@ -3111,7 +3235,7 @@ app.post("/api/spell/cast", requireAuth, (req, res) => {
   const spellScope = player.target_scope === "Location" ? "Location" : "World";
   const spellPoolCount = spellScope === "Location" ? locationZombiesOf(gameState, locationOf(player)) : gameState.horde_size;
   if (spell.type === "attack") {
-    if (!ZOMBIE_LOCATIONS.has(locationOf(player)))
+    if (!isZombieActive(locationOf(player), gameState))
       return res.status(409).json({ ok: false, message: "It's quiet here — no zombies in this area." });
     if (gameState.hunt_enabled !== "true")
       return res.status(409).json({ ok: false, message: "The hunt isn't active." });
@@ -3183,7 +3307,7 @@ app.post("/api/spell/cast", requireAuth, (req, res) => {
 });
 
 // Buy the next level of one skill with MAIN player XP (skills also
-// auto-level from their own training XP — see addSkillXp in db.js).
+// auto-level from their own training XP — see addSkillXp in db_backbone.js).
 app.post("/api/skill/up", requireAuth, (req, res) => {
   const skill = String(req.body.skill || "");
   if (!SKILLS.includes(skill)) return res.status(400).json({ ok: false, message: "Unknown skill." });
@@ -3254,26 +3378,19 @@ app.post("/api/base/reset", requireAuth, requireAdmin, (req, res) => {
 // ==================== Web admin panel API ====================
 // All routes are admin-only. Mirrors the users/players Admin CLI groups; the
 // item catalogue is read-only (items are code in item_backbone.js).
-const adminReq = [requireAuth, requireAdmin];
-// A sub-permission within admin — the 🎉 Fun modal/API needs users.adm_fun in
-// addition to is_admin (the rest of the panel doesn't).
-const adminFunReq = [requireAuth, requireAdmin, (req, res, next) => {
-  if (!req.gates.admFun) return res.status(403).json({ ok: false, message: "You don't have Fun access." });
-  next();
-}];
-const uidOf = (username) => getUserIdByName(String(username || "").trim())?.id ?? null;
 
 // --- Users ---
 app.get("/api/admin/users", adminReq, (req, res) => {
   // Enriched for the panel's player list: display location + online flag.
   const cutoff = Date.now() - game_config.timeout * 1000;
+  const gs = getGameState();
   res.json(listUsers().map((u) => {
     const locKey = LOCATION_NAMES[u.location] ? u.location : "basecamp_outside";
     return {
       ...u,
       locationName: LOCATION_NAMES[locKey],
       online: (u.last_seen ?? 0) >= cutoff,
-      zombieZone: ZOMBIE_LOCATIONS.has(locKey),
+      zombieZone: isZombieActive(locKey, gs),
     };
   }));
 });
@@ -3447,13 +3564,55 @@ app.get("/api/admin/player", adminReq, (req, res) => {
       .filter((i) => ARMORS[i.item_name]?.piece === slot && i.quantity > 0)
       .map((i) => ({ name: i.item_name, label: ARMORS[i.item_name].name, ap: ARMORS[i.item_name].ap, defense: ARMORS[i.item_name].defense, condition: i.condition })),
   }));
+  // Weapon wheel: the gun slot (reusing the `guns` array above) plus the 5
+  // wheel slots, one entry per slot listing every registry item valid for
+  // it with owned/equipped flags — feeds the admin panel's Equip Slots card.
+  const WHEEL_SLOTS = [
+    { slot: "melee", col: "equipped_melee", section: "Melee" },
+    { slot: "fist", col: "equipped_fist_weapon", section: "Fist" },
+    { slot: "ranged", col: "equipped_ranged", section: "Ranged" },
+    { slot: "throwing", col: "equipped_throwing", section: "Throwing" },
+    { slot: "zombie", col: "equipped_zombie_weapon", section: null },
+  ];
+  const weapons = [
+    { slot: "gun", equipped: player.equipped_gun || null, items: guns },
+    ...WHEEL_SLOTS.map(({ slot, col, section }) => {
+      const equippedName = player[col] || null;
+      const names = Object.keys(WEAPONS).filter((name) =>
+        section ? WEAPONS[name].section === section : isZombieWeapon(name)
+      );
+      return {
+        slot,
+        equipped: equippedName,
+        items: names.map((name) => ({
+          name,
+          label: WEAPONS[name].name,
+          owned: inventory.some((i) => i.item_name === name && i.quantity > 0),
+          equipped: name === equippedName,
+        })),
+      };
+    }),
+  ];
   const locKey = locationOf(player);
+  // Quest state for the admin panel's read-only Quests card: reuses the same
+  // active/started/completed shaping as the game page, plus an "unstarted"
+  // list computed here (every QUESTS key not yet started/active/completed).
+  const questsBase = questsPayloadFor(player);
+  const startedKeys = new Set([
+    ...(player.quest_started ? player.quest_started.split(",").filter(Boolean) : []),
+    ...(player.quest_active !== "NONE" ? [player.quest_active] : []),
+  ]);
+  const completedKeys = new Set(player.quest_completed ? player.quest_completed.split(",").filter(Boolean) : []);
+  const unstarted = Object.keys(QUESTS)
+    .filter((k) => !startedKeys.has(k) && !completedKeys.has(k))
+    .map((k) => ({ key: k, name: QUESTS[k].name, desc: QUESTS[k].desc }));
+  const quests = { ...questsBase, unstarted };
   res.json({
     ok: true, username: String(req.query.username), level: player.level,
     nextLevelCost: levelCost(nextLevelOf(player.level)),
-    equippedGun: player.equipped_gun, stats, skills, inventory, guns, armors,
+    equippedGun: player.equipped_gun, stats, skills, inventory, guns, armors, weapons, quests,
     location: locKey, locationName: LOCATION_NAMES[locKey],
-    zombieZone: ZOMBIE_LOCATIONS.has(locKey),
+    zombieZone: isZombieActive(locKey, getGameState()),
     busyUntil: busyUntilOf(id), campfireUntil: campfireUntilOf(id),
     locations: Object.entries(LOCATION_NAMES).map(([key, name]) => ({ key, name })),
   });
@@ -3493,10 +3652,22 @@ app.get("/api/admin/world/locations", adminReq, (req, res) => {
     const lk = locationOf(p);
     onlineCounts[lk] = (onlineCounts[lk] || 0) + 1;
   }
-  const locations = Object.entries(LOCATION_NAMES).map(([key, name]) => ({
-    key, name, zombie: ZOMBIE_LOCATIONS.has(key),
-    count: getLocationCount(key), online: onlineCounts[key] || 0,
-  }));
+  const gs = getGameState();
+  const locations = Object.entries(LOCATION_NAMES).map(([key, name]) => {
+    const isZombieLoc = ZOMBIE_LOCATIONS.has(key);
+    // Outbreak-reserved locations (mountains/river/cave/town) are display-only
+    // for now — nothing writes to their zombies_<loc> columns yet, but the
+    // Zombies column should still surface a real number once the (unbuilt)
+    // Outbreak mode flags zombie_break, per the schema's own reserved intent.
+    const isOutbreakReserved = OUTBREAK_LOCATIONS.has(key) && !isZombieLoc;
+    let zombies = null; // null = "N/A" client-side
+    if (isZombieLoc) zombies = locationZombiesOf(gs, key);
+    else if (isOutbreakReserved && gs.zombie_break === 1) zombies = gs[`zombies_${key}`] ?? 0;
+    return {
+      key, name, zombie: isZombieLoc, zombies,
+      count: getLocationCount(key), online: onlineCounts[key] || 0,
+    };
+  });
   res.json({ ok: true, locations });
 });
 
@@ -3536,7 +3707,7 @@ app.get("/api/admin/world", adminReq, (req, res) => {
     const lk = locationOf(p);
     return {
       username: p.username, location: lk, locationName: LOCATION_NAMES[lk],
-      zombieZone: ZOMBIE_LOCATIONS.has(lk),
+      zombieZone: isZombieActive(lk, gs),
       busy: busyUntilOf(p.user_id) > 0, campfire: campfireUntilOf(p.user_id) > 0,
     };
   });
@@ -3547,6 +3718,8 @@ app.get("/api/admin/world", adminReq, (req, res) => {
     hordeSize: gs.horde_size,
     hordeStatus: hordeStatusOf(gs),
     raid: gs.raid_enabled === "true",
+    totalZPool: gs.total_z_pool,
+    outbreak: gs.zombie_break === 1,
     base: {
       health: gs.base_health, max: game_config.baseMaxHealth, destroyed,
       ap: baseApOf(activeRaw), // summed armor AP of everyone sheltering inside
@@ -3556,6 +3729,12 @@ app.get("/api/admin/world", adminReq, (req, res) => {
       resetAt: destroyed && gs.base_destroyed_at ? gs.base_destroyed_at + game_config.experimentResetHours * 3600 * 1000 : null,
     },
     online,
+    // Per-location zombie pool counts (the 4 always-active ZOMBIE_LOCATIONS
+    // only) — feeds the Horde box's location badges so wandering/splintering
+    // state is visible without switching to the Locations tab.
+    locationZombies: [...ZOMBIE_LOCATIONS].map((loc) => ({
+      key: loc, name: LOCATION_NAMES[loc], count: locationZombiesOf(gs, loc),
+    })),
     // World Chat & Events feed — the conversational subset only (not the
     // shoot/travel/action spam), and NOT filtered by the viewing admin's own
     // chat_deaf/chat_strict (those gate the normal player view; this is a
@@ -3603,6 +3782,105 @@ app.post("/api/admin/world/horde/instant", adminReq, (req, res) => {
   insertEvent("system", `[Admin] ${req.user} triggered an instant ${tier} — zombie count set to ${size} [${status}]`, "public", "global");
   log("INFO", `${req.user} triggered instant ${tier}, horde_size ${before} -> ${size}`, game_config);
   return res.json({ ok: true, message: `Instant ${tier}: zombie count set to ${size}.` });
+});
+
+// Force one World -> Location splinter, on demand, for the Locations tab's
+// "Splinter To" button. Gated on the SAME eligibility the tick itself uses
+// (horde_size >= z_wander) — this isn't an admin bypass, it's "do the thing
+// the tick would do right now," so it refuses when the tick wouldn't do it
+// either (see server.js's splinter/flow-back tick block for the mirrored logic).
+app.post("/api/admin/world/zombies/splinter", adminReq, (req, res) => {
+  const location = String(req.body.location || "");
+  if (!ZOMBIE_LOCATIONS.has(location)) return res.status(400).json({ ok: false, message: "Not a zombie-active location." });
+  const gs = getGameState();
+  if (gs.horde_size < zombie_config.z_wander) {
+    return res.status(409).json({
+      ok: false,
+      message: `Not splintering yet — horde must reach z_wander (${zombie_config.z_wander}) before it splits off. Currently: ${gs.horde_size}.`,
+    });
+  }
+  adjustHordeSize(-1);
+  adjustLocationZombies(location, 1);
+  insertEvent("spawn", `A zombie splits off toward ${LOCATION_NAMES[location]}`, "background", "global");
+  insertEvent("system", `[Admin] ${req.user} forced a zombie to splinter into ${LOCATION_NAMES[location]}`, "public", "global");
+  log("INFO", `${req.user} forced a splinter into ${location}`, game_config);
+  return res.json({ ok: true, message: `Splintered a zombie into ${LOCATION_NAMES[location]}.` });
+});
+
+// Force one Location -> World flow-back. Gated on the location actually
+// having a zombie to pull, not on the world's z_wander threshold (per user:
+// flow-back just needs a nonzero source pool — it's the safeguard against
+// forcing on an empty location, not a mirror of the tick's own selection logic).
+app.post("/api/admin/world/zombies/flowback", adminReq, (req, res) => {
+  const location = String(req.body.location || "");
+  if (!ZOMBIE_LOCATIONS.has(location)) return res.status(400).json({ ok: false, message: "Not a zombie-active location." });
+  const gs = getGameState();
+  const count = locationZombiesOf(gs, location);
+  if (count <= 0) return res.status(409).json({ ok: false, message: `No zombies at ${LOCATION_NAMES[location]} to flow back.` });
+  adjustLocationZombies(location, -1);
+  adjustHordeSize(1);
+  latchRaidIfNeeded(); // flowing back into World may cross into raid territory
+  insertEvent("spawn", `A zombie drifts back from ${LOCATION_NAMES[location]} toward the world`, "background", "global");
+  insertEvent("system", `[Admin] ${req.user} forced a zombie to flow back from ${LOCATION_NAMES[location]}`, "public", "global");
+  log("INFO", `${req.user} forced a flow-back from ${location}`, game_config);
+  return res.json({ ok: true, message: `Flowed a zombie back from ${LOCATION_NAMES[location]}.` });
+});
+
+// Force-end an active Outbreak — a clean admin override, distinct from both
+// natural end paths (no reward like the early-quell path, no freeze/reset
+// like the "zombies win" path). Zeros every OUTBREAK_LOCATIONS pool except
+// Forest, which keeps a chunk (z_break - 5) so the world isn't left
+// completely zombie-free — Forest is already a normal always-active zombie
+// location, so those just become ordinary zombies to mop up.
+app.post("/api/admin/world/outbreak/forceend", adminReq, (req, res) => {
+  const gs = getGameState();
+  if (gs.zombie_break !== 1) return res.status(409).json({ ok: false, message: "No Outbreak is currently active." });
+  for (const loc of OUTBREAK_LOCATIONS) {
+    setLocationZombies(loc, loc === "forest" ? Math.max(0, zombie_config.z_break - 5) : 0);
+  }
+  setZombieBreak(false);
+  setZombieBreakDefeatedAt(0); // defensive — this is not the "zombies win" path
+  insertEvent("system", `[Admin] ${req.user} forcibly ended the Outbreak.`, "public", "global");
+  log("WARN", `${req.user} force-ended the Outbreak`, game_config);
+  return res.json({ ok: true, message: "Outbreak forcibly ended." });
+});
+
+// Per-player counterpart: Location -> that player's own Nearby pool (mirrors
+// the tick's "wander" step, server.js's startZombieTicker part 3). Used by
+// the Location Manager modal's per-player row buttons.
+app.post("/api/admin/player/zombies/splinter", adminReq, (req, res) => {
+  const id = uidOf(req.body.username);
+  if (id === null) return res.status(404).json({ ok: false, message: "No such user." });
+  const player = getPlayerByUserId(id);
+  const loc = locationOf(player);
+  if (!ZOMBIE_LOCATIONS.has(loc)) return res.status(409).json({ ok: false, message: `${req.body.username} isn't in a zombie-active location.` });
+  const gs = getGameState();
+  const count = locationZombiesOf(gs, loc);
+  if (count <= 0) return res.status(409).json({ ok: false, message: `No zombies at ${LOCATION_NAMES[loc]} to send toward ${req.body.username}.` });
+  adjustLocationZombies(loc, -1);
+  adjustZombieNear(id, 1);
+  setZombieNearHealth(id, zombie_config.z_hp);
+  insertEvent("spawn", `A zombie creeps toward you at ${LOCATION_NAMES[loc]}`, "private", id);
+  insertEvent("system", `[Admin] ${req.user} forced a zombie toward ${req.body.username} at ${LOCATION_NAMES[loc]}`, "public", "global");
+  log("INFO", `${req.user} forced a zombie toward ${req.body.username} (Location -> Nearby)`, game_config);
+  return res.json({ ok: true, message: `Sent a zombie toward ${req.body.username}.` });
+});
+
+// Per-player counterpart: that player's Nearby pool -> back to Location
+// (mirrors updatePlayerLocation's own travel-flush logic).
+app.post("/api/admin/player/zombies/flowback", adminReq, (req, res) => {
+  const id = uidOf(req.body.username);
+  if (id === null) return res.status(404).json({ ok: false, message: "No such user." });
+  const player = getPlayerByUserId(id);
+  if ((player.zombie_near || 0) <= 0) return res.status(409).json({ ok: false, message: `${req.body.username} has no nearby zombies to send back.` });
+  const loc = locationOf(player);
+  if (!ZOMBIE_LOCATIONS.has(loc)) return res.status(409).json({ ok: false, message: `${req.body.username} isn't in a zombie-active location.` });
+  adjustZombieNear(id, -1);
+  adjustLocationZombies(loc, 1);
+  if (player.zombie_near - 1 <= 0) setZombieNearHealth(id, 0);
+  insertEvent("system", `[Admin] ${req.user} pulled a zombie off ${req.body.username} back to ${LOCATION_NAMES[loc]}`, "public", "global");
+  log("INFO", `${req.user} forced a zombie back from ${req.body.username} (Nearby -> Location)`, game_config);
+  return res.json({ ok: true, message: `Sent a zombie from ${req.body.username} back to ${LOCATION_NAMES[loc]}.` });
 });
 
 // Free admin base fixes — bypass the repair-kit stock / craft-a-turret loop
@@ -3776,6 +4054,40 @@ app.post("/api/admin/player/armor/equip", adminReq, (req, res) => {
   return res.json({ ok: true, message: `Equipped ${item.name}${owned ? "" : " (force-granted)"}.` });
 });
 
+// Weapon wheel (melee/fist/ranged/throwing/zombie) equivalent of the gun/armor
+// equip routes above — same shape: item: "" clears the slot, an unowned item
+// gets force-granted (equip button reads "Grant" on the panel for those).
+app.post("/api/admin/player/weapon/equip", adminReq, (req, res) => {
+  const id = uidOf(req.body.username);
+  if (id === null) return res.status(404).json({ ok: false, message: "No such user." });
+  const slot = String(req.body.slot || "");
+  if (!WEAPON_SLOT_KEYS.includes(slot)) return res.status(400).json({ ok: false, message: "Unknown weapon slot." });
+  const itemName = String(req.body.item || "").trim();
+  if (!itemName || itemName === "none") {
+    equipWeaponSlot(id, slot, "");
+    insertEvent("system", `[Admin] ${req.user} cleared ${req.body.username}'s ${slot} weapon slot`, "public", "global");
+    log("INFO", `${req.user} cleared ${req.body.username}'s ${slot} weapon slot`, game_config);
+    return res.json({ ok: true, message: `${slot} slot cleared.` });
+  }
+  const item = WEAPONS[itemName];
+  if (!item) return res.status(400).json({ ok: false, message: "That isn't a weapon." });
+  const slotOk =
+    slot === "melee" ? item.section === "Melee" :
+    slot === "fist" ? item.section === "Fist" :
+    slot === "ranged" ? item.section === "Ranged" :
+    slot === "throwing" ? item.section === "Throwing" :
+    isZombieWeapon(itemName);
+  if (!slotOk) return res.status(400).json({ ok: false, message: `${item.name} doesn't go in the ${slot} slot.` });
+  const owned = getInventory(id).some((i) => i.item_name === itemName && i.quantity > 0);
+  const force = req.body.force === "true" || req.body.force === "1";
+  if (!owned && !force) return res.status(409).json({ ok: false, message: `${req.body.username} doesn't own a ${item.name} (use force).` });
+  if (!owned) giveInventoryItem(id, itemName, 1);
+  equipWeaponSlot(id, slot, itemName);
+  insertEvent("system", `[Admin] ${req.user} equipped ${req.body.username} with the ${item.name} (${slot})`, "public", "global");
+  log("INFO", `${req.user} equipped ${itemName} on ${req.body.username}'s ${slot} slot${owned ? "" : " (forced)"}`, game_config);
+  return res.json({ ok: true, message: `Equipped ${item.name}${owned ? "" : " (force-granted)"}.` });
+});
+
 // --- Item catalogue (read-only) ---
 // Items live in item_backbone.js now, not an admin-editable table — the panel
 // shows the registry + recipes for reference; editing means editing the file.
@@ -3849,9 +4161,71 @@ app.post("/api/admin/items/give", adminReq, (req, res) => {
 //   base death kills everyone inside; personal health 0 kills that player.
 const ARMOR_DEGRADE_CHANCE = 15; // % chance per landed hit — tunable
 
+// Applies zombie damage to one player: AP-block first, then shield/health,
+// Defense XP training and a chance to nick armor condition on any damage
+// that actually lands (fully-blocked hits teach/degrade nothing). Returns
+// true if this hit killed them. Shared by the normal tick's per-player
+// attack-apply loop and the Outbreak hive-mind attack below — Outbreak
+// locations never include basecamp_inside, so only this per-player branch
+// (never the base-absorption one) ever applies there.
+function applyZombieHitToPlayer(pl, dmg, isRaidLikeXpScale) {
+  const blocked = apBlocked(dmg, armorApOf(pl));
+  const dealt = dmg - blocked;
+  const r = damagePlayer(pl.user_id, dealt);
+  const armorNote = blocked > 0 ? `, armor blocked ${blocked}` : "";
+  insertEvent("attack", `A zombie hit you for ${dealt}${armorNote} (shield ${r.shield}, health ${r.health})`, "private", pl.user_id);
+  if (dealt > 0) {
+    const defXp = isRaidLikeXpScale ? Math.max(1, Math.floor(dealt / 10)) : Math.max(1, Math.floor(dealt / 5) * 3);
+    addSkillXp(pl.user_id, "defense", defXp);
+    const equippedSlots = ARMOR_PIECES.filter((slot) => pl[`a_${slot}`]);
+    if (equippedSlots.length && Math.random() * 100 < ARMOR_DEGRADE_CHANCE) {
+      const slot = equippedSlots[Math.floor(Math.random() * equippedSlots.length)];
+      const itemName = pl[`a_${slot}`];
+      const newCond = adjustArmorCondition(pl.user_id, itemName, -1);
+      insertEvent("attack", `Your ${itemName} takes a scratch (condition ${newCond})`, "private", pl.user_id);
+    }
+  }
+  return r.health <= 0;
+}
+
+// Consolidates every zombie in existence (gs.total_z_pool — World pool + all
+// 8 Location pools + everyone's Nearby pool, already accounted for by the
+// mirroring baked into adjustHordeSize/adjustLocationZombies/adjustZombieNear)
+// and splits that total evenly across the 8 OUTBREAK_LOCATIONS, remainder to
+// Forest — mathematically equivalent to "flow everything back to World, then
+// split," just computed directly rather than routed through an intermediate
+// step. Splinter/flow-back/wander/the normal tiered attack all stop the
+// instant this runs (see the tick's `zombie_break === 1` branch) until the
+// Outbreak ends one way or another.
+function triggerOutbreak() {
+  const gs = getGameState();
+  const total = gs.total_z_pool;
+  const locs = [...OUTBREAK_LOCATIONS];
+  const per = Math.floor(total / locs.length);
+  const remainder = total - per * locs.length;
+  for (const loc of locs) {
+    setLocationZombies(loc, loc === "forest" ? per + remainder : per);
+  }
+  adjustHordeSize(-gs.horde_size); // zero World — everything now lives in the 8 location pools
+  for (const p of getPlayersWithZombieNear()) {
+    adjustZombieNear(p.user_id, -p.zombie_near);
+    setZombieNearHealth(p.user_id, 0);
+  }
+  setZombieBreak(true);
+  setZombieBreakDefeatedAt(0); // defensive — should already be 0
+  setZombieBreakFalltime(Date.now());
+  cancelHuntVote(); // void anything mid-flight rather than let it resolve against outbreak-active state
+  insertEvent("system", `⚠️ AN OUTBREAK HAS BEGUN! ${total} zombies have overrun the world — they're everywhere now.`, "public", "global");
+  log("WARN", `Outbreak triggered — ${total} zombies split across ${locs.length} locations`, game_config);
+}
+
 function startZombieTicker() {
   const intervalMs = Math.max(1, zombie_config.z_tic) * 1000;
   const resetMs = game_config.experimentResetHours * 3600 * 1000;
+  // Ticks since total_z_pool last held >= z_break (see the roll-eligibility
+  // check at the end of this tick) — restart-clears, same convention as
+  // ACTION_BUSY/CAMPFIRES/HUNT_VOTE.
+  let outbreakRollTics = 0;
 
   setInterval(() => {
     let gs = getGameState();
@@ -3862,6 +4236,125 @@ function startZombieTicker() {
         experimentReset("24 hours elapsed");
       }
       return;
+    }
+
+    // 0b) A defeated Outbreak (zombies won — see the active-outbreak branch
+    // below) freezes the world the same way, but on its own z_break_reset-hour
+    // timer instead of experimentResetHours.
+    if (outbreakDefeated(gs)) {
+      const outbreakResetMs = zombie_config.z_break_reset * 3600 * 1000;
+      if (Date.now() - gs.z_break_defeated_at >= outbreakResetMs) {
+        experimentReset("the Outbreak consumed the world");
+      }
+      return;
+    }
+
+    // 0c) Active Outbreak: spawn/splinter/wander/the normal tiered attack are
+    // ALL skipped while this runs — replaced entirely by the logic below.
+    // Started by triggerOutbreak() (see the roll-eligibility check at the
+    // bottom of this tick), ended either here (duration expiry — zombies
+    // win) or below (enough killed — quelled early).
+    if (gs.zombie_break === 1) {
+      const cutoff = Date.now() - game_config.timeout * 1000;
+
+      // Duration expired first: zombies win. Checked before the fall
+      // threshold so a last-second kill can't save everyone if time's
+      // already up.
+      if (Date.now() - gs.z_break_falltime >= zombie_config.z_break_duration * 1000) {
+        const doomed = getActivePlayers(cutoff)
+          .filter((p) => !(DEV_FLAGS.stealthAdmins && isUserAdmin(p.user_id)))
+          .filter((p) => locationZombiesOf(gs, locationOf(p)) > 0);
+        for (const p of doomed) {
+          resetPlayer(p.user_id);
+          insertEvent("death", "The Outbreak Consumed You — you died and lost everything.", "private", p.user_id);
+        }
+        setZombieBreak(false);
+        setZombieBreakDefeatedAt(Date.now());
+        insertEvent("system", "THE OUTBREAK HAS CONSUMED THE WORLD. The dead walk everywhere.", "public", "global");
+        log("WARN", `Outbreak duration expired — ${doomed.length} player(s) consumed`, game_config);
+        return;
+      }
+
+      // Enough zombies killed already (via normal player combat, tracked
+      // live through total_z_pool) — quell it early. z_break_fall% is
+      // against the static z_break config number, not the actual (possibly
+      // larger) total that got split at trigger time.
+      const fallThreshold = zombie_config.z_break - Math.floor(zombie_config.z_break * (zombie_config.z_break_fall / 100));
+      if (gs.total_z_pool <= fallThreshold) {
+        for (const loc of OUTBREAK_LOCATIONS) {
+          const count = locationZombiesOf(gs, loc);
+          if (count > 0) {
+            adjustLocationZombies(loc, -count);
+            adjustHordeSize(count);
+          }
+        }
+        latchRaidIfNeeded(); // flowing back into World may cross into raid territory
+        setZombieBreak(false);
+        const survivors = getActivePlayers(cutoff);
+        for (const p of survivors) applyReward(p.user_id, zombie_config.z_break_reward);
+        insertEvent("system", `The Outbreak has been quelled! The horde retreats back into the world.${survivors.length ? ` ${survivors.length} survivor(s) rewarded.` : ""}`, "public", "global");
+        log("INFO", `Outbreak ended early (total_z_pool=${gs.total_z_pool} <= threshold=${fallThreshold}), ${survivors.length} player(s) rewarded`, game_config);
+        return;
+      }
+
+      // Still ongoing: one "hive-mind" roll for the whole Outbreak this tick
+      // — no per-location/per-player passive checks. On a hit, every present
+      // player at any OUTBREAK_LOCATIONS location that currently has
+      // zombies takes a hit; on a miss, the horde just shambles this tick.
+      if (Math.random() * 100 < zombie_config.z_hit) {
+        const targets = getActivePlayers(cutoff)
+          .filter((p) => !(DEV_FLAGS.stealthAdmins && isUserAdmin(p.user_id)))
+          .filter((p) => locationZombiesOf(gs, locationOf(p)) > 0);
+        const deaths = [];
+        for (const p of targets) {
+          if (applyZombieHitToPlayer(p, zombie_config.z_damage, false)) deaths.push(p);
+        }
+        for (const d of deaths) {
+          resetPlayer(d.user_id);
+          insertEvent("death", "You died and lost everything — back to level 1.", "private", d.user_id);
+          insertEvent("system", `${d.username} was torn apart by the Outbreak horde.`, "public", "global");
+        }
+        insertEvent("system", "The horde surges — a coordinated attack tears through the Outbreak zones!", "public", "global");
+        log("INFO", `tick: Outbreak hive-mind attack hit ${targets.length} player(s), ${deaths.length} death(s)`, game_config);
+      } else {
+        log("FULL", "tick: Outbreak horde shambles restlessly — no attack this tic", game_config);
+      }
+      return;
+    }
+
+    // Outbreak roll: ticks toward a chance at triggering triggerOutbreak(),
+    // once total_z_pool clears z_break. Checked once per tick, here rather
+    // than at the tick's end, since steps 1-4 below have their own
+    // early-return paths (no hunt, no one present, etc.) that would
+    // otherwise make a check placed after them unreliable.
+    if (gs.hunt_enabled === "true" && gs.total_z_pool >= zombie_config.z_break) {
+      outbreakRollTics++;
+    } else {
+      outbreakRollTics = 0;
+    }
+    if (outbreakRollTics >= zombie_config.z_break_tic_run) {
+      const rollCutoff = Date.now() - game_config.timeout * 1000;
+      const onlineCount = getActivePlayers(rollCutoff).length;
+      const intervalOk = Date.now() - gs.z_break_falltime >= zombie_config.z_break_interval * 1000;
+      // Online-count/interval not yet satisfied: leave the tic counter as-is
+      // (already over threshold) so eligibility is re-checked every tick
+      // from here on, rather than resetting and forcing another full
+      // z_break_tic_run wait for a condition unrelated to the zombie count.
+      if (onlineCount >= zombie_config.z_break_players && intervalOk) {
+        if (Math.random() * 100 < zombie_config.z_break_chance) {
+          triggerOutbreak();
+          outbreakRollTics = 0;
+          // Bail out of this tick entirely — triggerOutbreak() just zeroed
+          // horde_size and rewrote the location pools; letting the normal
+          // spawn/splinter/wander/attack steps below run against that same
+          // tick would immediately corrupt the fresh split (e.g. step 1
+          // spawning a "new" zombie back into horde_size right after it was
+          // zeroed). The next tick picks it up via the zombie_break === 1
+          // branch above instead.
+          return;
+        }
+        outbreakRollTics = 0; // reset after every failed attempt too
+      }
     }
 
     // Dev -H/-r: keep the horde topped up to the hunting (-H) or raiding (-r)
@@ -4001,28 +4494,7 @@ function startZombieTicker() {
       if (pl.location === "basecamp_inside" && insideAbsorbed < 500) {
         baseDamage += 2; insideAbsorbed++;
       } else {
-        const blocked = apBlocked(dmg, armorApOf(pl));
-        const dealt = dmg - blocked;
-        const r = damagePlayer(uid, dealt);
-        const armorNote = blocked > 0 ? `, armor blocked ${blocked}` : "";
-        insertEvent("attack", `A zombie hit you for ${dealt}${armorNote} (shield ${r.shield}, health ${r.health})`, "private", uid);
-        // Taking a hit trains Defense — scaled from the damage that actually
-        // landed (fully-blocked hits teach nothing): raids grind you tougher
-        // slowly per point, lighter tiers pay better per point of pain.
-        if (dealt > 0) {
-          const defXp = raiding ? Math.max(1, Math.floor(dealt / 10)) : Math.max(1, Math.floor(dealt / 5) * 3);
-          addSkillXp(uid, "defense", defXp);
-          // Chance to strip 1 condition from a random equipped armor piece —
-          // only rolls on damage that actually landed, same gate as Defense XP.
-          const equippedSlots = ARMOR_PIECES.filter((slot) => pl[`a_${slot}`]);
-          if (equippedSlots.length && Math.random() * 100 < ARMOR_DEGRADE_CHANCE) {
-            const slot = equippedSlots[Math.floor(Math.random() * equippedSlots.length)];
-            const itemName = pl[`a_${slot}`];
-            const newCond = adjustArmorCondition(uid, itemName, -1);
-            insertEvent("attack", `Your ${itemName} takes a scratch (condition ${newCond})`, "private", uid);
-          }
-        }
-        if (r.health <= 0) deaths.push(pl);
+        if (applyZombieHitToPlayer(pl, dmg, raiding)) deaths.push(pl);
       }
     }
 
@@ -4045,7 +4517,7 @@ function startZombieTicker() {
       const zNow = getGameState().horde_size;
       if (zNow > 0) {
         const sentry = { accuracy: SENTRY_ACCURACY };
-        if (Math.random() * 100 < computeHitChance(sentry, GUN_BEHAVIOR.rifle, SENTRY_ACCURACY)) {
+        if (Math.random() * 100 < computeHitChance(sentry, WEAPON_FIREARM_EXPORT.rifle, SENTRY_ACCURACY)) {
           const kills = Math.min(zNow, riflePierces(sentry, zNow) ? 2 : 1);
           adjustHordeSize(-kills);
           const left = zNow - kills;

@@ -53,17 +53,22 @@ export const ssl_config = {
 export const zombie_config = {
   z_tic: 15, // Time interval for zombie actions in seconds
   z_chance: 5, // Chance of zombie action occurring (percentage)
-  z_hit: 10, // Chance of zombie hitting the player (percentage)
+  z_hit: 1, // Chance of zombie hitting the player (percentage)
   z_damage: 3, // Damage dealt per zombie hit (absorbed by shield first, then health)
   z_horde: 5, // Number of zombies in a horde
   z_raid: 15, // Number of zombies in a raid
   z_hp: 20, // Health points of each zombie
   z_wander: 15, // number of zombie required to start world wandering
-  z_wander_chance: 10, // per-player, per-tick chance (percentage) a Location zombie wanders into a present player's "nearby" pool during a horde
-  z_break: 100, // Number of zombies needed to create a Zombie Break event.
-  z_break_chance: 10, // Chance of a Zombie Break event occurring (percentage)
-  z_break_duration: 60, // Duration of a Zombie Break event in seconds
-  z_break_reward: { gold: 500, xp: 250 }, // Reward for surviving a Zombie Break event
-  z_break_fall: 50 // Number of Zombies that must be killed to end a Zombie Break event early (percentage)
+  z_wander_chance: 15, // per-player, per-tick chance (percentage) a Location zombie wanders into a present player's "nearby" pool during a horde
+  // Outbreak mode settings.
+  z_break: 100, // Number of zombies needed to create a Outbreak Mode event.
+  z_break_players: 5, // Minimum number of players required to trigger a Outbreak Mode event.
+  z_break_interval: 300, // Time interval (in seconds) between Outbreak Mode events.
+  z_break_tic_run: 1, // Number of z_tic intervals that must pass between z_break chance rolls.
+  z_break_chance: 99, // Chance of a Outbreak Mode event occurring (percentage)
+  z_break_duration: 600, // Max duration of a Outbreak Mode event in seconds
+  z_break_reward: { gold: 500, xp: 250, level: 3 }, // Reward for surviving a Outbreak Mode event
+  z_break_fall: 50, // Number of Zombies that must be killed to end a Outbreak Mode event early (percentage)
+  z_break_reset: 3, // Number of hours after the Outbreak winning that we reset the experiment.
 
 };

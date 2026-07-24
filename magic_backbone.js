@@ -1,4 +1,4 @@
-// magic.js — the spell registry (pure data + magic-only helpers, NO imports —
+// magic_backbone.js — the spell registry (pure data + magic-only helpers, NO imports —
 // same leaf-module convention as item_backbone.js).
 //
 // MAGIC_SPELLS fields:
@@ -36,7 +36,7 @@ export const MAGIC_SPELL_CATEGORIES = {
     "travel": { name: "Travel Spells",  desc: "Spells that allow teleportation to specific locations." },
 };
 
-// Spells flagged `starter: true` — granted by db.js on account creation and
+// Spells flagged `starter: true` — granted by db_backbone.js on account creation and
 // after every death reset (and backfilled at boot for pre-existing players).
 export const STARTER_SPELLS = Object.entries(MAGIC_SPELLS)
   .filter(([, s]) => s.starter)
@@ -44,14 +44,14 @@ export const STARTER_SPELLS = Object.entries(MAGIC_SPELLS)
 
 // ===== Magic Backbone =====
 // Magic-system helpers that only server.js's spell-casting code needs — kept
-// out of db.js since none of it touches SQL (see addMana and the player_magic
-// accessors in db.js for the SQL side, which stays there for that reason).
+// out of db_backbone.js since none of it touches SQL (see addMana and the player_magic
+// accessors in db_backbone.js for the SQL side, which stays there for that reason).
 
 export const SPELL_TYPES = ["attack", "armor", "heal", "aid", "travel"];
 
 // Boot-time sanity check for MAGIC_SPELLS — a typo here dies at boot, not
 // mid-cast. Takes LOCATION_NAMES/ITEMS as params (rather than importing
-// db.js/item_backbone.js) so this file stays a leaf; server.js calls this
+// db_backbone.js/item_backbone.js) so this file stays a leaf; server.js calls this
 // and owns the FATAL logging/exit, same as the item registry validation.
 export function validateMagicSpells(LOCATION_NAMES, ITEMS) {
   const bad = [];

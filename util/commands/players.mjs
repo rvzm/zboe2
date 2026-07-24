@@ -1,10 +1,10 @@
-// EDITABLE_STATS / setPlayerStat live in db.js (the single source of truth for
+// EDITABLE_STATS / setPlayerStat live in db_backbone.js (the single source of truth for
 // which player columns are admin-editable and how they clamp).
 import { styleText } from "node:util";
 import {
   db, GUN_NAMES, giveInventoryItem, EDITABLE_STATS, setPlayerStat, forceLevel,
   SKILLS, SKILL_NAMES, skillLevelCost,
-} from "../../db.js";
+} from "../../db_backbone.js";
 
 function getUserId(username) {
   return db.prepare("SELECT id FROM users WHERE username = ?").get(username)?.id ?? null;

@@ -111,7 +111,7 @@ Every cast (hit or miss) costs its mana and grants Magic XP, so training the ski
 
 ### The item registry
 
-`item_backbone.js` is the single source of truth for every item and crafting recipe in the game — guns, tools, armor, consumables, treasure, crafting materials — as plain, readable rows: display name, type, description, value, shop price, and (for consumables) the exact effect it applies. `magic.js` does the same for spells. Both are validated at boot: an unknown item reference, a bad effect verb, an armor with no valid AP, a spell with a missing effect field — any of it is a loud startup FATAL, not a silent runtime bug. Adding content to the game is meant to be "add a row," not "hunt through the code."
+`item_backbone.js` is the single source of truth for every item and crafting recipe in the game — guns, tools, armor, consumables, treasure, crafting materials — as plain, readable rows: display name, type, description, value, shop price, and (for consumables) the exact effect it applies. `magic_backbone.js` does the same for spells. Both are validated at boot: an unknown item reference, a bad effect verb, an armor with no valid AP, a spell with a missing effect field — any of it is a loud startup FATAL, not a silent runtime bug. Adding content to the game is meant to be "add a row," not "hunt through the code."
 
 ### Progression
 

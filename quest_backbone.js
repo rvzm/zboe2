@@ -155,26 +155,7 @@ export const QUESTS = {
 
 
 export const QUEST_OBJECTIVE_TYPES = ["action", "recipe", "use_item", "learn_spell", "break_horde", "clear_raid", "acquire_item"];
-export const QUEST_REWARDS = {
-    "gold": { give: "gold" },
-    "tokens": { give: "tokens" },
-    "xp": { give: "xp" },
-    "items": { give: "items" },
-    "level_up": { grant_instant_level: true },
-}
 
-export const QUEST_REWARD_EXPORTER = {
-  "gold": (player, qty) => { player.gold += qty; },
-  "tokens": (player, qty) => { player.tokens += qty; },
-  "xp": (player, qty) => { player.xp += qty; },
-  "items": (player, items) => {
-    for (const [item, qty] of Object.entries(items)) {
-      if (!player.items[item]) player.items[item] = 0;
-      player.items[item] += qty;
-    }
-  },
-  "grant_instant_level": (player) => { player.level += 1; },
-};
 export const QUEST_PROGRESS_HOOK = {
     // Hook for quest progress tracking. Each objective type has a corresponding function that checks if the player has completed the objective.
     "action": (player, objective) => {

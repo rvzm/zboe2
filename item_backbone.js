@@ -1,6 +1,6 @@
  // item_backbone.js — the item registry (pure data, NO imports, NO logic).
  // Single source of truth for every in-game item and crafting recipe. Both
- // db.js and server.js import from here; server.js validates all references
+ // db_backbone.js and server.js import from here; server.js validates all references
  // against ITEMS at boot, so a typo'd name dies loudly instead of silently.
  //
  // Adding an item = adding a row to ITEMS. Adding a recipe = a row in RECIPES.
@@ -17,6 +17,12 @@
  //           interpreter once and every item can use it
  //   shop    { cost, currency: "gold"|"token" } — listed in the in-game shop
  //   gunType (guns) which per-gun stat block it maps to
+ //   attack_mod (guns) optional { dmg?, floor?, acc? } additive offset from
+ //           the base WEAPON_FIREARM_EXPORT[gunType] stats — dmg/floor shift
+ //           the underlying inputs, acc is a flat post-formula hit-chance
+ //           handicap/bonus (server.js computeHitChance, clamped [0,100]).
+ //           Broad-scope (World/Location) kills are instant and never read
+ //           dmg, so attack_mod.dmg only matters in Nearby-scope combat.
  //   ap      (armor) Armor Points, a 1-500 gauge of effectiveness: the
  //           equipped armor blocks ap/500 of each tick's tallied zombie
  //           damage (server.js apBlocked). Armor equips from the Backpack
@@ -35,21 +41,32 @@
  export const WEAPON_THROWING_OPTIONS = ["throwing knives", "spear", "javelin"];
  export const WEAPON_FIREARM_TYPES = ["handgun", "rifle", "shotgun", "burstrifle", "railgun", "bfg2000"];
  export const WEAPON_ATTACK_EXPORT = {
-    "Melee":    { floor: 35 },
+    "Melee":    { floor: 45 },
     "Ranged":   { floor: 40 },
     "Throwing": { floor: 30 },
     "Fist":     { floor: 30 },
     "Zombie":   { floor: 45 },
     "Firearm":  { floor: 40 },
  };
+ // The single gun accuracy/damage/target model, shared by both World/Location
+ // (Broad, instant-kill) and Nearby (real HP) combat — formerly two separate
+ // tables (WEAPON_FIREARM_EXPORT + GUN_BEHAVIOR); folded into one.
+ // accuracyModel: "player"    → player accuracy stat (+ gun condition), floored.
+ //                "condition" → floor scaled by condition only.
+ // floor: optional — computeHitChance()/nearbyGunHitChance() default a missing
+ //        floor to 5 (a player-model gun's floor is just a sanity-check lower
+ //        bound, not a defining value).
+ // maxTargets: zombies a single successful Broad-scope shot can drop (unused
+ //             in Nearby scope, which resolves one queued zombie at a time).
  export const WEAPON_FIREARM_EXPORT = {
-    "handgun":   { acc_model: "player", dmg: 6, ammo: 6, clips: 3 },
-    "rifle":     { acc_model: "condition", dmg: 8, floor: 60, ammo: 12, clips: 3 },
-    "burstrifle":  { acc_model: "condition", dmg: 7, floor: 55, ammo: 15, clips: 3 },
-    "shotgun":    { acc_model: "condition", dmg: 15, floor: 50, ammo: 8, clips: 3 },
-    "railgun":    { acc_model: "condition", dmg: 25, floor: 70, ammo: 5, clips: 2 },
-    "bfg2000":   { acc_model: "condition", dmg: 200, floor: 80, ammo: 1, clips: 3 },
+    "handgun":   { accuracyModel: "player", dmg: 6, ammo: 6, clips: 3, maxTargets: 1 },
+    "rifle":     { accuracyModel: "condition", dmg: 8, floor: 60, ammo: 12, clips: 3, maxTargets: 1 },
+    "burstrifle":  { accuracyModel: "condition", dmg: 7, floor: 55, ammo: 15, clips: 3, maxTargets: 3 },
+    "shotgun":    { accuracyModel: "condition", dmg: 15, floor: 50, ammo: 8, clips: 3, maxTargets: 5 },
+    "railgun":    { accuracyModel: "condition", dmg: 25, floor: 70, ammo: 5, clips: 2, maxTargets: 3 },
+    "bfg2000":   { accuracyModel: "condition", dmg: 200, floor: 80, ammo: 1, clips: 10, maxTargets: 100 },
  };
+
 
  export const ITEMS = {
    // --- Guns (capitalized keys are legacy inventory names — keep them) ---
@@ -329,7 +346,7 @@
    "zombie shield":     { name: "Zombie Shield",     piece: "shield", type: "armor", section: "zombie",     desc: "A shield forged from zombie remains. Extremely protective.", value: 2000, ap: 350, defense: 35 },
  
    // - Magic ingredients (gathered via magic-skill location actions; consumed
-   //   learning spells at the Magic Table in Town — see magic.js `learn` maps)
+   //   learning spells at the Magic Table in Town — see magic_backbone.js `learn` maps)
    "glowcap":        { name: "Glowcap",        type: "crafting", section: "Magic", desc: "A faintly luminous mushroom. Hums with magic.", value: 9 },
    "arcane dust":    { name: "Arcane Dust",    type: "crafting", section: "Magic", desc: "Glittering residue sifted from a ley line.",  value: 15 },
    "spirit bloom":   { name: "Spirit Bloom",   type: "crafting", section: "Magic", desc: "A pale flower that sways without wind.",      value: 12 },

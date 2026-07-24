@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>About ZBOE</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        body {
+          background: radial-gradient(1000px 500px at 20% 0%, rgba(13,110,253,.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(25,135,84,.12), transparent 60%),
+                  #0b0f14;
+        }
+        .muted-mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color: rgba(255,255,255,.65);
+        font-size: .85rem;
+        }
+        .mx-auto {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color: rgba(255,255,255,.65);
+        font-size: .85rem;
+        }
+
+        #pageBg{
+            position:fixed;
+            inset:0;
+            z-index:-1;
+
+            background-image:
+                linear-gradient(rgba(11,15,20,.65),rgba(11,15,20,.90)),
+                url("/img/page_about.png");
+
+            background-size:cover;
+            background-position:center;
+        }
+
+        .soft-card{
+            background:rgba(255,255,255,.03);
+            border:1px solid rgba(255,255,255,.12);
+        }
+
+        .soft-card .card-header{
+            background:rgba(255,255,255,.06);
+            border-color:rgba(255,255,255,.12);
+        }
+
+        .muted-mono{
+            font-family:ui-monospace, monospace;
+            color:rgba(255,255,255,.65);
+            font-size:.9rem;
+        }
+
+        .feature{
+            text-align:center;
+            padding:1.5rem;
+        }
+
+        .feature .icon{
+            font-size:2.3rem;
+            margin-bottom:.75rem;
+        }
+
+        .timeline-item{
+            border-left:2px solid rgba(255,255,255,.15);
+            padding-left:1rem;
+            margin-left:.5rem;
+            margin-bottom:1.5rem;
+        }
+
+        .tech-pill{
+            display:inline-block;
+            margin:.25rem;
+        }
+
+        footer{
+            opacity:.6;
+        }
+        .soft-card {
+             background: rgba(255,255,255,.03);
+             border-color: rgba(255,255,255,.12);
+        }
+        /* Bootstrap cards reset to the (dark) body color — without this the header
+           titles are near-invisible on the dark background. */
+        .soft-card .card-header {
+        background: rgba(255,255,255,.06);
+        border-color: rgba(255,255,255,.12);
+        color: #ffffff;
+        }
+    </style>
+</head>
+
+<body class="text-light">
+
+<div id="pageBg"></div>
+
+<nav class="navbar navbar-dark border-bottom" style="border-color:rgba(255,255,255,.12)!important;">
+    <div class="container py-2 d-flex justify-content-between">
+
+        <span class="navbar-brand fw-semibold">
+            🧟 ZBOE
+            <span class="opacity-75">About</span>
+        </span>
+
+        <div class="d-flex gap-2">
+            <a href="/" class="btn btn-outline-light btn-sm">Home</a>
+            <a href="/playercard.html" class="btn btn-outline-light btn-sm">Leaderboard</a>
+            <a href="/game" class="btn btn-outline-light btn-sm">Game</a>
+        </div>
+
+    </div>
+</nav>
+
+<main class="container my-4">
+
+    <div class="card soft-card mb-4">
+
+        <div class="card-body text-center py-5">
+
+            <h1 class="display-5 fw-bold">
+                Zombie Biohazard Outbreak Experiment 2
+            </h1>
+
+            <p class="lead text-secondary mt-3">
+
+                A persistent online zombie survival RPG built for the browser.
+
+            </p>
+
+            <p class="mx-auto" style="max-width:850px">
+
+                zboe2 started as an IRC-based bot, named simply zboe which had no acronymic meaning, that simply informed chatters when zombies appeared, allowing
+                them to issue a command (originally, the bot used ".shoot" as a chat command, and ".reload) to interact. Eventually the IRC bot got a small shop
+                where users could buy ammo, but thats about as far as it went. That was in 2012. Now, it's 2026, and zboe2 has been born (circia 2024 ish) as something
+                new: Zombie Biohazard Outbreak Experiment. When this project started zboe became zboe2, to signify it's "rebirth" and gained an acronymic meaning.      
+                However, we started as "Zombie Biohazard Occult Experiment 2", because i was struggling to come up with what the O in zbOe could mean, but always knew
+                that "Occult" wasn't quite right. Then it hit me: Outbreak.
+
+            </p>
+
+            <div class="mt-4">
+
+                <a class="btn btn-danger me-2" href="/game">
+                    Play Now
+                </a>
+
+                <a class="btn btn-outline-light me-2" href="/playercard.html">
+                    Leaderboard
+                </a>
+
+                <a class="btn btn-outline-info"
+                   href="https://github.com/rvzm/zboe2" target="_blank">
+                    GitHub
+                </a>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="row g-4">
+
+        <div class="col-lg-6">
+
+            <div class="card soft-card h-100">
+
+                <div class="card-header fw-semibold">
+                    🌎 About the Game
+                </div>
+
+                <div class="card-body">
+
+                    <p>
+
+                        ZBOE combines classic browser RPG mechanics with modern
+                        progression systems.
+
+                    </p>
+
+                    <p>
+
+                        Players venture into dangerous zombie-infested locations,
+                        gather resources, improve their equipment, craft better
+                        gear, complete quests, and slowly rebuild humanity's
+                        chances of survival.
+
+                    </p>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-lg-6">
+
+            <div class="card soft-card h-100">
+
+                <div class="card-header fw-semibold">
+                    🎯 Core Features
+                </div>
+
+                <div class="card-body">
+
+                    ✔ Persistent Online World<br>
+                    ✔ RPG Progression<br>
+                    ✔ Hundreds of Items<br>
+                    ✔ Crafting & Smelting<br>
+                    ✔ Quests<br>
+                    ✔ Magic System<br>
+                    ✔ Guns & Melee Combat<br>
+                    ✔ Armor & Equipment<br>
+                    ✔ Player Leaderboards
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="row mt-4 g-3">
+
+        <div class="col-md-4">
+
+            <div class="card soft-card feature h-100">
+
+                <div class="icon">⚔️</div>
+
+                <h5>Combat</h5>
+
+                <div class="muted-mono">
+
+                    Firearms, melee weapons, bows,
+                    throwable weapons and magic.
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-md-4">
+
+            <div class="card soft-card feature h-100">
+
+                <div class="icon">⚒️</div>
+
+                <h5>Crafting</h5>
+
+                <div class="muted-mono">
+
+                    Gather resources, smelt ores,
+                    repair equipment and improve your base.
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-md-4">
+
+            <div class="card soft-card feature h-100">
+
+                <div class="icon">🏆</div>
+
+                <h5>Progression</h5>
+
+                <div class="muted-mono">
+
+                    Level skills, unlock equipment,
+                    complete quests and climb the leaderboard.
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="card soft-card mt-4">
+
+        <div class="card-header fw-semibold">
+            📈 Development
+        </div>
+
+        <div class="card-body">
+
+            <div class="timeline-item">
+                <strong>Project Started</strong><br>
+                <span class="muted-mono">
+                    Initial browser RPG concept.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>Combat & Inventory</strong><br>
+                <span class="muted-mono">
+                    Core gameplay systems implemented.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>Player Cards</strong><br>
+                <span class="muted-mono">
+                    Public player profiles and leaderboards.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>Magic & Quests</strong><br>
+                <span class="muted-mono">
+                    Expanding progression and gameplay.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>Public Alpha</strong><br>
+                <span class="muted-mono">
+                    The beginning of a much larger world.
+                </span>
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="row mt-4 g-4">
+
+        <div class="col-lg-6">
+
+            <div class="card soft-card h-100">
+
+                <div class="card-header fw-semibold">
+                    💻 Built With
+                </div>
+
+                <div class="card-body">
+
+                    <span class="badge bg-success tech-pill">Node.js</span>
+                    <span class="badge bg-primary tech-pill">Express</span>
+                    <span class="badge bg-secondary tech-pill">SQLite</span>
+                    <span class="badge bg-info tech-pill text-dark">Bootstrap 5</span>
+                    <span class="badge bg-warning text-dark tech-pill">WebSockets</span>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-lg-6">
+
+            <div class="card soft-card h-100">
+
+                <div class="card-header fw-semibold">
+                    ❤️ About the Developer
+                </div>
+
+                <div class="card-body">
+
+                    ZBOE is an independent passion project focused on creating a
+                    lightweight browser RPG that anyone can jump into without
+                    downloads or launchers.
+
+                    <hr>
+
+                    Every update expands the world with new systems, locations,
+                    items, and mechanics.
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</main>
+
+<footer class="container text-center py-5">
+
+    <div class="muted-mono">
+
+        Zombie Biohazard Outbreak Experiment 2
+
+        <br>
+
+        Version 2.0.x
+
+        <br><br>
+
+        © 2026 RVZM
+
+    </div>
+
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

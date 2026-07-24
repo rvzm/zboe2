@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZBOE — CSS Paperdoll Test</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background: radial-gradient(1000px 500px at 20% 0%, rgba(220,53,69,.15), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(13,110,253,.12), transparent 60%),
+                  #0b0f14;
+    }
+    .muted-mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.6); font-size: .8rem; }
+    .soft-card { background: rgba(255,255,255,.03); border-color: rgba(255,255,255,.12); }
+    .soft-card .card-header { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); color: #fff; }
+    .soft-card .card-body { color: rgba(255,255,255,.9); }
+
+    /* ---- Paperdoll stage ---- */
+    .paperdoll-row {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2.5rem;
+      flex-wrap: wrap;
+      padding: 1rem 0 1.5rem;
+    }
+    .doll-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    .doll-line { stroke: rgba(255,255,255,.22); stroke-width: 1.5; transition: stroke .15s ease; }
+    .doll-line-selected { stroke: #0dcaf0; stroke-width: 2; }
+
+    .doll-col { display: flex; flex-direction: column; gap: 1.1rem; width: 190px; z-index: 2; }
+    .doll-col-left { align-items: flex-end; }
+    .doll-col-right { align-items: flex-start; }
+
+    .doll-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: .5rem;
+      padding: .5rem .7rem;
+      width: 100%;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease, transform .15s ease;
+    }
+    .doll-card:hover { background: rgba(255,255,255,.07); }
+    .doll-card-selected { border-color: #0dcaf0; box-shadow: 0 0 0 1px rgba(13,202,240,.4), 0 0 14px rgba(13,202,240,.25); }
+    .doll-card-label { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.55); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+    .doll-card-item { font-weight: 600; font-size: .92rem; color: #fff; }
+    .doll-empty { font-weight: 400; color: rgba(255,255,255,.4); font-style: italic; }
+    .doll-card-badges { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .35rem; }
+
+    .doll-stage { position: relative; z-index: 2; width: 280px; flex: 0 0 auto; }
+    .doll-figure { display: flex; flex-direction: column; align-items: center; width: 100%; }
+
+    .doll-head {
+      position: relative; width: 56px; height: 56px; border-radius: 50%;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+      margin-bottom: 4px;
+    }
+    /* T-pose: arms are horizontal bars at shoulder height spanning out to the
+       torso's edges, so .doll-upper is widened to give them room to extend. */
+    .doll-upper { position: relative; width: 264px; height: 132px; }
+    .doll-torso {
+      position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+      width: 92px; height: 128px; border-radius: 34px 34px 16px 16px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+    .doll-arm {
+      position: absolute; top: 10px; width: 86px; height: 20px; border-radius: 10px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+    .doll-arm-left { left: 0; }
+    .doll-arm-right { right: 0; }
+
+    .doll-lower { position: relative; display: flex; gap: 10px; margin-top: 2px; }
+    .doll-leg {
+      width: 34px; height: 118px; border-radius: 14px 14px 8px 8px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+    .doll-feet { position: relative; display: flex; gap: 20px; margin-top: 2px; }
+    .doll-foot {
+      width: 40px; height: 18px; border-radius: 40% 40% 50% 10% / 60% 60% 100% 40%;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+
+    /* Shield lives under the doll's feet, not on an arm — the shield shape
+       itself is the .doll-dot for this slot (same empty/selected state
+       classes), just re-shaped via clip-path instead of the default circle. */
+    .doll-dot.doll-shield {
+      position: relative; width: 46px; height: 56px; margin-top: 14px;
+      border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.08);
+      box-shadow: none; border-radius: 0;
+      clip-path: polygon(50% 0%, 100% 14%, 100% 58%, 50% 100%, 0% 58%, 0% 14%);
+    }
+    .doll-shield::after {
+      content: ""; position: absolute; left: 50%; top: 10%; bottom: 16%; width: 2px;
+      background: rgba(255,255,255,.3); transform: translateX(-50%);
+    }
+    .doll-shield.selected::after { background: rgba(255,255,255,.85); }
+
+    .doll-dot {
+      position: absolute; width: 14px; height: 14px; border-radius: 50%;
+      background: rgba(13,202,240,.85); border: 2px solid rgba(255,255,255,.85);
+      box-shadow: 0 0 6px rgba(13,202,240,.7);
+      cursor: pointer; z-index: 3; transition: box-shadow .15s ease, background .15s ease, transform .15s ease;
+    }
+    .doll-dot:hover { transform: scale(1.15); }
+    .doll-dot.empty { background: rgba(255,255,255,.3); box-shadow: none; }
+    .doll-dot.selected { background: #0dcaf0; box-shadow: 0 0 0 4px rgba(13,202,240,.3), 0 0 16px rgba(13,202,240,.9); }
+
+    .doll-head .doll-dot { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-head .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-torso .doll-dot { top: 38%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-torso .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-arm-left .doll-dot { left: -5px; top: 50%; transform: translateY(-50%); }
+    .doll-arm-left .doll-dot:hover { transform: translateY(-50%) scale(1.15); }
+    .doll-lower .doll-dot { top: 42%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-lower .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-feet .doll-dot { bottom: -2px; left: 50%; transform: translate(-50%, 50%); }
+    .doll-feet .doll-dot:hover { transform: translate(-50%, 50%) scale(1.15); }
+  </style>
+</head>
+<body class="text-light">
+  <nav class="navbar navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
+    <div class="container py-2 d-flex justify-content-between">
+      <span class="navbar-brand fw-semibold">🛠️ ZBOE <span class="opacity-75">Paperdoll Test</span></span>
+      <a class="btn btn-sm btn-outline-light" href="/admin">← Admin</a>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="card soft-card">
+      <div class="card-header fw-semibold">CSS Paperdoll — scratch/prototype (revision 2)</div>
+      <div class="card-body">
+        <p class="muted-mono mb-3">
+          Not wired into the admin panel — mock data only, shaped exactly like
+          <code>data.armors</code> from <code>GET /api/admin/player</code>. Click a
+          dot or a card to select that slot.
+        </p>
+
+        <div class="paperdoll-row" id="paperdollRow">
+          <svg class="doll-lines" id="dollLines"></svg>
+
+          <div class="doll-col doll-col-left" id="colLeft"></div>
+
+          <div class="doll-stage">
+            <div class="doll-figure">
+              <div class="doll-head"><span class="doll-dot" data-slot="head"></span></div>
+              <div class="doll-upper">
+                <div class="doll-torso"><span class="doll-dot" data-slot="torso"></span></div>
+                <div class="doll-arm doll-arm-left"><span class="doll-dot" data-slot="hands"></span></div>
+                <div class="doll-arm doll-arm-right"></div>
+              </div>
+              <div class="doll-lower">
+                <div class="doll-leg"></div>
+                <div class="doll-leg"></div>
+                <span class="doll-dot" data-slot="legs"></span>
+              </div>
+              <div class="doll-feet">
+                <div class="doll-foot"></div>
+                <div class="doll-foot"></div>
+                <span class="doll-dot" data-slot="boots"></span>
+              </div>
+              <div class="doll-dot doll-shield" data-slot="shield"></div>
+            </div>
+          </div>
+
+          <div class="doll-col doll-col-right" id="colRight"></div>
+        </div>
+
+        <div class="muted-mono mb-1">Owned — <span id="dollSelectedSlot">Head</span></div>
+        <div id="dollOwnedList"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+    // Mock data — same shape as the real `data.armors` from GET /api/admin/player:
+    // ARMOR_PIECES.map(slot => ({ slot, equipped, owned: [{name,label,ap,defense,condition}] }))
+    // Values pulled from real item_backbone.js armor entries, chosen to cover the
+    // full condition-tier spread plus both empty-with-alt and fully-empty states.
+    const MOCK_ARMORS = [
+      { slot: "head", equipped: "iron helm", owned: [
+          { name: "iron helm", label: "Iron Helm", ap: 50, defense: 5, condition: 65 },
+          { name: "gold helm", label: "Gold Helm", ap: 100, defense: 15, condition: 100 },
+        ] },
+      { slot: "torso", equipped: "silver chestplate", owned: [
+          { name: "silver chestplate", label: "Silver Chestplate", ap: 75, defense: 10, condition: 92 },
+        ] },
+      { slot: "hands", equipped: null, owned: [
+          { name: "bronze gauntlets", label: "Bronze Gauntlets", ap: 60, defense: 1, condition: 18 },
+        ] },
+      { slot: "legs", equipped: "gold platelegs", owned: [
+          { name: "gold platelegs", label: "Gold Platelegs", ap: 100, defense: 15, condition: 45 },
+        ] },
+      { slot: "boots", equipped: "mythril boots", owned: [
+          { name: "mythril boots", label: "Mythril Boots", ap: 150, defense: 25, condition: 100 },
+        ] },
+      { slot: "shield", equipped: null, owned: [] },
+    ];
+    const findEntry = (slot) => MOCK_ARMORS.find((a) => a.slot === slot);
+
+    // Same tier thresholds as condTierOf() in game.html, re-expressed as Bootstrap badge classes.
+    function conditionPillHtml(cond) {
+      const tier = cond >= 85 ? "success" : cond >= 61 ? "primary" : cond >= 41 ? "warning" : cond >= 21 ? "danger" : "light";
+      const dark = (tier === "warning" || tier === "light") ? " text-dark" : "";
+      return `<span class="badge rounded-pill text-bg-${tier}${dark}">${cond}%</span>`;
+    }
+
+    let armorSlot = "head";
+
+    function renderCard(slot) {
+      const entry = findEntry(slot);
+      const label = slot.charAt(0).toUpperCase() + slot.slice(1);
+      const eq = entry.equipped;
+      const eqItem = eq ? entry.owned.find((o) => o.name === eq) : null;
+      const selected = slot === armorSlot;
+      return `
+        <div class="doll-card${selected ? " doll-card-selected" : ""}" data-slot="${slot}" id="card-${slot}">
+          <div class="doll-card-label">${label}</div>
+          <div class="doll-card-item">${eq ? esc(eqItem?.label || eq) : '<span class="doll-empty">(empty)</span>'}</div>
+          ${eqItem ? `
+          <div class="doll-card-badges">
+            <span class="badge rounded-pill text-bg-info">AP ${eqItem.ap}</span>
+            <span class="badge rounded-pill text-bg-secondary">Def ${eqItem.defense}</span>
+            ${conditionPillHtml(eqItem.condition)}
+          </div>` : ``}
+        </div>`;
+    }
+
+    function renderOwnedPanel() {
+      const entry = findEntry(armorSlot);
+      $("dollSelectedSlot").textContent = armorSlot.charAt(0).toUpperCase() + armorSlot.slice(1);
+      const wrap = $("dollOwnedList"); wrap.innerHTML = "";
+      const equipped = entry.equipped;
+      (entry.owned || []).forEach((o) => {
+        const b = document.createElement("button");
+        b.className = "btn btn-sm me-2 mb-2 " + (o.name === equipped ? "btn-primary" : "btn-outline-primary");
+        b.textContent = o.name === equipped ? `${o.label} ✓ (c${o.condition})` : `${o.label} (c${o.condition})`;
+        b.disabled = o.name === equipped;
+        b.onclick = () => { entry.equipped = o.name; renderAll(); };
+        wrap.appendChild(b);
+      });
+      if (equipped) {
+        const clear = document.createElement("button");
+        clear.className = "btn btn-sm btn-outline-secondary mb-2";
+        clear.textContent = "Clear slot";
+        clear.onclick = () => { entry.equipped = null; renderAll(); };
+        wrap.appendChild(clear);
+      }
+      if (!(entry.owned || []).length && !equipped) wrap.insertAdjacentHTML("beforeend", `<div class="muted-mono">(none owned)</div>`);
+    }
+
+    function drawLines() {
+      const svg = $("dollLines");
+      const rowRect = $("paperdollRow").getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${rowRect.width} ${rowRect.height}`);
+      svg.innerHTML = "";
+      ["head", "torso", "hands", "legs", "boots", "shield"].forEach((slot) => {
+        const dot = document.querySelector(`.doll-dot[data-slot="${slot}"]`);
+        const card = $(`card-${slot}`);
+        if (!dot || !card) return;
+        const dr = dot.getBoundingClientRect();
+        const cr = card.getBoundingClientRect();
+        const dx = dr.left + dr.width / 2 - rowRect.left;
+        const dy = dr.top + dr.height / 2 - rowRect.top;
+        const cardCenterX = cr.left + cr.width / 2 - rowRect.left;
+        const cx = cardCenterX > dx ? (cr.left - rowRect.left) : (cr.right - rowRect.left);
+        const cy = cr.top + cr.height / 2 - rowRect.top;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", dx); line.setAttribute("y1", dy);
+        line.setAttribute("x2", cx); line.setAttribute("y2", cy);
+        line.setAttribute("class", "doll-line" + (slot === armorSlot ? " doll-line-selected" : ""));
+        svg.appendChild(line);
+      });
+    }
+
+    function renderAll() {
+      $("colLeft").innerHTML = ["head", "hands", "legs"].map(renderCard).join("");
+      $("colRight").innerHTML = ["torso", "boots", "shield"].map(renderCard).join("");
+      document.querySelectorAll(".doll-dot").forEach((dot) => {
+        const entry = findEntry(dot.dataset.slot);
+        dot.classList.toggle("empty", !entry.equipped);
+        dot.classList.toggle("selected", dot.dataset.slot === armorSlot);
+      });
+      renderOwnedPanel();
+      requestAnimationFrame(drawLines);
+    }
+
+    document.addEventListener("click", (e) => {
+      const el = e.target.closest("[data-slot]");
+      if (!el) return;
+      armorSlot = el.dataset.slot;
+      renderAll();
+    });
+
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(drawLines, 80);
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>

@@ -693,9 +693,9 @@ try {
 
   console.log(paint(["bold", "cyan"], "\n== Stage 2g: API log-file split =="));
 
-  await check("regular /api/* traffic logs to logFile.api only, not the main log", async () => {
+  await check("API-level request plumbing logs to logFile.api only, not the main log", async () => {
     // A few plain /api/* hits generate a fresh, unambiguous marker line
-    // (the /api/game-state FULL log) to look for in both files.
+    // (the /api/game-state API-level log) to look for in both files.
     await req("player1", "GET", "/api/game-state");
     const main = readFileSync(path.join(scratchDir, "logs", "server.log"), "utf8");
     const api = readFileSync(path.join(scratchDir, "logs", "server.log.api"), "utf8");
@@ -704,14 +704,14 @@ try {
     if (main.includes(marker)) throw new Error("game-state marker leaked into the main server.log");
   });
 
-  await check("login/register traffic logs to BOTH the main log and logFile.api", async () => {
+  await check("login/register traffic logs to the main log only, never logFile.api", async () => {
     const main = readFileSync(path.join(scratchDir, "logs", "server.log"), "utf8");
     const api = readFileSync(path.join(scratchDir, "logs", "server.log.api"), "utf8");
     const loginMarker = "Login attempt for username=player1";
     const registerMarker = `Registration attempt for username=${testUser}`;
     for (const [label, marker] of [["login", loginMarker], ["register", registerMarker]]) {
       if (!main.includes(marker)) throw new Error(`expected ${label} marker in the main server.log`);
-      if (!api.includes(marker)) throw new Error(`expected ${label} marker in server.log.api too`);
+      if (api.includes(marker)) throw new Error(`${label} marker leaked into server.log.api`);
     }
   });
 

@@ -473,13 +473,14 @@
                 <button class="btn btn-sm btn-outline-info" id="locSet">Move</button>
               </div>
             </div>
-            <div class="card soft-card mb-3">
-              <div class="card-header fw-semibold">Equip Slots</div>
-              <div class="card-body" id="equipSlots"></div>
-            </div>
             <div class="card soft-card">
-              <div class="card-header fw-semibold">Inventory</div>
-              <div class="card-body">
+              <div class="card-header fw-semibold">Equip Slots / Inventory</div>
+              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="equipInvTabs">
+                <button class="btn btn-outline-light active" data-eitab="equip" type="button">Equip Slots</button>
+                <button class="btn btn-outline-light" data-eitab="inventory" type="button">Inventory</button>
+              </div>
+              <div class="card-body" id="equipSlots"></div>
+              <div class="card-body d-none" id="inventoryPane">
                 <form id="invAddForm" class="row g-2 mb-2 align-items-end">
                   <div class="col-7"><label class="muted-mono">Item (registry)</label><select class="form-select form-select-sm" name="item" id="invItemSel"></select></div>
                   <div class="col-3"><label class="muted-mono">Qty</label><input class="form-control form-control-sm" name="qty" value="1"></div>
@@ -1054,6 +1055,16 @@
     $("questTabs").querySelectorAll("[data-questtab]").forEach(b =>
       b.addEventListener("click", () => { questTab = b.dataset.questtab; renderQuestTabs(); }));
 
+    let equipInvTab = "equip";
+    $("equipInvTabs").querySelectorAll("[data-eitab]").forEach(b =>
+      b.addEventListener("click", () => { equipInvTab = b.dataset.eitab; renderEquipInvTabs(); }));
+    function renderEquipInvTabs(){
+      $("equipInvTabs").querySelectorAll("[data-eitab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.eitab === equipInvTab));
+      $("equipSlots").classList.toggle("d-none", equipInvTab !== "equip");
+      $("inventoryPane").classList.toggle("d-none", equipInvTab !== "inventory");
+    }
+
     async function loadPlayer(name){
       loadItemSelect(); // populate the grant dropdown once
       const data = await api("/api/admin/player?username=" + encodeURIComponent(name));
@@ -1126,6 +1137,7 @@
       renderQuestTabs();
 
       renderEquipSlots(data);
+      renderEquipInvTabs();
 
       const iv = $("invRows"); iv.innerHTML = "";
       if (!data.inventory.length) iv.innerHTML = `<tr><td class="muted-mono">(empty)</td></tr>`;

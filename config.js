@@ -62,7 +62,7 @@ export const zombie_config = {
   z_wander_chance: 15, // per-player, per-tick chance (percentage) a Location zombie wanders into a present player's "nearby" pool during a horde
   // Outbreak mode settings.
   z_break: 100, // Number of zombies needed to create a Outbreak Mode event.
-  z_break_players: 5, // Minimum number of players required to trigger a Outbreak Mode event.
+  z_break_players: 1, // Minimum number of players required to trigger a Outbreak Mode event.
   z_break_interval: 300, // Time interval (in seconds) between Outbreak Mode events.
   z_break_tic_run: 1, // Number of z_tic intervals that must pass between z_break chance rolls.
   z_break_chance: 99, // Chance of a Outbreak Mode event occurring (percentage)

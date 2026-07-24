@@ -8,6 +8,13 @@ import { STARTER_SPELLS } from "./magic_backbone.js";
 import { QUESTS } from "./quest_backbone.js";
 import { ZOMBIE_LOCATIONS, OUTBREAK_LOCATIONS } from "./location_backbone.js";
 
+// Injected once at boot from server.js, which owns the real log() facility —
+// db_backbone.js can't import it directly (server.js imports FROM here, so
+// the reverse would be circular). No-ops until wired up, but nothing in this
+// file logs at module-load time, so that's never actually hit in practice.
+let _log = () => {};
+export function setLogger(fn) { _log = fn; }
+
 // Quests whose starter descriptor is `{ starter: true }` are granted from
 // character creation, the same convention as magic_backbone.js's STARTER_SPELLS.
 // Declared here (not beside the other quest functions further down) so the
@@ -874,6 +881,7 @@ function activateQuest(userId, questKey) {
   if (!quest) return;
   db.prepare(`UPDATE players SET quest_active = ?, quest_objectives = ?, updated_at = ? WHERE user_id = ?`)
     .run(questKey, JSON.stringify(seedObjectiveProgress(userId, quest)), Date.now(), userId);
+  _log("INFO", `quest activated: user=${userId} key=${questKey}`);
   completeActiveQuestIfDone(userId);
 }
 
@@ -894,6 +902,7 @@ export function startQuest(userId, questKey) {
   db.prepare(`UPDATE players SET quest_started = ?, updated_at = ? WHERE user_id = ?`)
     .run(started.join(","), Date.now(), userId);
   insertEvent("action", `Quest started: ${quest.name}`, "private", userId);
+  _log("INFO", `quest started: user=${userId} key=${questKey}`);
   if (player.quest_active === "NONE") activateQuest(userId, questKey);
 }
 
@@ -973,6 +982,7 @@ export function applyReward(userId, reward) {
     forceLevel(userId, 1);
     bits.push(`+1 level`);
   }
+  _log("INFO", `applyReward user=${userId}: ${bits.join(", ") || "nothing"}`);
   return bits;
 }
 
@@ -1002,6 +1012,7 @@ export function completeActiveQuestIfDone(userId) {
     .run(completed.join(","), Date.now(), userId);
 
   insertEvent("action", `Quest complete: ${quest.name}!${rewardBits.length ? " " + rewardBits.join(", ") : ""}`, "private", userId);
+  _log("INFO", `quest completed: user=${userId} key=${questKey} reward=[${rewardBits.join(", ")}]`);
 
   if (nextKey !== "NONE") activateQuest(userId, nextKey);
   return questKey;
@@ -1381,6 +1392,7 @@ export function damageNearbyZombie(userId, dmg, zHp) {
   // here has to mirror into total_z_pool explicitly rather than getting it
   // for free the way adjustZombieNear's callers do.
   if (killed) adjustTotalZPool(-killed);
+  _log("FULL", `damageNearbyZombie user=${userId}: dmg=${dmg} remaining=${remaining} killed=${killed}`);
   return { killed, zombieNear, zombieNearHealth };
 }
 

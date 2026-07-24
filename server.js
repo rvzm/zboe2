@@ -39,6 +39,7 @@ import {
   equipWeaponSlot, setSelectedSlot,
   adjustLocationZombies, setLocationZombies, setTargetScope, adjustZombieNear, setZombieNearHealth, damageNearbyZombie,
   adjustTotalZPool, setZombieBreak, setZombieBreakFalltime, setZombieBreakDefeatedAt, getPlayersWithZombieNear, applyReward,
+  setLogger as setDbLogger,
 } from "./db_backbone.js";
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -48,7 +49,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "node:child_process";
 import { styleText } from "node:util";
-import { AsyncLocalStorage } from "node:async_hooks";
 import { game_config, file_config, zombie_config, ssl_config, app_version, account_config } from "./config.js";
 import https from "node:https";
 import http from "node:http";
@@ -70,20 +70,20 @@ import { LOCATION_NAMES, LOCATION_LINKS, ZOMBIE_LOCATIONS, OUTBREAK_LOCATIONS, L
 // ===================================================================
 
 function hashPassword(password, salt) {
-  log("FULL", `Hashing password with salt=${salt}`, game_config, "Hashing password with salt=[redacted]");
+  log("API", `Hashing password with salt=${salt}`, game_config, "Hashing password with salt=[redacted]");
   return crypto.pbkdf2Sync(password, salt, 150000, 32, "sha256").toString("hex");
 }
 
 // ----- Very simple signed session cookie -----
 function sign(value) {
-  log("FULL", `Signing value: ${value}`, game_config, "Signing value: [redacted]");
+  log("API", `Signing value: ${value}`, game_config, "Signing value: [redacted]");
   return crypto.createHmac("sha256", game_config.sessionSecret).update(value).digest("hex");
 }
 function setSession(res, username) {
   const payload = JSON.stringify({ u: username, t: Date.now() });
   const b64 = Buffer.from(payload, "utf8").toString("base64url");
   const sig = sign(b64);
-  log("FULL", `Setting session for ${username}`, game_config);
+  log("API", `Setting session for ${username}`, game_config);
   res.cookie("zboe_session", `${b64}.${sig}`, {
     httpOnly: true,
     sameSite: "lax",
@@ -111,17 +111,17 @@ function issueServerSession(res, userId) {
   const opts = { httpOnly: true, sameSite: "lax", secure: ssl_config.enabled };
   res.cookie("zboe_skey", rawKey, opts);
   res.cookie("zboe_sid", sessionId, opts);
-  log("FULL", `Issued session pair for userId=${userId} (sid=${sessionId})`, game_config, `Issued session pair for userId=${userId} (sid=[redacted])`);
+  log("API", `Issued session pair for userId=${userId} (sid=${sessionId})`, game_config, `Issued session pair for userId=${userId} (sid=[redacted])`);
 }
 
 function getSession(req) {
   const raw = req.cookies?.zboe_session;
-  log("FULL", `Retrieving session cookie: ${raw}`, game_config, "Retrieving session cookie: [redacted]");
+  log("API", `Retrieving session cookie: ${raw}`, game_config, "Retrieving session cookie: [redacted]");
   if (!raw) return null;
   const [b64, sig] = raw.split(".");
   if (!b64 || !sig) return null;
   if (sign(b64) !== sig) return null;
-  log("FULL", `Session valid for payload: ${b64}`, game_config, "Session valid for payload: [redacted]");
+  log("API", `Session valid for payload: ${b64}`, game_config, "Session valid for payload: [redacted]");
   try {
     return JSON.parse(Buffer.from(b64, "base64url").toString("utf8"));
   } catch {
@@ -160,10 +160,10 @@ function tryAuth(req) {
 
 function requireAuth(req, res, next) {
   const sess = getSession(req);
-  log("FULL", `Authenticating request, session=${JSON.stringify(sess)}`, game_config, `Authenticating request, session for user=${sess?.u ?? "?"}`);
+  log("API", `Authenticating request, session=${JSON.stringify(sess)}`, game_config, `Authenticating request, session for user=${sess?.u ?? "?"}`);
   if (!sess?.u) return res.redirect("/login.html?err=Please%20login");
   const auth = getAuthRecord(sess.u);
-  log("FULL", `User lookup result for username=${sess.u}: ${auth ? `id=${auth.id}` : "undefined"}`, game_config);
+  log("API", `User lookup result for username=${sess.u}: ${auth ? `id=${auth.id}` : "undefined"}`, game_config);
   if (!auth) return res.redirect("/login.html?err=Please%20login");
 
   // Server-side session verification: the cookie pair must match the stored
@@ -208,7 +208,7 @@ function requireAuth(req, res, next) {
     return res.redirect(redirect);
   }
 
-  log("FULL", `Authenticated user ${auth.username} (id=${auth.id})`, game_config);
+  log("API", `Authenticated user ${auth.username} (id=${auth.id})`, game_config);
   req.user = auth.username;
   req.userId = auth.id;
   // Chat/fun gates (users.adm_fun/chat_mute/chat_deaf/chat_strict) — fetched
@@ -926,6 +926,7 @@ function grantKillRewards(userId, username, killed, sourceLabel) {
     const bit = ZOMBIE_BITS[Math.floor(Math.random() * ZOMBIE_BITS.length)];
     giveInventoryItem(userId, bit, 1);
     bitNote = ` …a ${ITEMS[bit].name} drops from the pile.`;
+    log("INFO", `${username} bit-drop roll hit via ${sourceLabel}: ${bit}`, game_config);
   }
   const noun = killed === 1 ? "a zombie" : `${killed} zombies`;
   insertEvent("kill", `${username} dropped ${noun} with ${sourceLabel} (+${XP_PER_KILL * killed} XP, +${GOLD_PER_KILL * killed} gold)${bitNote}`, "public", "global");
@@ -958,11 +959,13 @@ function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "
     insertEvent("system", `${username} ended the raid! (+3 tokens)`, "public", "global");
     bonus += " Raid ended — +3 tokens!";
     recordQuestProgress(userId, "clear_raid", null, 1);
+    log("INFO", `${username} ended the raid via ${sourceLabel} (+3 tokens) [horde ${hordeBefore}->${hordeAfter}]`, game_config);
   } else if (!wasRaiding && hordeBefore >= zombie_config.z_horde && hordeAfter < zombie_config.z_horde) {
     addTokens(userId, 1);
     insertEvent("system", `${username} broke the horde (+1 token)`, "public", "global");
     bonus += " Horde broken — +1 token!";
     recordQuestProgress(userId, "break_horde", null, 1);
+    log("INFO", `${username} broke the horde via ${sourceLabel} (+1 token) [horde ${hordeBefore}->${hordeAfter}]`, game_config);
   }
   return bonus;
 }
@@ -1011,10 +1014,11 @@ function formatDuration(seconds) {
 
 const LOG_LEVELS = {
     FULL: 0,
-    INFO: 1,   // actions (shoot/reload/…) and tick check results
-    WARN: 2,
-    ERROR: 3,
-    FATAL: 4
+    API: 1,    // per-request session/auth/crypto plumbing — see log()'s hard-coded API branch
+    INFO: 2,   // actions (shoot/reload/…) and tick check results
+    WARN: 3,
+    ERROR: 4,
+    FATAL: 5
 };
 
 // Console colors per log level (styleText format names). File output stays plain.
@@ -1027,18 +1031,15 @@ const LOG_COLORS = {
 };
 
 const LOG_FILE = path.join("logs/", file_config.logFile || "server.log");
-// Every API request's log() calls are routed here instead of LOG_FILE (login/
-// register are the one exception — see logFileContext/the request-tagging
-// middleware below, and the destination switch inside log() itself).
+// Every log() call at level "API" lands here instead of LOG_FILE — never the
+// console, never the main log, regardless of --verbose/--debug-level. A hard
+// special case inside log() itself, not a request-context split: routine
+// per-request session/auth/crypto plumbing (requireAuth/getSession/sign/…)
+// is logged at this level so it stops burying the main log's game-relevant
+// lines. login/register's own narrative lines keep their original levels and
+// so are NOT routed here — see CLAUDE.md's Logging section.
 const LOG_FILE_API = LOG_FILE + ".api";
 fs.mkdirSync("logs/", { recursive: true });
-// Tracks, for the request currently being handled, which log file(s) a
-// log() call should land in — set once per request by the requestLogContext
-// middleware and read back inside log() itself. AsyncLocalStorage carries
-// this through the whole request's async continuation (including a busy
-// action's later setTimeout resolution), so no individual log() call site
-// needs to know it's part of an API request.
-const logFileContext = new AsyncLocalStorage();
 // PID of a backgrounded server, written by the parent when it daemonizes and
 // removed by the daemon on exit. Used by --stop.
 const PID_FILE = path.join("logs", "zboe.pid");
@@ -1349,22 +1350,23 @@ function log(level, message, game_config, fileMessage) {
 
     const timestamp = new Date().toISOString();
     const prefix = `${timestamp} [${level}] - `;
+    const line = `${prefix}${fileMessage ?? message}\n`;
 
-    if (game_config.dev || level === "ERROR" || level === "FATAL") {
-        const line = `${prefix}${fileMessage ?? message}\n`;
-        // Which file(s) this line lands in depends on the request currently
-        // being handled (set by the requestLogContext middleware below):
-        // "api" -> LOG_FILE_API only, "both" -> LOG_FILE_API + LOG_FILE
-        // (login/register), undefined (no request, or a non-API page) -> LOG_FILE.
-        const dest = logFileContext.getStore();
-        if (dest !== "api") {
-            rotateLogIfNeeded();
-            fs.appendFileSync(LOG_FILE, line);
-        }
-        if (dest === "api" || dest === "both") {
+    // Hard special case, not just another verbosity rung: API-level lines
+    // NEVER reach the console and NEVER touch the main log, regardless of
+    // --verbose/--debug-level — they exist solely to keep routine per-request
+    // plumbing out of both. Same dev-mode gate as everything else below.
+    if (level === "API") {
+        if (game_config.dev) {
             rotateLogIfNeeded(LOG_FILE_API, ROTATED_LOG_FILE_API);
             fs.appendFileSync(LOG_FILE_API, line);
         }
+        return;
+    }
+
+    if (game_config.dev || level === "ERROR" || level === "FATAL") {
+        rotateLogIfNeeded();
+        fs.appendFileSync(LOG_FILE, line);
     }
 
     if (
@@ -1399,24 +1401,13 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
     log("ERROR", String(reason), game_config);
 });
+// Lets db_backbone.js's own game-rule decisions (quest trigger/completion,
+// reward payout, Nearby-zombie combat) log through the real facility above
+// without importing this file (would be circular) — see setLogger() there.
+setDbLogger((level, message, fileMessage) => log(level, message, game_config, fileMessage));
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Registered first so every downstream middleware/route runs inside the
-// AsyncLocalStorage context it sets: /api/* requests log to LOG_FILE_API only,
-// login/register (auth's entry points, though not under /api/) log to BOTH
-// files, and everything else (static assets, /game, /admin, ...) is untouched
-// and keeps logging to LOG_FILE alone.
-app.use((req, res, next) => {
-  if (req.path === "/login" || req.path === "/register") {
-    logFileContext.run("both", next);
-  } else if (req.path.startsWith("/api/")) {
-    logFileContext.run("api", next);
-  } else {
-    next();
-  }
-});
 
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -1607,7 +1598,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // Routes
 app.get("/", (req, res) => {
   // Always show public homepage
-  log("FULL", "Serving homepage", game_config);
+  log("API", "Serving homepage", game_config);
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
@@ -1752,7 +1743,7 @@ app.post("/logout", (req, res) => {
 
 app.get("/game", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "game.html"));
-  log("FULL", `Serving game page to authenticated user ${req.user}`, game_config);
+  log("API", `Serving game page to authenticated user ${req.user}`, game_config);
 });
 
 // Web admin panel — the zboe.sh user/player/shop functions. Admin only; a
@@ -1794,7 +1785,7 @@ app.get("/api/ban-status", (req, res) => {
 });
 
 app.get("/api/game-state", requireAuth, (req, res) => {
-  log("FULL", `API request for game state by user ${req.user}`, game_config);
+  log("API", `API request for game state by user ${req.user}`, game_config);
   touchPlayerSeen(req.userId);
   const player = ensurePlayer(req.userId);
   const gameState = getGameState();
@@ -4174,6 +4165,7 @@ function applyZombieHitToPlayer(pl, dmg, isRaidLikeXpScale) {
   const r = damagePlayer(pl.user_id, dealt);
   const armorNote = blocked > 0 ? `, armor blocked ${blocked}` : "";
   insertEvent("attack", `A zombie hit you for ${dealt}${armorNote} (shield ${r.shield}, health ${r.health})`, "private", pl.user_id);
+  log("FULL", `zombie hit ${pl.username}: dmg=${dmg} blocked=${blocked} dealt=${dealt} shield=${r.shield} health=${r.health}`, game_config);
   if (dealt > 0) {
     const defXp = isRaidLikeXpScale ? Math.max(1, Math.floor(dealt / 10)) : Math.max(1, Math.floor(dealt / 5) * 3);
     addSkillXp(pl.user_id, "defense", defXp);
@@ -4183,6 +4175,7 @@ function applyZombieHitToPlayer(pl, dmg, isRaidLikeXpScale) {
       const itemName = pl[`a_${slot}`];
       const newCond = adjustArmorCondition(pl.user_id, itemName, -1);
       insertEvent("attack", `Your ${itemName} takes a scratch (condition ${newCond})`, "private", pl.user_id);
+      log("INFO", `${pl.username}'s ${itemName} degraded to condition ${newCond}`, game_config);
     }
   }
   return r.health <= 0;
@@ -4336,6 +4329,7 @@ function startZombieTicker() {
       const rollCutoff = Date.now() - game_config.timeout * 1000;
       const onlineCount = getActivePlayers(rollCutoff).length;
       const intervalOk = Date.now() - gs.z_break_falltime >= zombie_config.z_break_interval * 1000;
+      log("WARN", `tick: Outbreak roll-eligible (pool=${gs.total_z_pool}/${zombie_config.z_break}, tics=${outbreakRollTics}/${zombie_config.z_break_tic_run}) — online=${onlineCount}/${zombie_config.z_break_players}, intervalOk=${intervalOk}`, game_config);
       // Online-count/interval not yet satisfied: leave the tic counter as-is
       // (already over threshold) so eligibility is re-checked every tick
       // from here on, rather than resetting and forcing another full
@@ -4353,6 +4347,7 @@ function startZombieTicker() {
           // branch above instead.
           return;
         }
+        log("INFO", `tick: Outbreak roll missed (chance=${zombie_config.z_break_chance}%)`, game_config);
         outbreakRollTics = 0; // reset after every failed attempt too
       }
     }
@@ -4407,6 +4402,8 @@ function startZombieTicker() {
           adjustHordeSize(-1);
           adjustLocationZombies(loc, 1);
           insertEvent("spawn", `A zombie splits off toward ${LOCATION_NAMES[loc]}`, "background", "global");
+          const after = getGameState();
+          log("INFO", `tick: splintered 1 zombie world->${loc} (horde now ${after.horde_size}, ${loc} now ${locationZombiesOf(after, loc)})`, game_config);
         }
       } else {
         let biggestLoc = null, biggestCount = 0;
@@ -4418,6 +4415,7 @@ function startZombieTicker() {
           adjustLocationZombies(biggestLoc, -1);
           adjustHordeSize(1);
           insertEvent("spawn", `A zombie drifts back from ${LOCATION_NAMES[biggestLoc]} toward the world`, "background", "global");
+          log("INFO", `tick: flowed back 1 zombie ${biggestLoc}->world (horde now ${getGameState().horde_size})`, game_config);
         }
       }
       latchRaidIfNeeded(); // flow-back adding to World may cross into raid territory
@@ -4431,6 +4429,7 @@ function startZombieTicker() {
     gs = getGameState();
     const tierNow = hordeStatusOf(gs);
     if (gs.hunt_enabled === "true" && (tierNow === "hunting" || tierNow === "raiding")) {
+      let wanderedCount = 0;
       for (const p of zombieLocPlayers) {
         const loc = locationOf(p);
         if (locationZombiesOf(getGameState(), loc) <= 0) continue;
@@ -4439,8 +4438,10 @@ function startZombieTicker() {
           adjustZombieNear(p.user_id, 1);
           setZombieNearHealth(p.user_id, zombie_config.z_hp);
           insertEvent("spawn", `A zombie creeps toward you at ${LOCATION_NAMES[loc]}`, "private", p.user_id);
+          wanderedCount++;
         }
       }
+      if (wanderedCount) log("INFO", `tick: wander — ${wanderedCount} player(s) had a zombie creep into range`, game_config);
     }
 
     // 4) Attack phase. Raid stays exactly as it was — sampling from the

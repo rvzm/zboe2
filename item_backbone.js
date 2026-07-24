@@ -561,6 +561,30 @@ export const COOKING = [
 
 ];
 
+// METALS 
+//  Here we detail each of the metal types, and their properties.
+//  These include their name, their likelyness to fail smelting (as a -5 to +5 scale with -5 meaning most like to fail,
+//  0 meaning normal successRate, and +1-5 being a likelyhood of smithing double, with +5 capping at 80% likely to double),
+//  a color value for the metal, and a description of the metal.
+// fields:
+//   key:       unique id
+//   label:     display name
+//   metal:     which metal it is (a SMELT_TYPES entry)
+//   color:     hex color for the metal
+//   fail:      -5 to +5 scale for smelting failure/success
+//   desc:      description of the metal
+export const METALS = [
+  { key: "copper", label: "Copper", metal: "copper", color: "#ff9a3b", fail: -2, desc: "A common metal used in crafting and smithing." },
+  { key: "bronze", label: "Bronze", metal: "bronze", color: "#964f07", fail: -1, desc: "An alloy of copper and tin, used for crafting and smithing." },
+  { key: "iron", label: "Iron", metal: "iron", color: "#d4d4d4", fail: 0, desc: "A strong metal used in crafting and smithing." },
+  { key: "silver", label: "Silver", metal: "silver", color: "#c0c0c0", fail: 1, desc: "A precious metal used in crafting and smithing." },
+  { key: "gold", label: "Gold", metal: "gold", color: "#ffd700", fail: 2, desc: "A valuable metal used in crafting and smithing." },
+  { key: "mythril", label: "Mythril", metal: "mythril", color: "#31ffc5", fail: 3, desc: "A rare and magical metal used in crafting and smithing." },
+  { key: "adamantite", label: "Adamantite", metal: "adamantite", color: "#ff3c00", fail: 4, desc: "An extremely rare and strong metal used in crafting and smithing." },
+  { key: "syllic", label: "Syllic", metal: "syllic", color: "#2bb7e2", fail: 5, desc: "A legendary and mystical metal used in crafting and smithing." },
+];
+
+
  // RECIPES fields:
  //   key       unique id
  //   label     display name

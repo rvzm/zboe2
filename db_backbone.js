@@ -502,6 +502,7 @@ const stmtAuthRecord = db.prepare(`
          u.adm_fun, u.chat_mute, u.chat_deaf, u.chat_strict,
          u.login_restricted, u.login_res_time, u.login_res_set_time, u.login_res_reason, u.login_res_admin,
          u.user_exiled, u.user_exiled_reason, u.user_exiled_admin,
+         u.created_at, u.last_login,
          p.session_key AS p_session_key, p.session_id AS p_session_id
   FROM users u LEFT JOIN players p ON p.user_id = u.id
   WHERE u.username = ?
@@ -1975,6 +1976,8 @@ export const EDITABLE_STATS = {
   rifle_ammo: {}, rifle_max_ammo: {}, rifle_clips: {}, rifle_max_clips: {}, rifle_condition: { max: 100 }, rifle_jammed: { max: 1 },
   shotgun_ammo: {}, shotgun_max_ammo: {}, shotgun_clips: {}, shotgun_max_clips: {}, shotgun_condition: { max: 100 }, shotgun_jammed: { max: 1 },
   burstrifle_ammo: {}, burstrifle_max_ammo: {}, burstrifle_clips: {}, burstrifle_max_clips: {}, burstrifle_condition: { max: 100 }, burstrifle_jammed: { max: 1 },
+  railgun_ammo: {}, railgun_max_ammo: {}, railgun_clips: {}, railgun_max_clips: {}, railgun_condition: { max: 100 }, railgun_jammed: { max: 1 },
+  bfg2000_ammo: {}, bfg2000_max_ammo: {}, bfg2000_clips: {}, bfg2000_max_clips: {}, bfg2000_condition: { max: 100 }, bfg2000_jammed: { max: 1 },
   melee_condition: { max: 100 },
   ranged_condition: { max: 100 }, ranged_ammo: {}, ranged_crossbow_max_ammo: {}, ranged_bow_max_ammo: {}, ranged_slingshot_max_ammo: {}, ranged_cb_jammed: { max: 1 },
   throwing_condition: { max: 100 }, throwing_ammo: {}, throwing_max_ammo: {},

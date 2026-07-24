@@ -53,13 +53,134 @@
     .table { --bs-table-color: #e9ecef; --bs-table-bg: transparent; --bs-table-border-color: rgba(255,255,255,.12); }
     .panel { max-height: 60vh; overflow-y: auto; overflow-x: hidden; }
     .statval { color: #fff; font-weight: 600; }
+    /* Admin-brand shimmer — same background-clip:text technique as game.html's
+       .shiny-name, but a blue-gold combo of its own (none of that file's
+       per-level-tier variants is a blue+gold mix). */
+    .admin-shiny {
+      background-image: linear-gradient(90deg, #123a6b 0%, #3b82f6 20%, #d4af37 50%, #3b82f6 80%, #123a6b 100%);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      text-shadow: 0 0 6px rgba(255,255,255,.18);
+      animation: admin-shimmer 3.5s linear infinite;
+    }
+    @keyframes admin-shimmer { to { background-position: -200% center; } }
+    @media (prefers-reduced-motion: reduce) { .admin-shiny { animation: none; } }
+
+    /* ---- Armor paperdoll (Equipment tab) — prototyped/iterated in
+       public/css_paperdoll_test.html (revision 2: T-pose + under-doll
+       shield) before this port. ---- */
+    .paperdoll-row {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2.5rem;
+      flex-wrap: wrap;
+      padding: 1rem 0 1.5rem;
+    }
+    .doll-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    .doll-line { stroke: rgba(255,255,255,.22); stroke-width: 1.5; transition: stroke .15s ease; }
+    .doll-line-selected { stroke: #0dcaf0; stroke-width: 2; }
+
+    .doll-col { display: flex; flex-direction: column; gap: 1.1rem; width: 190px; z-index: 2; }
+    .doll-col-left { align-items: flex-end; }
+    .doll-col-right { align-items: flex-start; }
+
+    .doll-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: .5rem;
+      padding: .5rem .7rem;
+      width: 100%;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease, transform .15s ease;
+    }
+    .doll-card:hover { background: rgba(255,255,255,.07); }
+    .doll-card-selected { border-color: #0dcaf0; box-shadow: 0 0 0 1px rgba(13,202,240,.4), 0 0 14px rgba(13,202,240,.25); }
+    .doll-card-label { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.55); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+    .doll-card-item { font-weight: 600; font-size: .92rem; color: #fff; }
+    .doll-empty { font-weight: 400; color: rgba(255,255,255,.4); font-style: italic; }
+    .doll-card-badges { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .35rem; }
+
+    .doll-stage { position: relative; z-index: 2; width: 280px; flex: 0 0 auto; }
+    .doll-figure { display: flex; flex-direction: column; align-items: center; width: 100%; }
+
+    .doll-head {
+      position: relative; width: 56px; height: 56px; border-radius: 50%;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+      margin-bottom: 4px;
+    }
+    /* T-pose: arms are horizontal bars at shoulder height spanning out to the
+       torso's edges, so .doll-upper is widened to give them room. */
+    .doll-upper { position: relative; width: 264px; height: 132px; }
+    .doll-torso {
+      position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+      width: 92px; height: 128px; border-radius: 34px 34px 16px 16px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+    .doll-arm {
+      position: absolute; top: 10px; width: 86px; height: 20px; border-radius: 10px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+    .doll-arm-left { left: 0; }
+    .doll-arm-right { right: 0; }
+
+    .doll-lower { position: relative; display: flex; gap: 10px; margin-top: 2px; }
+    .doll-leg {
+      width: 34px; height: 118px; border-radius: 14px 14px 8px 8px;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+    .doll-feet { position: relative; display: flex; gap: 20px; margin-top: 2px; }
+    .doll-foot {
+      width: 40px; height: 18px; border-radius: 40% 40% 50% 10% / 60% 60% 100% 40%;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
+    }
+
+    /* Shield lives under the doll's feet, not on an arm — the shield shape
+       itself is the .doll-dot for this slot (same empty/selected state
+       classes), just re-shaped via clip-path instead of the default circle. */
+    .doll-dot.doll-shield {
+      position: relative; width: 46px; height: 56px; margin-top: 14px;
+      border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.08);
+      box-shadow: none; border-radius: 0;
+      clip-path: polygon(50% 0%, 100% 14%, 100% 58%, 50% 100%, 0% 58%, 0% 14%);
+    }
+    .doll-shield::after {
+      content: ""; position: absolute; left: 50%; top: 10%; bottom: 16%; width: 2px;
+      background: rgba(255,255,255,.3); transform: translateX(-50%);
+    }
+    .doll-shield.selected::after { background: rgba(255,255,255,.85); }
+
+    .doll-dot {
+      position: absolute; width: 14px; height: 14px; border-radius: 50%;
+      background: rgba(13,202,240,.85); border: 2px solid rgba(255,255,255,.85);
+      box-shadow: 0 0 6px rgba(13,202,240,.7);
+      cursor: pointer; z-index: 3; transition: box-shadow .15s ease, background .15s ease, transform .15s ease;
+    }
+    .doll-dot:hover { transform: scale(1.15); }
+    .doll-dot.empty { background: rgba(255,255,255,.3); box-shadow: none; }
+    .doll-dot.selected { background: #0dcaf0; box-shadow: 0 0 0 4px rgba(13,202,240,.3), 0 0 16px rgba(13,202,240,.9); }
+
+    .doll-head .doll-dot { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-head .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-torso .doll-dot { top: 38%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-torso .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-arm-left .doll-dot { left: -5px; top: 50%; transform: translateY(-50%); }
+    .doll-arm-left .doll-dot:hover { transform: translateY(-50%) scale(1.15); }
+    .doll-lower .doll-dot { top: 42%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-lower .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-feet .doll-dot { bottom: -2px; left: 50%; transform: translate(-50%, 50%); }
+    .doll-feet .doll-dot:hover { transform: translate(-50%, 50%) scale(1.15); }
   </style>
 </head>
 <body class="text-light">
   <div id="pageBg"></div>
   <nav class="navbar navbar-dark border-bottom" style="border-color: rgba(255,255,255,.12) !important;">
     <div class="container py-2 d-flex justify-content-between">
-      <span class="navbar-brand fw-semibold">🛠️ ZBOE <span class="opacity-75">Admin</span></span>
+      <span class="navbar-brand fw-semibold">🛠️ <span class="admin-shiny">ZBOE Admin</span></span>
       <div class="d-flex align-items-center gap-2">
         <span class="muted-mono">Admin: <span class="text-white" id="meName">—</span></span>
         <a class="btn btn-sm btn-outline-light" href="/game">← Game</a>
@@ -70,6 +191,14 @@
   <!-- Destroyed-base warning — always visible (any tab) while the base is down -->
   <div id="baseWarningBanner" class="alert alert-danger text-center fw-semibold mb-0 rounded-0 d-none" role="alert">
     ⚠️ WARNING! Base destroyed! <span id="baseResetCountdown">—</span> Until Base Resets
+  </div>
+
+  <!-- Edit-mode banner — always visible (any tab) while a player is open via
+       the Players tab / ?p= deep link, independent of which top-level tab is
+       currently showing (same "any tab" convention as baseWarningBanner). -->
+  <div id="editModeBanner" class="text-center fw-semibold mb-0 py-1 d-none" style="background:#d4af37; color:#1a1a1a;" role="alert">
+    Edit Mode for Player: <span id="editModeName">—</span> [<span id="editModeUid">—</span>]
+    <button class="btn btn-sm btn-dark ms-3 py-0" id="exitEditMode">Exit Edit Mode</button>
   </div>
 
   <main class="container my-4">
@@ -373,120 +502,262 @@
       </div>
       <div id="playerPanel" class="d-none">
         <button class="btn btn-sm btn-outline-light mb-3" id="backToList">← All Players</button>
-        <div class="row g-3">
-          <div class="col-lg-7">
-            <div class="card soft-card">
-              <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
-                <span>Stats — <span id="pName"></span></span>
-                <span id="pStatus"></span>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="fs-5 fw-semibold">Editing: <span id="pName"></span></span>
+          <span id="pStatus"></span>
+        </div>
+        <div class="btn-group btn-group-sm w-100 p-2 mb-3" role="group" id="editTabs">
+          <button class="btn btn-outline-light active" data-edittab="playercard" type="button">Playercard</button>
+          <button class="btn btn-outline-light" data-edittab="equipment" type="button">Equipment</button>
+          <button class="btn btn-outline-light" data-edittab="stats" type="button">Stats</button>
+          <button class="btn btn-outline-light" data-edittab="options" type="button">Options</button>
+        </div>
+
+        <!-- PLAYERCARD: HUD-style bars/level, currency, live location table, base info -->
+        <div id="editTabPlayercard">
+          <div class="row g-3">
+            <div class="col-lg-5">
+              <div class="card soft-card mb-3">
+                <div class="card-header fw-semibold">Player Card</div>
+                <div class="card-body">
+                  <!-- Statcard header: level circle + name -->
+                  <div class="d-flex align-items-center gap-3 mb-2">
+                    <div class="d-flex align-items-center justify-content-center flex-shrink-0"
+                         style="width:56px; height:56px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05);">
+                      <span class="fs-4 fw-semibold statval" id="pLevel">1</span>
+                    </div>
+                    <div class="fw-semibold text-truncate statval fs-5" id="pCardName">player</div>
+                  </div>
+
+                  <!-- Health bar + its edit rows -->
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                    <span>Health</span><span id="pHealthText">— / —</span>
+                  </div>
+                  <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                    <div class="progress-bar bg-danger" id="pHealthBar" style="width:0%;"></div>
+                  </div>
+                  <div id="pHealthRows" class="mb-2"></div>
+
+                  <!-- Shield bar + its edit rows -->
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                    <span>Shield</span><span id="pShieldText">— / —</span>
+                  </div>
+                  <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                    <div class="progress-bar bg-primary" id="pShieldBar" style="width:0%;"></div>
+                  </div>
+                  <div id="pShieldRows" class="mb-2"></div>
+
+                  <!-- Mana bar + its edit rows -->
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                    <span>Mana</span><span id="pManaText">— / —</span>
+                  </div>
+                  <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                    <div class="progress-bar bg-mana" id="pManaBar" style="width:0%;"></div>
+                  </div>
+                  <div id="pManaRows" class="mb-2"></div>
+
+                  <!-- XP bar + the level control under it -->
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                    <span>XP</span><span id="pXpText">— / —</span>
+                  </div>
+                  <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
+                    <div class="progress-bar bg-warning" id="pXpBar" style="width:0%;"></div>
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="muted-mono">Level</span>
+                    <span>
+                      <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-10">-10</button>
+                      <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-5">-5</button>
+                      <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-1">-1</button>
+                      <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="1">+1</button>
+                      <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="5">+5</button>
+                      <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="10">+10</button>
+                    </span>
+                  </div>
+                  <div class="muted-mono" style="font-size:.7rem;">Level is full-stack: stat + lifetime-XP gains, no XP cost.</div>
+                </div>
               </div>
-              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="statTabs">
-                <button class="btn btn-outline-light active" data-stattab="player" type="button">Player</button>
-                <button class="btn btn-outline-light" data-stattab="currency" type="button">Currency</button>
-                <button class="btn btn-outline-light" data-stattab="guns" type="button">Guns</button>
-                <button class="btn btn-outline-light" data-stattab="armor" type="button">Armor</button>
-                <button class="btn btn-outline-light" data-stattab="skills" type="button">Skills</button>
-              </div>
-              <div class="card-body p-0 panel">
-                <div id="statTabPlayer"><table class="table table-sm mb-0"><tbody></tbody></table></div>
-                <div id="statTabCurrency" class="d-none"><table class="table table-sm mb-0"><tbody></tbody></table></div>
-                <div id="statTabGuns" class="d-none"><table class="table table-sm mb-0"><tbody></tbody></table></div>
-                <div id="statTabArmor" class="d-none p-2"></div>
-                <div id="statTabSkills" class="d-none p-2"></div>
+              <div class="card soft-card">
+                <div class="card-header fw-semibold">Currency</div>
+                <div class="card-body" id="pCurrencyRows"></div>
               </div>
             </div>
-            <div class="card soft-card mt-3">
-              <div class="card-header fw-semibold">Quests <span class="muted-mono">(read-only)</span></div>
-              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="questTabs">
-                <button class="btn btn-outline-light active" data-questtab="started" type="button">Started</button>
-                <button class="btn btn-outline-light" data-questtab="completed" type="button">Completed</button>
-                <button class="btn btn-outline-light" data-questtab="unstarted" type="button">Unstarted</button>
+            <div class="col-lg-7">
+              <div class="card soft-card mb-3">
+                <div class="card-header fw-semibold">Locations</div>
+                <div class="card-body p-0 panel" style="max-height: 40vh;">
+                  <table class="table table-sm mb-0">
+                    <thead><tr><th>Location</th><th>Zone</th><th class="text-end"># Zombies</th><th class="text-end"># Players</th><th class="text-end"></th></tr></thead>
+                    <tbody id="pLocRows"></tbody>
+                  </table>
+                </div>
               </div>
-              <div class="card-body p-2 panel" id="questBody" style="max-height: 30vh;"></div>
+              <div class="card soft-card">
+                <div class="card-header fw-semibold">Base</div>
+                <div class="card-body">
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
+                    <span>Health</span><span id="pBaseHealthText">— / —</span>
+                  </div>
+                  <div class="progress mb-2" style="height:10px; background: rgba(255,255,255,.08);">
+                    <div class="progress-bar bg-success" id="pBaseHealthBar" style="width:0%;"></div>
+                  </div>
+                  <span class="badge rounded-pill text-bg-dark border" id="pBaseAp">AP —</span>
+                  <span class="badge rounded-pill text-bg-secondary" id="pBaseSentry">Sentry: off</span>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="col-lg-5">
-            <div class="card soft-card mb-3">
-              <div class="card-header fw-semibold">Player Card</div>
-              <div class="card-body">
-                <!-- Statcard header: level circle + name -->
-                <div class="d-flex align-items-center gap-3 mb-2">
-                  <div class="d-flex align-items-center justify-content-center flex-shrink-0"
-                       style="width:56px; height:56px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05);">
-                    <span class="fs-4 fw-semibold statval" id="pLevel">1</span>
+        </div>
+
+        <!-- EQUIPMENT: Guns / Weapons / Armor / Inventory -->
+        <div id="editTabEquipment" class="d-none">
+          <div class="card soft-card">
+            <div class="btn-group btn-group-sm w-100 p-2" role="group" id="eqSubTabs">
+              <button class="btn btn-outline-light active" data-eqtab="guns" type="button">Guns</button>
+              <button class="btn btn-outline-light" data-eqtab="weapons" type="button">Weapons</button>
+              <button class="btn btn-outline-light" data-eqtab="armor" type="button">Armor</button>
+              <button class="btn btn-outline-light" data-eqtab="inventory" type="button">Inventory</button>
+            </div>
+            <div class="card-body">
+              <div id="eqPaneGuns">
+                <div class="btn-group btn-group-sm flex-wrap mb-3" role="group" id="gunTypeTabs"></div>
+                <div id="gunStatRows" class="mb-3"></div>
+                <div class="p-2 mb-3" style="background: rgba(255,255,255,.04); border-radius:.25rem;">
+                  <div class="muted-mono mb-1">Equipped Gun</div>
+                  <div class="fw-semibold" id="gunEquippedName">—</div>
+                </div>
+                <div class="muted-mono mb-1">Owned (not equipped)</div>
+                <div id="gunOwnedList"></div>
+              </div>
+              <div id="eqPaneWeapons" class="d-none">
+                <div class="btn-group btn-group-sm flex-wrap mb-3" role="group" id="weaponSlotTabs"></div>
+                <div id="weaponStatRows" class="mb-3"></div>
+                <div class="p-2 mb-3" style="background: rgba(255,255,255,.04); border-radius:.25rem;">
+                  <div class="muted-mono mb-1">Equipped Weapon</div>
+                  <div class="fw-semibold" id="weaponEquippedName">—</div>
+                </div>
+                <div class="muted-mono mb-1">Owned (not equipped)</div>
+                <div id="weaponOwnedList"></div>
+              </div>
+              <div id="eqPaneArmor" class="d-none">
+                <div class="paperdoll-row" id="paperdollRow">
+                  <svg class="doll-lines" id="dollLines"></svg>
+                  <div class="doll-col doll-col-left" id="colLeft"></div>
+                  <div class="doll-stage">
+                    <div class="doll-figure">
+                      <div class="doll-head"><span class="doll-dot" data-slot="head"></span></div>
+                      <div class="doll-upper">
+                        <div class="doll-torso"><span class="doll-dot" data-slot="torso"></span></div>
+                        <div class="doll-arm doll-arm-left"><span class="doll-dot" data-slot="hands"></span></div>
+                        <div class="doll-arm doll-arm-right"></div>
+                      </div>
+                      <div class="doll-lower">
+                        <div class="doll-leg"></div>
+                        <div class="doll-leg"></div>
+                        <span class="doll-dot" data-slot="legs"></span>
+                      </div>
+                      <div class="doll-feet">
+                        <div class="doll-foot"></div>
+                        <div class="doll-foot"></div>
+                        <span class="doll-dot" data-slot="boots"></span>
+                      </div>
+                      <div class="doll-dot doll-shield" data-slot="shield"></div>
+                    </div>
                   </div>
-                  <div class="fw-semibold text-truncate statval fs-5" id="pCardName">player</div>
+                  <div class="doll-col doll-col-right" id="colRight"></div>
                 </div>
-
-                <!-- Health bar + its edit rows -->
-                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
-                  <span>Health</span><span id="pHealthText">— / —</span>
-                </div>
-                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
-                  <div class="progress-bar bg-danger" id="pHealthBar" style="width:0%;"></div>
-                </div>
-                <div id="pHealthRows" class="mb-2"></div>
-
-                <!-- Shield bar + its edit rows -->
-                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
-                  <span>Shield</span><span id="pShieldText">— / —</span>
-                </div>
-                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
-                  <div class="progress-bar bg-primary" id="pShieldBar" style="width:0%;"></div>
-                </div>
-                <div id="pShieldRows" class="mb-2"></div>
-
-                <!-- Mana bar + its edit rows -->
-                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
-                  <span>Mana</span><span id="pManaText">— / —</span>
-                </div>
-                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
-                  <div class="progress-bar bg-mana" id="pManaBar" style="width:0%;"></div>
-                </div>
-                <div id="pManaRows" class="mb-2"></div>
-
-                <!-- XP bar + the level control under it -->
-                <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;">
-                  <span>XP</span><span id="pXpText">— / —</span>
-                </div>
-                <div class="progress mb-1" style="height:12px; background: rgba(255,255,255,.08);">
-                  <div class="progress-bar bg-warning" id="pXpBar" style="width:0%;"></div>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                  <span class="muted-mono">Level</span>
-                  <span>
-                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-10">-10</button>
-                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-5">-5</button>
-                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-lvl="-1">-1</button>
-                    <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="1">+1</button>
-                    <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="5">+5</button>
-                    <button class="btn btn-sm btn-outline-success py-0 px-1" data-lvl="10">+10</button>
-                  </span>
-                </div>
-                <div class="muted-mono" style="font-size:.7rem;">Level is full-stack: stat + lifetime-XP gains, no XP cost.</div>
+                <div class="muted-mono mb-1">Owned — <span id="armorSelectedSlot">Head</span></div>
+                <div id="armorOwnedList"></div>
               </div>
-            </div>
-            <div class="card soft-card mb-3">
-              <div class="card-header fw-semibold">Location</div>
-              <div class="card-body d-flex gap-2 align-items-center">
-                <select class="form-select form-select-sm" id="locSelect"></select>
-                <button class="btn btn-sm btn-outline-info" id="locSet">Move</button>
-              </div>
-            </div>
-            <div class="card soft-card">
-              <div class="card-header fw-semibold">Equip Slots / Inventory</div>
-              <div class="btn-group btn-group-sm w-100 p-2" role="group" id="equipInvTabs">
-                <button class="btn btn-outline-light active" data-eitab="equip" type="button">Equip Slots</button>
-                <button class="btn btn-outline-light" data-eitab="inventory" type="button">Inventory</button>
-              </div>
-              <div class="card-body" id="equipSlots"></div>
-              <div class="card-body d-none" id="inventoryPane">
+              <div id="eqPaneInventory" class="d-none">
                 <form id="invAddForm" class="row g-2 mb-2 align-items-end">
                   <div class="col-7"><label class="muted-mono">Item (registry)</label><select class="form-select form-select-sm" name="item" id="invItemSel"></select></div>
                   <div class="col-3"><label class="muted-mono">Qty</label><input class="form-control form-control-sm" name="qty" value="1"></div>
                   <div class="col-2"><button class="btn btn-sm btn-success w-100">Add</button></div>
                 </form>
                 <div class="panel"><table class="table table-sm mb-0"><tbody id="invRows"></tbody></table></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STATS: skill cards + read-only Quests -->
+        <div id="editTabStats" class="d-none">
+          <div class="card soft-card mb-3">
+            <div class="card-header fw-semibold">Skills</div>
+            <div class="card-body p-2" id="statTabSkills"></div>
+          </div>
+          <div class="card soft-card">
+            <div class="card-header fw-semibold">Quests <span class="muted-mono">(read-only)</span></div>
+            <div class="btn-group btn-group-sm w-100 p-2" role="group" id="questTabs">
+              <button class="btn btn-outline-light active" data-questtab="started" type="button">Started</button>
+              <button class="btn btn-outline-light" data-questtab="completed" type="button">Completed</button>
+              <button class="btn btn-outline-light" data-questtab="unstarted" type="button">Unstarted</button>
+            </div>
+            <div class="card-body p-2 panel" id="questBody" style="max-height: 30vh;"></div>
+          </div>
+        </div>
+
+        <!-- OPTIONS: inline mod actions, account info, residual misc stats -->
+        <div id="editTabOptions" class="d-none">
+          <div class="row g-3">
+            <div class="col-lg-6">
+              <div class="card soft-card">
+                <div class="card-header fw-semibold">Mod Actions</div>
+                <div class="card-body">
+                  <div class="mb-3">
+                    <div class="fw-semibold muted-mono mb-1">Chat</div>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-sm btn-outline-secondary flex-fill" id="optMute" data-flag="mute">Mute</button>
+                      <button class="btn btn-sm btn-outline-secondary flex-fill" id="optDeaf" data-flag="deaf">Deaf</button>
+                      <button class="btn btn-sm btn-outline-secondary flex-fill" id="optStrict" data-flag="strict">Strict</button>
+                    </div>
+                  </div>
+                  <hr style="border-color: rgba(255,255,255,.15);">
+                  <div class="mb-3">
+                    <div class="fw-semibold muted-mono mb-1">Ban <span class="muted-mono" id="optBanStatus"></span></div>
+                    <div class="d-flex gap-2 mb-2">
+                      <select class="form-select form-select-sm" id="optBanDur">
+                        <option value="60">1m</option>
+                        <option value="300">5m</option>
+                        <option value="900">15m</option>
+                        <option value="1800">30m</option>
+                        <option value="3600">1hr</option>
+                        <option value="7200">2hr</option>
+                        <option value="18000">5hr</option>
+                        <option value="43200">12hr</option>
+                        <option value="86400" selected>24hr</option>
+                        <option value="259200">72hr</option>
+                        <option value="custom">custom…</option>
+                      </select>
+                      <input class="form-control form-control-sm d-none" id="optBanCustom" placeholder="seconds">
+                    </div>
+                    <input class="form-control form-control-sm mb-2" id="optBanReason" placeholder="Reason (optional — defaults to a standard notice)">
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-sm btn-danger flex-fill" id="optBanBtn">Ban</button>
+                      <button class="btn btn-sm btn-outline-secondary flex-fill" id="optUnbanBtn">Unban</button>
+                    </div>
+                  </div>
+                  <hr style="border-color: rgba(255,255,255,.15);">
+                  <div>
+                    <div class="fw-semibold muted-mono mb-1">Exile <span class="muted-mono" id="optExileStatus"></span></div>
+                    <input class="form-control form-control-sm mb-2" id="optExileReason" placeholder="Reason (optional — defaults to a standard notice)">
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-sm btn-outline-danger flex-fill" id="optExileBtn">Exile (permanent)</button>
+                      <button class="btn btn-sm btn-outline-secondary flex-fill" id="optUnexileBtn">Un-exile</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-6">
+              <div class="card soft-card mb-3">
+                <div class="card-header fw-semibold">Account</div>
+                <div class="card-body" id="optAccountInfo"></div>
+              </div>
+              <div class="card soft-card">
+                <div class="card-header fw-semibold">Player Stats <span class="muted-mono">(misc)</span></div>
+                <div class="card-body p-0 panel"><table class="table table-sm mb-0"><tbody id="optStatRows"></tbody></table></div>
               </div>
             </div>
           </div>
@@ -584,10 +855,15 @@
       if (b.dataset.tab === "shop") loadShop();
       if (b.dataset.tab === "users") loadUsers();
       if (b.dataset.tab === "players") {
-        // Always land on the list view when entering the tab.
-        $("playerPanel").classList.add("d-none");
-        $("playerListCard").classList.remove("d-none");
-        loadPlayerList();
+        // Edit mode persists across tab switches (currentPlayer/?p=) — land
+        // back on that player's edit view rather than resetting to the list.
+        if (currentPlayer) {
+          loadPlayer(currentPlayer);
+        } else {
+          $("playerPanel").classList.add("d-none");
+          $("playerListCard").classList.remove("d-none");
+          loadPlayerList();
+        }
       }
     }));
 
@@ -632,6 +908,12 @@
 
       renderFeed(w.events);
       await loadWorldUsers();
+
+      // Cached for the Playercard tab's read-only Base box, which reads this
+      // instead of its own fetch — loadWorld() already polls unconditionally
+      // every 3s regardless of active tab, so it's never more than that stale.
+      worldData = w;
+      if (currentPlayer) renderBaseBox();
     }
 
     // World Chat & Events — plain lines, admin-authored ones read
@@ -1047,30 +1329,100 @@
       loadPlayerList();
     };
 
-    let currentPlayer = null, statTab = "player", currentPlayerData = null;
-    $("statTabs").querySelectorAll("[data-stattab]").forEach(b =>
-      b.addEventListener("click", () => { statTab = b.dataset.stattab; renderStatTabs(); }));
+    let currentPlayer = null, currentPlayerData = null, editTab = "playercard", worldData = null;
+    $("editTabs").querySelectorAll("[data-edittab]").forEach(b =>
+      b.addEventListener("click", () => { editTab = b.dataset.edittab; renderEditTabs(); }));
+    function renderEditTabs(){
+      $("editTabs").querySelectorAll("[data-edittab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.edittab === editTab));
+      ["playercard", "equipment", "stats", "options"].forEach(t =>
+        $("editTab" + t[0].toUpperCase() + t.slice(1)).classList.toggle("d-none", t !== editTab));
+    }
 
     let questTab = "started";
     $("questTabs").querySelectorAll("[data-questtab]").forEach(b =>
       b.addEventListener("click", () => { questTab = b.dataset.questtab; renderQuestTabs(); }));
 
-    let equipInvTab = "equip";
-    $("equipInvTabs").querySelectorAll("[data-eitab]").forEach(b =>
-      b.addEventListener("click", () => { equipInvTab = b.dataset.eitab; renderEquipInvTabs(); }));
-    function renderEquipInvTabs(){
-      $("equipInvTabs").querySelectorAll("[data-eitab]").forEach(b =>
-        b.classList.toggle("active", b.dataset.eitab === equipInvTab));
-      $("equipSlots").classList.toggle("d-none", equipInvTab !== "equip");
-      $("inventoryPane").classList.toggle("d-none", equipInvTab !== "inventory");
+    let eqTab = "guns";
+    $("eqSubTabs").querySelectorAll("[data-eqtab]").forEach(b =>
+      b.addEventListener("click", () => { eqTab = b.dataset.eqtab; renderEquipmentPanes(); }));
+    function renderEquipmentPanes(){
+      $("eqSubTabs").querySelectorAll("[data-eqtab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.eqtab === eqTab));
+      ["guns", "weapons", "armor", "inventory"].forEach(t =>
+        $("eqPane" + t[0].toUpperCase() + t.slice(1)).classList.toggle("d-none", t !== eqTab));
+      // The paperdoll's callout lines are measured via getBoundingClientRect,
+      // which returns zero size while #eqPaneArmor is d-none — redraw once
+      // the pane actually becomes visible (renderArmorPane may have run
+      // while it was still hidden, e.g. during the initial player load).
+      if (eqTab === "armor") requestAnimationFrame(drawArmorLines);
+    }
+
+    function updateEditModeBanner(){
+      const active = Boolean(currentPlayer && currentPlayerData);
+      $("editModeBanner").classList.toggle("d-none", !active);
+      if (active) {
+        $("editModeName").textContent = currentPlayerData.username;
+        $("editModeUid").textContent = currentPlayerData.id;
+      }
+    }
+    function exitPlayerEdit(){
+      currentPlayer = null;
+      currentPlayerData = null;
+      history.replaceState(null, "", "/admin");
+      updateEditModeBanner();
+      if (activeTab() === "players") {
+        $("playerPanel").classList.add("d-none");
+        $("playerListCard").classList.remove("d-none");
+        loadPlayerList();
+      }
+    }
+    $("backToList").onclick = exitPlayerEdit;
+    $("exitEditMode").onclick = exitPlayerEdit;
+
+    // Shared quick-edit row builder — a label, the current value, a spread of
+    // delta buttons (±10/-5/-1/+1/+5/+10 by default; Guns uses ±15/-5/-1/+1/+5/+15
+    // per the notes) plus "set", and an optional "Refill" button when a
+    // refill-source value is given. Used by the Playercard bars, Currency,
+    // and Guns/Weapons stat rows alike.
+    function quickRow(field, label, value, refillValue, deltas = [-10, -5, -1, 1, 5, 10]){
+      const row = document.createElement("div");
+      row.className = "d-flex justify-content-between align-items-center mb-1";
+      row.innerHTML = `
+        <span class="muted-mono">${label} <span class="statval">${value}</span></span>
+        <span>
+          ${deltas.map(d => `<button class="btn btn-sm btn-outline-secondary py-0 px-1" data-d="${d}">${d>0?"+":""}${d}</button>`).join("")}
+          <button class="btn btn-sm btn-outline-info py-0 px-1" data-set>set</button>
+          ${refillValue != null ? `<button class="btn btn-sm btn-outline-success py-0 px-1" data-refill>Refill</button>` : ""}
+        </span>`;
+      row.querySelectorAll("[data-d]").forEach(btn => btn.onclick = () => setStat(field, value + Number(btn.dataset.d)));
+      row.querySelector("[data-set]").onclick = () => { const v = prompt(`Set ${label} to:`, value); if (v !== null && v !== "") setStat(field, v); };
+      const rf = row.querySelector("[data-refill]");
+      if (rf) rf.onclick = () => setStat(field, refillValue);
+      return row;
+    }
+    // A boolean (jammed/etc) toggle row, same shape as statRowEl's toggle branch.
+    function toggleRow(field, label, on){
+      const row = document.createElement("div");
+      row.className = "d-flex justify-content-between align-items-center mb-1";
+      row.innerHTML = `
+        <span class="muted-mono">${label} ${on ? '<span class="badge text-bg-danger">ON</span>' : '<span class="badge text-bg-secondary">off</span>'}</span>
+        <button class="btn btn-sm ${on ? "btn-outline-secondary" : "btn-outline-warning"} py-0 px-2" data-toggle>Toggle</button>`;
+      row.querySelector("[data-toggle]").onclick = () => setStat(field, on ? 0 : 1);
+      return row;
     }
 
     async function loadPlayer(name){
       loadItemSelect(); // populate the grant dropdown once
-      const data = await api("/api/admin/player?username=" + encodeURIComponent(name));
+      const [data, locData] = await Promise.all([
+        api("/api/admin/player?username=" + encodeURIComponent(name)),
+        api("/api/admin/world/locations"),
+      ]);
       if (!data || !data.ok){ flash(data?.message || "Not found."); $("playerPanel").classList.add("d-none"); return; }
       currentPlayer = data.username;
       currentPlayerData = data;
+      history.replaceState(null, "", "/admin?p=" + encodeURIComponent(data.username));
+      updateEditModeBanner();
       $("playerListCard").classList.add("d-none");
       $("playerPanel").classList.remove("d-none");
       $("pName").textContent = data.username;
@@ -1089,33 +1441,17 @@
       $("pXpText").textContent = `${sv.xp} / ${data.nextLevelCost}`;
       $("pXpBar").style.width = Math.min(100, barPct(sv.xp, data.nextLevelCost)) + "%";
 
-      // Quick-edit rows, rendered under their matching bar. [field, label,
-      // refill-source, container]
-      const quick = [
-        ["health",       "Health",     "max_health", "pHealthRows"],
-        ["max_health",   "Health Max", null,         "pHealthRows"],
-        ["shield",       "Shield",     "max_shield", "pShieldRows"],
-        ["max_shield",   "Shield Max", null,         "pShieldRows"],
-        ["mana",         "Mana",       "mana_max",   "pManaRows"],
-        ["mana_max",     "Mana Max",   null,         "pManaRows"],
-      ];
       ["pHealthRows", "pShieldRows", "pManaRows"].forEach(id => $(id).innerHTML = "");
-      quick.forEach(([field, label, refillFrom, container]) => {
-        const row = document.createElement("div");
-        row.className = "d-flex justify-content-between align-items-center mb-1";
-        row.innerHTML = `
-          <span class="muted-mono">${label} <span class="statval">${sv[field]}</span></span>
-          <span>
-            ${[-10,-5,-1,1,5,10].map(d => `<button class="btn btn-sm btn-outline-secondary py-0 px-1" data-d="${d}">${d>0?"+":""}${d}</button>`).join("")}
-            <button class="btn btn-sm btn-outline-info py-0 px-1" data-set>set</button>
-            ${refillFrom ? `<button class="btn btn-sm btn-outline-success py-0 px-1" data-refill>Refill</button>` : ""}
-          </span>`;
-        row.querySelectorAll("[data-d]").forEach(btn => btn.onclick = () => setStat(field, sv[field] + Number(btn.dataset.d)));
-        row.querySelector("[data-set]").onclick = () => { const v = prompt(`Set ${label} to:`, sv[field]); if (v !== null && v !== "") setStat(field, v); };
-        const rf = row.querySelector("[data-refill]");
-        if (rf) rf.onclick = () => setStat(field, sv[refillFrom]);
-        $(container).appendChild(row);
-      });
+      $("pHealthRows").appendChild(quickRow("health", "Health", sv.health, sv.max_health));
+      $("pHealthRows").appendChild(quickRow("max_health", "Health Max", sv.max_health, null));
+      $("pShieldRows").appendChild(quickRow("shield", "Shield", sv.shield, sv.max_shield));
+      $("pShieldRows").appendChild(quickRow("max_shield", "Shield Max", sv.max_shield, null));
+      $("pManaRows").appendChild(quickRow("mana", "Mana", sv.mana, sv.mana_max));
+      $("pManaRows").appendChild(quickRow("mana_max", "Mana Max", sv.mana_max, null));
+
+      const cwrap = $("pCurrencyRows"); cwrap.innerHTML = "";
+      cwrap.appendChild(quickRow("c_gold", "Gold", sv.c_gold, null));
+      cwrap.appendChild(quickRow("c_tokens", "Tokens", sv.c_tokens, null));
 
       // Live status: where they are + busy/campfire (from the server's
       // in-memory action/campfire maps).
@@ -1127,17 +1463,17 @@
         fireLeft ? `<span class="badge text-bg-warning text-dark">🔥 ${fireLeft}s</span>` : "",
       ].join(" ");
 
-      // Location mover (teleport — ignores the travel graph).
-      const loc = $("locSelect"); loc.innerHTML = "";
-      data.locations.forEach(l => loc.insertAdjacentHTML("beforeend",
-        `<option value="${esc(l.key)}"${l.key === data.location ? " selected" : ""}>${esc(l.name)}</option>`));
+      renderLocationsTable(data, locData);
+      renderBaseBox();
 
-      // Stats table (Player/Currency/Guns tabs) + skill boxes (Skills tab).
-      renderStatTabs();
+      renderEditTabs();
       renderQuestTabs();
-
-      renderEquipSlots(data);
-      renderEquipInvTabs();
+      renderSkillBoxes(data);
+      renderEquipmentPanes();
+      renderGunsPane(data);
+      renderWeaponsPane(data);
+      renderArmorPane(data);
+      renderOptionsTab(data);
 
       const iv = $("invRows"); iv.innerHTML = "";
       if (!data.inventory.length) iv.innerHTML = `<tr><td class="muted-mono">(empty)</td></tr>`;
@@ -1153,40 +1489,337 @@
       });
     }
 
-    // Equip Slots: one section per weapon-wheel slot (gun + melee/fist/ranged/
-    // throwing/zombie) — same owned/equipped/force-equip button pattern as
-    // the old single-gun card and the Armor tab, just repeated per slot.
-    // Unowned items are labeled "Grant" (force-grants + equips in one click).
-    const SLOT_LABELS = { gun: "Gun", melee: "Melee", fist: "Fist", ranged: "Ranged", throwing: "Throwing", zombie: "Zombie" };
-    function renderEquipSlots(data){
-      const wrap = $("equipSlots"); wrap.innerHTML = "";
-      (data.weapons || []).forEach(({ slot, items }) => {
-        const row = document.createElement("div");
-        row.className = "mb-3";
-        row.innerHTML = `<div class="fw-semibold muted-mono mb-1">${esc(SLOT_LABELS[slot] || slot)}</div>`;
-        if (!items.length) row.insertAdjacentHTML("beforeend", `<div class="muted-mono">(no items registered for this slot)</div>`);
-        items.forEach(it => {
-          const label = it.label || it.name;
-          const b = document.createElement("button");
-          b.className = "btn btn-sm me-2 mb-2 " + (it.equipped ? "btn-primary" : it.owned ? "btn-outline-primary" : "btn-outline-secondary");
-          b.textContent = it.equipped ? `${label} ✓` : it.owned ? label : `${label} [Grant]`;
-          b.disabled = it.equipped;
-          b.onclick = () => {
-            const p = slot === "gun"
-              ? api("/api/admin/player/equip", { username: currentPlayer, gun: it.name, force: it.owned ? "false" : "true" })
-              : api("/api/admin/player/weapon/equip", { username: currentPlayer, slot, item: it.name, force: it.owned ? "false" : "true" });
-            p.then(r => r.ok && loadPlayer(currentPlayer));
-          };
-          row.appendChild(b);
-        });
-        wrap.appendChild(row);
+    // Locations table (Playercard tab): every LOCATION_NAMES entry, live
+    // zombie/player counts from /api/admin/world/locations, Teleport buttons
+    // on everywhere the player isn't currently standing.
+    function renderLocationsTable(data, locData){
+      const tb = $("pLocRows"); tb.innerHTML = "";
+      (locData?.locations || []).forEach(l => {
+        const here = l.key === data.location;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${esc(l.name)}${here ? ' <span class="badge text-bg-info">here</span>' : ""}</td>
+          <td>${l.zombie ? '<span class="badge text-bg-danger">zombies</span>' : '<span class="badge text-bg-success">safe</span>'}</td>
+          <td class="text-end muted-mono">${l.zombies == null ? "—" : l.zombies}</td>
+          <td class="text-end muted-mono">${l.count} (${l.online} online)</td>
+          <td class="text-end">${here ? "" : '<button class="btn btn-sm btn-outline-info py-0 px-2" data-teleport>Teleport To</button>'}</td>`;
+        const btn = tr.querySelector("[data-teleport]");
+        if (btn) btn.onclick = async () => {
+          const r = await api("/api/admin/player/location", { username: currentPlayer, location: l.key });
+          if (r.ok) loadPlayer(currentPlayer);
+        };
+        tb.appendChild(tr);
       });
     }
 
+    // Base box (Playercard tab): read-only, sourced from the always-polled
+    // worldData cache (set at the end of loadWorld()) rather than its own
+    // fetch — may be up to 3s stale, fine for a display-only box.
+    function renderBaseBox(){
+      const w = worldData;
+      if (!w) return;
+      const pct = w.base.max > 0 ? Math.max(0, Math.min(100, (w.base.health / w.base.max) * 100)) : 0;
+      $("pBaseHealthText").textContent = w.base.destroyed ? "DESTROYED" : `${w.base.health} / ${w.base.max}`;
+      const bar = $("pBaseHealthBar");
+      bar.style.width = pct + "%";
+      bar.className = "progress-bar " + (pct > 50 ? "bg-success" : pct > 20 ? "bg-warning" : "bg-danger");
+      $("pBaseAp").textContent = `AP ${w.base.ap}`;
+      $("pBaseSentry").className = "badge rounded-pill " + (w.base.sentryActive ? "text-bg-success" : "text-bg-secondary");
+      $("pBaseSentry").textContent = w.base.sentryActive ? "🤖 Sentry: ON" : "Sentry: off";
+    }
+
+    // Equipment tab — Guns pane: one horizontal button per GUN_NAMES entry,
+    // ammo/clips/condition/jam rows for whichever type is selected (±15 per
+    // the notes, not the usual ±10), an Equipped Gun box, and an owned-but-
+    // not-equipped entry for the selected type (labeled "[Grant]" if unowned
+    // — force-grants + equips in one click, same convention as before).
+    const gunKeyOf = (name) => name.toLowerCase().replace(/\s/g, "");
+    let gunType = null;
+    function renderGunsPane(data){
+      if (!gunType) gunType = gunKeyOf(data.guns[0].name);
+      const tabs = $("gunTypeTabs"); tabs.innerHTML = "";
+      data.guns.forEach(g => {
+        const key = gunKeyOf(g.name);
+        const b = document.createElement("button");
+        b.className = "btn btn-sm " + (key === gunType ? "btn-light active" : "btn-outline-light");
+        b.textContent = g.name + (g.equipped ? " ✓" : "");
+        b.onclick = () => { gunType = key; renderGunsPane(currentPlayerData); };
+        tabs.appendChild(b);
+      });
+
+      const prefix = gunType + "_";
+      const sv = Object.fromEntries(data.stats.map(s => [s.field, s.value]));
+      const wrap = $("gunStatRows"); wrap.innerHTML = "";
+      const deltas = [-15, -5, -1, 1, 5, 15];
+      if (sv[prefix + "ammo"] !== undefined) {
+        wrap.appendChild(quickRow(prefix + "ammo", "Ammo", sv[prefix + "ammo"], sv[prefix + "max_ammo"], deltas));
+        wrap.appendChild(quickRow(prefix + "max_ammo", "Max Ammo", sv[prefix + "max_ammo"], null, deltas));
+        wrap.appendChild(quickRow(prefix + "clips", "Clips", sv[prefix + "clips"], sv[prefix + "max_clips"], deltas));
+        wrap.appendChild(quickRow(prefix + "max_clips", "Max Clips", sv[prefix + "max_clips"], null, deltas));
+        wrap.appendChild(quickRow(prefix + "condition", "Condition", sv[prefix + "condition"], null, deltas));
+        wrap.appendChild(toggleRow(prefix + "jammed", "Jammed", Number(sv[prefix + "jammed"]) === 1));
+      }
+
+      const equippedGun = data.guns.find(g => g.equipped);
+      $("gunEquippedName").textContent = equippedGun ? equippedGun.name : "(none)";
+
+      const ownedWrap = $("gunOwnedList"); ownedWrap.innerHTML = "";
+      data.guns.filter(g => gunKeyOf(g.name) === gunType && !g.equipped).forEach(g => {
+        const b = document.createElement("button");
+        b.className = "btn btn-sm me-2 mb-2 " + (g.owned ? "btn-outline-primary" : "btn-outline-secondary");
+        b.textContent = g.owned ? g.name : `${g.name} [Grant]`;
+        b.onclick = () => api("/api/admin/player/equip", { username: currentPlayer, gun: g.name, force: g.owned ? "false" : "true" })
+          .then(r => r.ok && loadPlayer(currentPlayer));
+        ownedWrap.appendChild(b);
+      });
+      if (!ownedWrap.children.length) ownedWrap.innerHTML = `<div class="muted-mono">(none)</div>`;
+    }
+
+    // Equipment tab — Weapons pane: the 5 weapon-wheel slots (melee/fist/
+    // ranged/throwing/zombie). Stat rows differ per slot (melee/fist:
+    // condition only; throwing: condition+ammo; ranged: condition+ammo+all 3
+    // type-specific max-ammo columns, since which one applies depends on the
+    // equipped item's rangedType and that isn't surfaced to the client — the
+    // admin edits whichever's relevant — plus the crossbow-only jam toggle;
+    // zombie: no stats at all, always pristine).
+    const SLOT_LABELS = { melee: "Melee", fist: "Fist", ranged: "Ranged", throwing: "Throwing", zombie: "Zombie" };
+    const WEAPON_SLOTS = ["melee", "fist", "ranged", "throwing", "zombie"];
+    let weaponSlot = "melee";
+    function renderWeaponsPane(data){
+      const bySlot = Object.fromEntries((data.weapons || []).filter(w => w.slot !== "gun").map(w => [w.slot, w]));
+      const tabs = $("weaponSlotTabs"); tabs.innerHTML = "";
+      WEAPON_SLOTS.forEach(slot => {
+        const w = bySlot[slot];
+        const b = document.createElement("button");
+        b.className = "btn btn-sm " + (slot === weaponSlot ? "btn-light active" : "btn-outline-light");
+        b.textContent = SLOT_LABELS[slot] + (w?.equipped ? " ✓" : "");
+        b.onclick = () => { weaponSlot = slot; renderWeaponsPane(currentPlayerData); };
+        tabs.appendChild(b);
+      });
+
+      const w = bySlot[weaponSlot];
+      const sv = Object.fromEntries(data.stats.map(s => [s.field, s.value]));
+      const wrap = $("weaponStatRows"); wrap.innerHTML = "";
+      if (weaponSlot === "melee") {
+        wrap.appendChild(quickRow("melee_condition", "Condition", sv.melee_condition, null));
+      } else if (weaponSlot === "fist") {
+        wrap.appendChild(quickRow("fist_weapon_condition", "Condition", sv.fist_weapon_condition, null));
+      } else if (weaponSlot === "throwing") {
+        wrap.appendChild(quickRow("throwing_condition", "Condition", sv.throwing_condition, null));
+        wrap.appendChild(quickRow("throwing_ammo", "Ammo", sv.throwing_ammo, sv.throwing_max_ammo));
+        wrap.appendChild(quickRow("throwing_max_ammo", "Max Ammo", sv.throwing_max_ammo, null));
+      } else if (weaponSlot === "ranged") {
+        wrap.appendChild(quickRow("ranged_condition", "Condition", sv.ranged_condition, null));
+        wrap.appendChild(quickRow("ranged_ammo", "Ammo", sv.ranged_ammo, null));
+        wrap.appendChild(quickRow("ranged_crossbow_max_ammo", "Max Ammo (Crossbow)", sv.ranged_crossbow_max_ammo, null));
+        wrap.appendChild(quickRow("ranged_bow_max_ammo", "Max Ammo (Bow)", sv.ranged_bow_max_ammo, null));
+        wrap.appendChild(quickRow("ranged_slingshot_max_ammo", "Max Ammo (Slingshot)", sv.ranged_slingshot_max_ammo, null));
+        wrap.appendChild(toggleRow("ranged_cb_jammed", "Jammed (Crossbow)", Number(sv.ranged_cb_jammed) === 1));
+      } else {
+        wrap.innerHTML = `<div class="muted-mono">No stats — zombie-slot weapons are always pristine.</div>`;
+      }
+
+      $("weaponEquippedName").textContent = w?.equipped || "(none)";
+
+      const ownedWrap = $("weaponOwnedList"); ownedWrap.innerHTML = "";
+      (w?.items || []).filter(it => !it.equipped).forEach(it => {
+        const label = it.label || it.name;
+        const b = document.createElement("button");
+        b.className = "btn btn-sm me-2 mb-2 " + (it.owned ? "btn-outline-primary" : "btn-outline-secondary");
+        b.textContent = it.owned ? label : `${label} [Grant]`;
+        b.onclick = () => api("/api/admin/player/weapon/equip", { username: currentPlayer, slot: weaponSlot, item: it.name, force: it.owned ? "false" : "true" })
+          .then(r => r.ok && loadPlayer(currentPlayer));
+        ownedWrap.appendChild(b);
+      });
+      if (!ownedWrap.children.length) ownedWrap.innerHTML = `<div class="muted-mono">(none)</div>`;
+    }
+
+    // Equipment tab — Armor pane: a CSS body-outline paperdoll (6 ARMOR_PIECES
+    // hotspots + callout-line label cards), replacing the old 6-box grid.
+    // Prototyped/iterated in public/css_paperdoll_test.html (revision 2:
+    // T-pose + under-doll shield) before this port. Same owned/equipped
+    // mechanics the grid version used, just laid out around the figure.
+    let armorSlot = "head";
+
+    // Same tier thresholds as condTierOf() in game.html.
+    function armorConditionPill(cond) {
+      const tier = cond >= 85 ? "success" : cond >= 61 ? "primary" : cond >= 41 ? "warning" : cond >= 21 ? "danger" : "light";
+      const dark = (tier === "warning" || tier === "light") ? " text-dark" : "";
+      return `<span class="badge rounded-pill text-bg-${tier}${dark}">${cond}%</span>`;
+    }
+
+    function renderArmorCard(slot, armors) {
+      const entry = armors.find(a => a.slot === slot) || {};
+      const label = slot.charAt(0).toUpperCase() + slot.slice(1);
+      const eq = entry.equipped;
+      const eqItem = eq ? (entry.owned || []).find(o => o.name === eq) : null;
+      const selected = slot === armorSlot;
+      return `
+        <div class="doll-card${selected ? " doll-card-selected" : ""}" data-slot="${esc(slot)}" id="card-${esc(slot)}">
+          <div class="doll-card-label">${esc(label)}</div>
+          <div class="doll-card-item">${eq ? esc(eqItem?.label || eq) : '<span class="doll-empty">(empty)</span>'}</div>
+          ${eqItem ? `
+          <div class="doll-card-badges">
+            <span class="badge rounded-pill text-bg-info">AP ${eqItem.ap}</span>
+            <span class="badge rounded-pill text-bg-secondary">Def ${eqItem.defense}</span>
+            ${armorConditionPill(eqItem.condition)}
+          </div>` : ``}
+        </div>`;
+    }
+
+    function drawArmorLines() {
+      const svg = $("dollLines");
+      const row = $("paperdollRow");
+      if (!svg || !row) return;
+      const rowRect = row.getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${rowRect.width} ${rowRect.height}`);
+      svg.innerHTML = "";
+      ["head", "torso", "hands", "legs", "boots", "shield"].forEach((slot) => {
+        const dot = document.querySelector(`.doll-dot[data-slot="${slot}"]`);
+        const card = $(`card-${slot}`);
+        if (!dot || !card) return;
+        const dr = dot.getBoundingClientRect();
+        const cr = card.getBoundingClientRect();
+        const dx = dr.left + dr.width / 2 - rowRect.left;
+        const dy = dr.top + dr.height / 2 - rowRect.top;
+        const cardCenterX = cr.left + cr.width / 2 - rowRect.left;
+        const cx = cardCenterX > dx ? (cr.left - rowRect.left) : (cr.right - rowRect.left);
+        const cy = cr.top + cr.height / 2 - rowRect.top;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", dx); line.setAttribute("y1", dy);
+        line.setAttribute("x2", cx); line.setAttribute("y2", cy);
+        line.setAttribute("class", "doll-line" + (slot === armorSlot ? " doll-line-selected" : ""));
+        svg.appendChild(line);
+      });
+    }
+    let armorResizeTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(armorResizeTimer);
+      armorResizeTimer = setTimeout(drawArmorLines, 80);
+    });
+
+    function renderArmorPane(data){
+      const armors = data.armors || [];
+      $("colLeft").innerHTML = ["head", "hands", "legs"].map(s => renderArmorCard(s, armors)).join("");
+      $("colRight").innerHTML = ["torso", "boots", "shield"].map(s => renderArmorCard(s, armors)).join("");
+
+      document.querySelectorAll(".doll-dot[data-slot]").forEach((dot) => {
+        const entry = armors.find(a => a.slot === dot.dataset.slot);
+        dot.classList.toggle("empty", !entry?.equipped);
+        dot.classList.toggle("selected", dot.dataset.slot === armorSlot);
+        dot.onclick = () => { armorSlot = dot.dataset.slot; renderArmorPane(currentPlayerData); };
+      });
+      document.querySelectorAll(".doll-card[data-slot]").forEach((card) => {
+        card.onclick = () => { armorSlot = card.dataset.slot; renderArmorPane(currentPlayerData); };
+      });
+
+      const armorEntry = armors.find(a => a.slot === armorSlot);
+      $("armorSelectedSlot").textContent = armorSlot.charAt(0).toUpperCase() + armorSlot.slice(1);
+      const wrap = $("armorOwnedList"); wrap.innerHTML = "";
+      const equipped = armorEntry?.equipped;
+      (armorEntry?.owned || []).forEach(o => {
+        const b = document.createElement("button");
+        b.className = "btn btn-sm me-2 mb-2 " + (o.name === equipped ? "btn-primary" : "btn-outline-primary");
+        b.textContent = o.name === equipped ? `${o.label} ✓ (c${o.condition})` : `${o.label} (c${o.condition})`;
+        b.disabled = o.name === equipped;
+        b.onclick = () => api("/api/admin/player/armor/equip", { username: currentPlayer, slot: armorSlot, item: o.name })
+          .then(r => r.ok && loadPlayer(currentPlayer));
+        wrap.appendChild(b);
+      });
+      if (equipped) {
+        const clear = document.createElement("button");
+        clear.className = "btn btn-sm btn-outline-secondary mb-2";
+        clear.textContent = "Clear slot";
+        clear.onclick = () => api("/api/admin/player/armor/equip", { username: currentPlayer, slot: armorSlot, item: "" })
+          .then(r => r.ok && loadPlayer(currentPlayer));
+        wrap.appendChild(clear);
+      }
+      if (!(armorEntry?.owned || []).length && !equipped) wrap.insertAdjacentHTML("beforeend", `<div class="muted-mono">(none owned)</div>`);
+
+      requestAnimationFrame(drawArmorLines);
+    }
+
+    // Options tab: inline Mod Actions (mirrors openActions()/#modActions but
+    // sourced from data.moderation instead of the worldUsers cache), account
+    // info (created/last-login/online/leaderboard rank), and the residual
+    // generic "Player" stat group (misc fields with no home in the other 3
+    // tabs) via the existing generic statRowEl table.
+    const OPTIONS_MISC_FIELDS = new Set([
+      "xp", "lifetime_xp", "kills", "golden_shots", "accuracy", "ap_level",
+      "hidden", "forge_fired", "beacon_fired", "arcane_table", "arcane_table_activated_at",
+      "zombie_near", "zombie_near_health",
+    ]);
+    function renderOptionsTab(data){
+      const m = data.moderation || {};
+      ["mute", "deaf", "strict"].forEach(flag => {
+        const on = Boolean(m[`chat_${flag}`]);
+        const btn = $("opt" + flag[0].toUpperCase() + flag.slice(1));
+        btn.className = "btn btn-sm flex-fill " + (on ? "btn-warning" : "btn-outline-secondary");
+        btn.textContent = `${flag[0].toUpperCase()}${flag.slice(1)}${on ? " ✓" : ""}`;
+      });
+      if (m.login_restricted) {
+        const liftsAt = m.login_res_set_time + m.login_res_time * 1000;
+        $("optBanStatus").textContent = `— banned until ${new Date(liftsAt).toLocaleString()} (${m.login_res_reason})`;
+      } else {
+        $("optBanStatus").textContent = "";
+      }
+      $("optUnbanBtn").disabled = !m.login_restricted;
+      $("optBanReason").value = "";
+      $("optBanDur").value = "86400";
+      $("optBanCustom").classList.add("d-none");
+      $("optExileStatus").textContent = m.user_exiled ? `— currently exiled (${m.user_exiled_reason})` : "";
+      $("optExileBtn").disabled = Boolean(m.user_exiled);
+      $("optUnexileBtn").disabled = !m.user_exiled;
+      $("optExileReason").value = "";
+
+      const fmt = (ts) => ts ? new Date(ts).toLocaleString() : "—";
+      $("optAccountInfo").innerHTML = `
+        <div class="mb-1"><span class="muted-mono">Created:</span> <span class="statval">${esc(fmt(data.accountCreatedAt))}</span></div>
+        <div class="mb-1"><span class="muted-mono">Last login:</span> <span class="statval">${esc(fmt(data.lastLogin))}</span></div>
+        <div class="mb-1"><span class="muted-mono">Online:</span> ${data.online ? '<span class="badge text-bg-success">online</span>' : '<span class="badge text-bg-secondary">offline</span>'}</div>
+        <div class="mb-1"><span class="muted-mono">Leaderboard:</span> <span class="statval">#${data.leaderboard?.rank ?? "—"} of ${data.leaderboard?.total ?? "—"}</span></div>`;
+
+      const body = $("optStatRows"); body.innerHTML = "";
+      data.stats.filter(s => OPTIONS_MISC_FIELDS.has(s.field)).forEach(s => body.appendChild(statRowEl(s.field, s.field, s.value, s.max)));
+    }
+    document.querySelectorAll("#editTabOptions [data-flag]").forEach(btn => btn.onclick = async () => {
+      if (!currentPlayer) return;
+      const flag = btn.dataset.flag;
+      const on = Boolean(currentPlayerData?.moderation?.[`chat_${flag}`]);
+      await api("/api/admin/moderation/chatflag", { username: currentPlayer, flag, value: on ? "false" : "true" });
+      loadPlayer(currentPlayer);
+    });
+    $("optBanDur").addEventListener("change", () => {
+      $("optBanCustom").classList.toggle("d-none", $("optBanDur").value !== "custom");
+    });
+    $("optBanBtn").onclick = async () => {
+      if (!currentPlayer) return;
+      const seconds = $("optBanDur").value === "custom" ? Number($("optBanCustom").value) : Number($("optBanDur").value);
+      if (!seconds || seconds <= 0) { flash("Enter a valid ban duration."); return; }
+      await api("/api/admin/moderation/ban", { username: currentPlayer, seconds, reason: $("optBanReason").value.trim() });
+      loadPlayer(currentPlayer);
+    };
+    $("optUnbanBtn").onclick = async () => {
+      if (!currentPlayer) return;
+      await api("/api/admin/moderation/unban", { username: currentPlayer });
+      loadPlayer(currentPlayer);
+    };
+    $("optExileBtn").onclick = async () => {
+      if (!currentPlayer) return;
+      if (!confirm(`Permanently exile ${currentPlayer}? This is a permaban.`)) return;
+      await api("/api/admin/moderation/exile", { username: currentPlayer, reason: $("optExileReason").value.trim() });
+      loadPlayer(currentPlayer);
+    };
+    $("optUnexileBtn").onclick = async () => {
+      if (!currentPlayer) return;
+      await api("/api/admin/moderation/unexile", { username: currentPlayer });
+      loadPlayer(currentPlayer);
+    };
+
     // Quests card: read-only Started/Completed/Unstarted view, cached off
     // currentPlayerData.quests (same "no refetch on tab switch" convention as
-    // renderStatTabs). Started = the active quest (with objective progress)
-    // plus any other started-but-not-active quests.
+    // the other Playercard/Equipment/Stats/Options renderers). Started = the
+    // active quest (with objective progress) plus any other started-but-not-active quests.
     function renderQuestTabs(){
       const q = currentPlayerData?.quests;
       $("questTabs").querySelectorAll("[data-questtab]").forEach(b =>
@@ -1255,91 +1888,6 @@
       return tr;
     }
 
-    const CURRENCY_LABELS = { c_gold: "Gold", c_tokens: "Tokens" };
-    // Player-card quick-edit fields (health/shield/mana) are shown via the
-    // bars on the right, not duplicated in the Player tab table.
-    const CARD_QUICK_FIELDS = new Set(["health", "max_health", "shield", "max_shield", "mana", "mana_max"]);
-    const groupOf = (f) =>
-      f.startsWith("handgun_")    ? "Handgun" :
-      f.startsWith("rifle_")      ? "Rifle" :
-      f.startsWith("shotgun_")    ? "Shotgun" :
-      f.startsWith("burstrifle_") ? "Burst Rifle" :
-      f.startsWith("s_")          ? null : // Skills tab renders these as boxes instead
-      CURRENCY_LABELS[f]          ? "Currency" :
-      CARD_QUICK_FIELDS.has(f)    ? null :
-      "Player";
-
-    // Renders whichever stat tab is active from the cached currentPlayerData
-    // — switching tabs never refetches.
-    function renderStatTabs(){
-      const data = currentPlayerData;
-      if (!data) return;
-      $("statTabs").querySelectorAll("[data-stattab]").forEach(b =>
-        b.classList.toggle("active", b.dataset.stattab === statTab));
-      $("statTabPlayer").classList.toggle("d-none", statTab !== "player");
-      $("statTabCurrency").classList.toggle("d-none", statTab !== "currency");
-      $("statTabGuns").classList.toggle("d-none", statTab !== "guns");
-      $("statTabArmor").classList.toggle("d-none", statTab !== "armor");
-      $("statTabSkills").classList.toggle("d-none", statTab !== "skills");
-
-      const groups = {};
-      data.stats.forEach(s => { const g = groupOf(s.field); if (g) (groups[g] ||= []).push(s); });
-
-      if (statTab === "player") {
-        const tb = $("statTabPlayer").querySelector("tbody"); tb.innerHTML = "";
-        (groups["Player"] || []).forEach(s => tb.appendChild(statRowEl(s.field, s.field, s.value, s.max)));
-      } else if (statTab === "currency") {
-        const tb = $("statTabCurrency").querySelector("tbody"); tb.innerHTML = "";
-        (groups["Currency"] || []).forEach(s => tb.appendChild(statRowEl(s.field, CURRENCY_LABELS[s.field], s.value, s.max)));
-      } else if (statTab === "guns") {
-        const tb = $("statTabGuns").querySelector("tbody"); tb.innerHTML = "";
-        ["Handgun", "Rifle", "Shotgun", "Burst Rifle"].forEach(g => {
-          if (!groups[g]) return;
-          tb.insertAdjacentHTML("beforeend",
-            `<tr><td colspan="3" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${g}</td></tr>`);
-          groups[g].forEach(s => {
-            const label = s.field.replace(/^(handgun|rifle|shotgun|burstrifle)_/, "");
-            tb.appendChild(statRowEl(s.field, label, s.value, s.max));
-          });
-        });
-      } else if (statTab === "armor") {
-        renderArmorTab(data);
-      } else if (statTab === "skills") {
-        renderSkillBoxes(data);
-      }
-    }
-
-    // Armor tab: one row per paperdoll slot — the equipped piece (if any)
-    // plus a button per owned item matching that slot, mirroring the
-    // Equipped Gun card's owned/equipped/force-equip button pattern.
-    function renderArmorTab(data){
-      const wrap = $("statTabArmor"); wrap.innerHTML = "";
-      (data.armors || []).forEach(({ slot, equipped, owned }) => {
-        const row = document.createElement("div");
-        row.className = "mb-3";
-        row.innerHTML = `<div class="fw-semibold muted-mono mb-1">${esc(slot)}${equipped ? ` — ${esc(equipped)}` : ""}</div>`;
-        owned.forEach(o => {
-          const b = document.createElement("button");
-          b.className = "btn btn-sm me-2 mb-2 " + (o.name === equipped ? "btn-primary" : "btn-outline-primary");
-          b.textContent = o.name === equipped ? `${o.label} ✓ (c${o.condition})` : `${o.label} (c${o.condition})`;
-          b.disabled = o.name === equipped;
-          b.onclick = () => api("/api/admin/player/armor/equip", { username: currentPlayer, slot, item: o.name })
-            .then(r => r.ok && loadPlayer(currentPlayer));
-          row.appendChild(b);
-        });
-        if (equipped) {
-          const clear = document.createElement("button");
-          clear.className = "btn btn-sm btn-outline-secondary mb-2";
-          clear.textContent = "Clear slot";
-          clear.onclick = () => api("/api/admin/player/armor/equip", { username: currentPlayer, slot, item: "" })
-            .then(r => r.ok && loadPlayer(currentPlayer));
-          row.appendChild(clear);
-        }
-        if (!owned.length && !equipped) row.insertAdjacentHTML("beforeend", `<div class="muted-mono">(none owned)</div>`);
-        wrap.appendChild(row);
-      });
-    }
-
     // Skills tab: one boxed card per skill — an XP progress bar (server-
     // computed nextCost, same skillLevelCost formula the game/playercard
     // pages use) plus compact Level/XP edit rows, both driven by setStat.
@@ -1396,11 +1944,6 @@
       const r = await api("/api/admin/player/level", { username: currentPlayer, steps: b.dataset.lvl });
       if (r.ok) loadPlayer(currentPlayer);
     });
-    $("locSet").onclick = async () => {
-      if (!currentPlayer) return;
-      const r = await api("/api/admin/player/location", { username: currentPlayer, location: $("locSelect").value });
-      if (r.ok) loadPlayer(currentPlayer);
-    };
     $("invAddForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const r = await api("/api/admin/player/inventory/add", { username: currentPlayer, item: e.target.item.value, qty: e.target.qty.value });
@@ -1428,7 +1971,7 @@
     // ---- Item catalogue (read-only; items are code in item_backbone.js) ----
     // Cached from the last fetch — every tab/side-tab click below just
     // re-renders from these, same "no re-fetch on tab switch" convention as
-    // renderStatTabs() in the Players panel.
+    // the Players panel's renderers.
     let shopData = null, upgradesData = null;
     let itemType = null, itemSideTab = null;
     let recipeTab = null, recipeMetalSubTab = null;
@@ -1618,6 +2161,14 @@
     // ---- Give modal (bulk grant one item to one or more players) ----
     let giveModal = null, giveItem = null;
     async function openGive(itemName){
+      // A player's edit view is open — skip the recipient picker entirely
+      // and grant straight to them (works even if they own 0 already, unlike
+      // the picker below which only lists existing owners).
+      if (currentPlayer) {
+        const r = await api("/api/admin/player/inventory/add", { username: currentPlayer, item: itemName, qty: 1 });
+        flash(r.message || (r.ok ? "Given." : "Failed to give item."));
+        return;
+      }
       giveItem = itemName;
       $("giveItemName").textContent = itemName;
       $("giveQty").value = "1";
@@ -1669,6 +2220,16 @@
     fetch("/api/game-state", { credentials: "same-origin" }).then(r => r.json()).then(d => { $("meName").textContent = d?.me?.user || "—"; }).catch(()=>{});
     loadWorld();  // default tab
     loadUsers();  // also fills the Players dropdown
+
+    // ?p=<username> deep-link — jump straight into that player's edit view
+    // instead of requiring a manual Players-tab click first.
+    const deepLinkPlayer = new URLSearchParams(location.search).get("p");
+    if (deepLinkPlayer) {
+      $("tabs").querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      $("tabs").querySelector('[data-tab="players"]').classList.add("active");
+      ["world", "locations", "users", "players", "shop"].forEach(t => $("tab-" + t).classList.toggle("d-none", t !== "players"));
+      loadPlayer(deepLinkPlayer);
+    }
   </script>
 </body>
 </html>

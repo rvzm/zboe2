@@ -1605,6 +1605,9 @@ app.get("/", (req, res) => {
 
 app.get("/login", (_req, res) => res.redirect("/login.html"));
 app.get("/register", (_req, res) => res.redirect("/register.html"));
+// Scratch/prototype page for a future CSS-paperdoll pass on the admin panel's
+// Armor sub-tab — not auth-gated, not linked from anywhere in the live app.
+app.get("/paperdoll-test", (_req, res) => res.redirect("/css_paperdoll_test.html"));
 
 app.post("/register", (req, res) => {
   const username = String(req.body.username || "").trim();
@@ -3598,14 +3601,28 @@ app.get("/api/admin/player", adminReq, (req, res) => {
     .filter((k) => !startedKeys.has(k) && !completedKeys.has(k))
     .map((k) => ({ key: k, name: QUESTS[k].name, desc: QUESTS[k].desc }));
   const quests = { ...questsBase, unstarted };
+  // Moderation/account fields for the admin panel's Options tab — reuses the
+  // same auth-record lookup requireAuth/tryAuth already do, so the inline
+  // Mod Actions there can mirror openActions()'s field names exactly.
+  const auth = getAuthRecord(req.query.username);
+  const moderation = {
+    chat_mute: Boolean(auth?.chat_mute), chat_deaf: Boolean(auth?.chat_deaf), chat_strict: Boolean(auth?.chat_strict),
+    login_restricted: Boolean(auth?.login_restricted), login_res_time: auth?.login_res_time ?? 0,
+    login_res_set_time: auth?.login_res_set_time ?? 0, login_res_reason: auth?.login_res_reason ?? "",
+    user_exiled: Boolean(auth?.user_exiled), user_exiled_reason: auth?.user_exiled_reason ?? "",
+  };
+  const { rank: leaderboardRank, total: leaderboardTotal } = getLeaderboardRank(id);
   res.json({
-    ok: true, username: String(req.query.username), level: player.level,
+    ok: true, id, username: String(req.query.username), level: player.level,
     nextLevelCost: levelCost(nextLevelOf(player.level)),
     equippedGun: player.equipped_gun, stats, skills, inventory, guns, armors, weapons, quests,
     location: locKey, locationName: LOCATION_NAMES[locKey],
     zombieZone: isZombieActive(locKey, getGameState()),
     busyUntil: busyUntilOf(id), campfireUntil: campfireUntilOf(id),
+    online: (player.last_seen ?? 0) >= Date.now() - game_config.timeout * 1000,
     locations: Object.entries(LOCATION_NAMES).map(([key, name]) => ({ key, name })),
+    moderation, accountCreatedAt: auth?.created_at ?? null, lastLogin: auth?.last_login ?? null,
+    leaderboard: { rank: leaderboardRank, total: leaderboardTotal },
   });
 });
 

@@ -20,7 +20,8 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RECIPES, ITEMS, ARMOR_PIECES, WEAPON_TYPES, WEAPON_ATTACK_EXPORT, WEAPON_FIREARM_TYPES, WEAPON_FIREARM_EXPORT } from "./item_backbone.js";
+import { RECIPES, ITEMS, ARMOR_PIECES, WEAPON_TYPES, WEAPON_ATTACK_EXPORT, WEAPON_FIREARM_TYPES, WEAPON_FIREARM_EXPORT, METALS, SMELT_TYPES } from "./item_backbone.js";
+import { LOCATION_ACTIONS } from "./location_backbone.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,6 +92,36 @@ console.log(paint(["bold", "cyan"], "== Stage 0: registry sanity (no server need
     return !base || ["dmg", "acc", "floor"].some((f) => m[f] !== undefined && !Number.isFinite(m[f])) || (Number.isFinite(m.dmg) && base.dmg + m.dmg < 0);
   }).map(([k]) => k);
   record(`every gun ITEMS row with attack_mod has a valid offset`, badMod.length === 0, badMod.join(", "));
+}
+{
+  // Paperdoll metal-color regression guard: every METALS entry names a real
+  // SMELT_TYPES metal and a usable hex color, and every armor item's
+  // `section` has a matching METALS row (zombie included, now that it's
+  // mapped too). Catches a tier silently losing its paperdoll tint.
+  const metalKeys = new Set(METALS.map((m) => m.key));
+  const badMetal = METALS.filter((m) => !SMELT_TYPES.includes(m.metal) || !/^#[0-9a-fA-F]{6}$/.test(m.color));
+  record(`every METALS entry (${METALS.length}) has a valid SMELT_TYPES metal + hex color`, badMetal.length === 0, badMetal.map((m) => m.key).join(", "));
+
+  const armorSections = new Set(Object.values(ITEMS).filter((i) => i.type === "armor").map((i) => i.section));
+  const unmapped = [...armorSections].filter((s) => !metalKeys.has(s));
+  record(`every armor section has a METALS color mapping`, unmapped.length === 0, unmapped.join(", "));
+
+  // Zombie-tier "radioactive shimmer" regression guard: it's the one METALS
+  // row flagged `radioactive` (paperdoll shimmer instead of a flat tint —
+  // see .doll-radioactive in admin.html/game.html/playercard.html), and no
+  // other tier should have picked the flag up by accident.
+  const radioactiveKeys = METALS.filter((m) => m.radioactive).map((m) => m.key);
+  record(`exactly one METALS entry ("zombie") is flagged radioactive`, radioactiveKeys.length === 1 && radioactiveKeys[0] === "zombie", radioactiveKeys.join(", "));
+}
+{
+  // Cobalt regression guard: this tier was previously dead content (its bar
+  // was a recipe input with no way to ever obtain it — no mining action, no
+  // smelting recipe) — make sure the full gather -> smelt -> smith chain
+  // still exists.
+  const hasMineCobalt = Object.values(LOCATION_ACTIONS).some((defs) => defs.some((a) => a.key === "mine_cobalt"));
+  record(`a mine_cobalt location action exists`, hasMineCobalt);
+  const hasSmeltCobalt = RECIPES.some((r) => r.key === "smelt_cobalt" && r.output === "cobalt bar");
+  record(`smelt_cobalt recipe produces cobalt bar`, hasSmeltCobalt);
 }
 
 console.log(paint(["bold", "cyan"], "\n== Stage 1: isolated boot =="));
@@ -289,6 +320,26 @@ try {
     const inv = await req("player1", "GET", "/api/inventory");
     const row = (inv.json?.armors || []).find((a) => a.name === "bronze helm");
     if (!row || row.piece !== "head" || !row.equipped) throw new Error(`armors[] row missing/wrong: ${JSON.stringify(row)}`);
+    if (row.color !== "#964f07") throw new Error(`expected bronze's registry color on the armors[] row, got ${row.color}`);
+    if (row.radioactive !== false) throw new Error(`expected bronze's armors[] row to be radioactive:false, got ${row.radioactive}`);
+    const oil = (inv.json?.usable || []).find((u) => u.name === "gun oil");
+    if (oil?.bucket !== "repair") throw new Error(`expected gun oil's Toolbelt bucket to be "repair", got ${oil?.bucket}`);
+  });
+
+  await check("POST /api/armor/equip (zombie helm carries the radioactive-shimmer flag)", async () => {
+    // Zombie helm's registry `defense` is 35 (syllic-tier) — bump player1's
+    // Defense skill past the gate first, same as any other heavy-tier equip.
+    const defense = await req("admin", "POST", "/api/admin/player/stat", { username: "player1", field: "s_defense_lvl", value: 35 });
+    if (!defense.json?.ok) throw new Error(`bump s_defense_lvl: ${defense.json?.message || defense.status}`);
+    const grant = await req("admin", "POST", "/api/admin/player/inventory/add", { username: "player1", item: "zombie helm", qty: 1 });
+    if (!grant.json?.ok) throw new Error(`grant: ${grant.json?.message || grant.status}`);
+    const equip = await req("player1", "POST", "/api/armor/equip", { item: "zombie helm", slot: "head" });
+    if (!equip.json?.ok) throw new Error(`equip: ${equip.json?.message || equip.status}`);
+    const inv = await req("player1", "GET", "/api/inventory");
+    const row = (inv.json?.armors || []).find((a) => a.name === "zombie helm");
+    if (!row || row.piece !== "head" || !row.equipped) throw new Error(`armors[] row missing/wrong: ${JSON.stringify(row)}`);
+    if (row.radioactive !== true) throw new Error(`expected zombie helm's armors[] row to be radioactive:true, got ${row.radioactive}`);
+    if (row.color !== "#39ff14") throw new Error(`expected zombie's registry color on the armors[] row, got ${row.color}`);
   });
 
   await check("POST /api/action/reload (graceful: already full)", async () => {

@@ -246,7 +246,7 @@
    "iron armor set":       { name: "Iron Armor Set",       type: "treasure", section: "Artifacts", desc: "A matched set of iron armor.",       value: 900 },
    "silver armor set":     { name: "Silver Armor Set",     type: "treasure", section: "Artifacts", desc: "A matched set of silver armor.",     value: 1500 },
    "gold armor set":       { name: "Gold Armor Set",       type: "treasure", section: "Artifacts", desc: "A matched set of gold armor.",       value: 2400 },
-   "gold and silver armor set": { name: "Gold and Silver Armor Set", type: "treasure", section: "Artifacts", desc: "A matched set of gold and silver armor.", value: 3600 },
+   "cobalt armor set": { name: "Cobalt Armor Set", type: "treasure", section: "Artifacts", desc: "A matched set of cobalt armor.", value: 3600 },
    "mythril armor set":    { name: "Mythril Armor Set",    type: "treasure", section: "Artifacts", desc: "A matched set of mythril armor.",    value: 4800 },
    "adamantite armor set": { name: "Adamantite Armor Set", type: "treasure", section: "Artifacts", desc: "A matched set of adamantite armor.", value: 7200 },
    "syllic armor set":     { name: "Syllic Armor Set",     type: "treasure", section: "Artifacts", desc: "A matched set of syllic armor.",     value: 12000 },
@@ -290,13 +290,13 @@
    "gold gauntlets":    { name: "Gold Gauntlets", piece: "hands", type: "armor", section: "gold",            desc: "A pair of gold gauntlets. Heavy, shiny, and protective.",        value: 400, ap: 100, defense: 15 },
  
    // Gold and Silver Armor
-   "gold and silver helm": { name: "Gold and Silver Helm", piece: "head", type: "armor", section: "gold and silver", desc: "A suit of gold and silver armor. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
-   "gold and silver chainmail": { name: "Gold and Silver Chainmail", piece: "torso", type: "armor", section: "gold and silver", desc: "A suit of gold and silver chainmail. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
-   "gold and silver chestplate": { name: "Gold and Silver Chestplate", piece: "torso", type: "armor", section: "gold and silver", desc: "A suit of gold and silver chestplate. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
-   "gold and silver chainlegs": { name: "Gold and Silver Chainlegs", piece: "legs", type: "armor", section: "gold and silver", desc: "A suit of gold and silver chainlegs. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
-   "gold and silver platelegs": { name: "Gold and Silver Platelegs", piece: "legs", type: "armor", section: "gold and silver", desc: "A suit of gold and silver platelegs. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
-   "gold and silver boots": { name: "Gold and Silver Boots", piece: "boots", type: "armor", section: "gold and silver", desc: "A pair of gold and silver boots. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
-   "gold and silver gauntlets": { name: "Gold and Silver Gauntlets", piece: "hands", type: "armor", section: "gold and silver", desc: "A pair of gold and silver gauntlets. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt helm": { name: "Cobalt Helm", piece: "head", type: "armor", section: "cobalt", desc: "A suit of cobalt armor. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt chainmail": { name: "Cobalt Chainmail", piece: "torso", type: "armor", section: "cobalt", desc: "A suit of cobalt chainmail. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt chestplate": { name: "Cobalt Chestplate", piece: "torso", type: "armor", section: "cobalt", desc: "A suit of cobalt chestplate. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt chainlegs": { name: "Cobalt Chainlegs", piece: "legs", type: "armor", section: "cobalt", desc: "A suit of cobalt chainlegs. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt platelegs": { name: "Cobalt Platelegs", piece: "legs", type: "armor", section: "cobalt", desc: "A suit of cobalt platelegs. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt boots": { name: "Cobalt Boots", piece: "boots", type: "armor", section: "cobalt", desc: "A pair of cobalt boots. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt gauntlets": { name: "Cobalt Gauntlets", piece: "hands", type: "armor", section: "cobalt", desc: "A pair of cobalt gauntlets. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
  
    // Mythril Armor
    "mythril helm":    { name: "Mythril Helm",              piece: "head", type: "armor", section: "mythril",         desc: "A suit of mythril armor. Light and protective.",                 value: 800, ap: 150, defense: 25 },
@@ -339,7 +339,7 @@
    "iron shield":       { name: "Iron Shield",       piece: "shield", type: "armor", section: "iron",       desc: "An iron shield. Heavy but protective.",            value: 150,   ap: 50,  defense: 5 },
    "silver shield":     { name: "Silver Shield",     piece: "shield", type: "armor", section: "silver",     desc: "A silver shield. Shines and protects.",            value: 250,   ap: 75,  defense: 10 },
    "gold shield":       { name: "Gold Shield",       piece: "shield", type: "armor", section: "gold",       desc: "A gold shield. Heavy, shiny, and protective.",     value: 400,   ap: 100, defense: 15 },
-   "gold and silver shield": { name: "Gold and Silver Shield", piece: "shield", type: "armor", section: "gold and silver", desc: "A gold and silver shield. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
+   "cobalt shield": { name: "Cobalt Shield", piece: "shield", type: "armor", section: "cobalt", desc: "A cobalt shield. Heavy, shiny, and protective.", value: 600, ap: 115, defense: 20 },
    "mythril shield":    { name: "Mythril Shield",    piece: "shield", type: "armor", section: "mythril",    desc: "A mythril shield. Light and protective.",          value: 800,   ap: 150, defense: 25 },
    "adamantite shield": { name: "Adamantite Shield", piece: "shield", type: "armor", section: "adamantite", desc: "An adamantite shield. Extremely protective.",      value: 1200,  ap: 200, defense: 30 },
    "syllic shield":     { name: "Syllic Shield",     piece: "shield", type: "armor", section: "syllic",     desc: "A syllic shield. Extremely protective.",           value: 2000,  ap: 350, defense: 35 },
@@ -491,7 +491,7 @@
    { key: "iron armor set", chance: 0.5 },
    { key: "silver armor set", chance: 0.5 },
    { key: "gold armor set", chance: 0.5 },
-   { key: "gold and silver armor set", chance: 0.5 },
+   { key: "cobalt armor set", chance: 0.5 },
    { key: "mythril armor set", chance: 0.5 },
    { key: "adamantite armor set", chance: 0.5 },
    { key: "syllic armor set", chance: 0.25 },
@@ -573,15 +573,22 @@ export const COOKING = [
 //   color:     hex color for the metal
 //   fail:      -5 to +5 scale for smelting failure/success
 //   desc:      description of the metal
+//   radioactive: (optional, default false) the paperdoll renders this tier's
+//                equipped slots as an animated shimmer (see .doll-radioactive
+//                in admin.html/game.html/playercard.html) instead of a flat
+//                `color` tint. Zombie gear is drop-only (no smelt/smith
+//                recipes reference it) so `fail` is unused for this row.
 export const METALS = [
   { key: "copper", label: "Copper", metal: "copper", color: "#ff9a3b", fail: -2, desc: "A common metal used in crafting and smithing." },
   { key: "bronze", label: "Bronze", metal: "bronze", color: "#964f07", fail: -1, desc: "An alloy of copper and tin, used for crafting and smithing." },
   { key: "iron", label: "Iron", metal: "iron", color: "#d4d4d4", fail: 0, desc: "A strong metal used in crafting and smithing." },
   { key: "silver", label: "Silver", metal: "silver", color: "#c0c0c0", fail: 1, desc: "A precious metal used in crafting and smithing." },
   { key: "gold", label: "Gold", metal: "gold", color: "#ffd700", fail: 2, desc: "A valuable metal used in crafting and smithing." },
+  { key: "cobalt", label: "Cobalt", metal: "cobalt", color: "#0047ab", fail: 2, desc: "A rare and strong metal used in crafting and smithing." },
   { key: "mythril", label: "Mythril", metal: "mythril", color: "#31ffc5", fail: 3, desc: "A rare and magical metal used in crafting and smithing." },
   { key: "adamantite", label: "Adamantite", metal: "adamantite", color: "#ff3c00", fail: 4, desc: "An extremely rare and strong metal used in crafting and smithing." },
   { key: "syllic", label: "Syllic", metal: "syllic", color: "#2bb7e2", fail: 5, desc: "A legendary and mystical metal used in crafting and smithing." },
+  { key: "zombie", label: "Zombie", metal: "zombie", color: "#39ff14", fail: 5, desc: "Grisly armor scavenged from the undead — it pulses with a sickly, radioactive glow.", radioactive: true },
 ];
 
 
@@ -606,10 +613,10 @@ export const METALS = [
  //   timer     seconds the craft takes
  //   section   (forge recipes) which section of the Use Forge modal the row
  //             renders under: "Ingredients" | "Tools" | "Bronze" | "Iron" |
- //             "Silver" | "Gold" | "Mythril" | "Adamantite" | "Syllic". The
- //             modal's main tab is derived from the key: smelt_* -> Smelting,
- //             everything else -> Smithing. Required on station:"forge" rows
- //             (boot-checked). Gold-and-silver pieces use section "Gold".
+ //             "Silver" | "Gold" | "Cobalt" | "Mythril" | "Adamantite" |
+ //             "Syllic". The modal's main tab is derived from the key:
+ //             smelt_* -> Smelting, everything else -> Smithing. Required on
+ //             station:"forge" rows (boot-checked).
  // `category` (admin-panel Recipes tabs, added alongside `section`): one of
  // "food" | "potion" | "base" | "magic" | "metal" | "misc". Only "metal" rows
  // also carry `metal` (a SMELT_TYPES entry) and `metalType`
@@ -691,6 +698,7 @@ export const METALS = [
    { key: "smelt_tin",     label: "Smelt Tin",     skill: "smithing", level: 2, station: "forge", section: "Ingredients", requires: "hammer", inputs: { "tin ore": 2, "firewood": 1 },    output: "tin bar",    xp: 15, timer: 20, category: "metal", metal: "tin", metalType: "crafting" },
    { key: "smelt_silver",  label: "Smelt Silver",  skill: "smithing", level: 4, station: "forge", section: "Silver", requires: "hammer", inputs: { "silver ore": 2, "firewood": 2 }, output: "silver bar", xp: 20, timer: 25, category: "metal", metal: "silver", metalType: "crafting" },
    { key: "smelt_gold",    label: "Smelt Gold",    skill: "smithing", level: 5, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold ore": 2, "firewood": 3 },   output: "gold bar",   xp: 30, timer: 35, category: "metal", metal: "gold", metalType: "crafting" },
+   { key: "smelt_cobalt",  label: "Smelt Cobalt",  skill: "smithing", level: 5, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt ore": 2, "firewood": 3 }, output: "cobalt bar", xp: 32, timer: 37, category: "metal", metal: "cobalt", metalType: "crafting" },
    { key: "smelt_mythril",  label: "Smelt Mythril",  skill: "smithing", level: 6, station: "forge", section: "Mythril", requires: "hammer", inputs: { "mythril ore": 2, "firewood": 4 }, output: "mythril bar", xp: 40, timer: 45, category: "metal", metal: "mythril", metalType: "crafting" },
    { key: "smelt_adamantite", label: "Smelt Adamantite", skill: "smithing", level: 7, station: "forge", section: "Adamantite", requires: "hammer", inputs: { "adamantite ore": 2, "firewood": 5 }, output: "adamantite bar", xp: 50, timer: 50, category: "metal", metal: "adamantite", metalType: "crafting" },
    { key: "smelt_syllic",    label: "Smelt Syllic",    skill: "smithing", level: 8, station: "forge", section: "Syllic", requires: "hammer", inputs: { "syllic ore": 2, "firewood": 6 }, output: "syllic bar", xp: 60, timer: 55, category: "metal", metal: "syllic", metalType: "crafting" },
@@ -727,8 +735,8 @@ export const METALS = [
    // -- Armor (bars -> armor) — one recipe per paperdoll piece per tier.
    // Material cost scales by piece "weight": head/boots/hands (weight 1) cost
    // one bar; torso/legs/shield (weight 2, more material) cost two — or for
-   // the split tiers (gold-and-silver, syllic) one of the base bar plus one of
-   // the secondary/heavy component, mirroring the old whole-suit recipes' 2:1
+   // the split tier (syllic) one of the base bar plus one of the
+   // secondary/heavy component, mirroring the old whole-suit recipes' 2:1
    // material ratios. xp/timer scale with weight too. Numbers are a starting
    // baseline, easy to retune later.
    // Bronze
@@ -760,12 +768,12 @@ export const METALS = [
    { key: "smith_gold_hands",  label: "Smith Gold Gauntlets",  skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1 }, output: "gold gauntlets", xp: 25, timer: 28, category: "metal", metal: "gold", metalType: "armor" },
    { key: "smith_gold_shield", label: "Smith Gold Shield",     skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 2 }, output: "gold shield",    xp: 38, timer: 35, category: "metal", metal: "gold", metalType: "armor" },
    // Gold and Silver (weight-2 pieces split 1 gold + 1 silver, mirroring the old whole-suit's 2:1 ratio)
-   { key: "smith_gold_and_silver_head",   label: "Smith Gold and Silver Helm",       skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1 }, output: "gold and silver helm",       xp: 28, timer: 30, category: "metal", metal: "gold", metalType: "armor" },
-   { key: "smith_gold_and_silver_torso",  label: "Smith Gold and Silver Chestplate", skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1, "silver bar": 1 }, output: "gold and silver chestplate", xp: 42, timer: 38, category: "metal", metal: "gold", metalType: "armor" },
-   { key: "smith_gold_and_silver_legs",   label: "Smith Gold and Silver Platelegs",  skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1, "silver bar": 1 }, output: "gold and silver platelegs", xp: 42, timer: 38, category: "metal", metal: "gold", metalType: "armor" },
-   { key: "smith_gold_and_silver_boots",  label: "Smith Gold and Silver Boots",      skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1 }, output: "gold and silver boots",       xp: 28, timer: 30, category: "metal", metal: "gold", metalType: "armor" },
-   { key: "smith_gold_and_silver_hands",  label: "Smith Gold and Silver Gauntlets",  skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1 }, output: "gold and silver gauntlets",   xp: 28, timer: 30, category: "metal", metal: "gold", metalType: "armor" },
-   { key: "smith_gold_and_silver_shield", label: "Smith Gold and Silver Shield",     skill: "smithing", level: 6, station: "forge", section: "Gold", requires: "hammer", inputs: { "gold bar": 1, "silver bar": 1 }, output: "gold and silver shield",   xp: 42, timer: 38, category: "metal", metal: "gold", metalType: "armor" },
+   { key: "smith_cobalt_head",   label: "Smith Cobalt Helm",       skill: "smithing", level: 6, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt bar": 1 }, output: "cobalt helm",       xp: 28, timer: 30, category: "metal", metal: "cobalt", metalType: "armor" },
+   { key: "smith_cobalt_torso",  label: "Smith Cobalt Chestplate", skill: "smithing", level: 6, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt bar": 2 }, output: "cobalt chestplate", xp: 42, timer: 38, category: "metal", metal: "cobalt", metalType: "armor" },
+   { key: "smith_cobalt_legs",   label: "Smith Cobalt Platelegs",  skill: "smithing", level: 6, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt bar": 2 }, output: "cobalt platelegs", xp: 42, timer: 38, category: "metal", metal: "cobalt", metalType: "armor" },
+   { key: "smith_cobalt_boots",  label: "Smith Cobalt Boots",      skill: "smithing", level: 6, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt bar": 1 }, output: "cobalt boots",       xp: 28, timer: 30, category: "metal", metal: "cobalt", metalType: "armor" },
+   { key: "smith_cobalt_hands",  label: "Smith Cobalt Gauntlets",  skill: "smithing", level: 6, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt bar": 1 }, output: "cobalt gauntlets",   xp: 28, timer: 30, category: "metal", metal: "cobalt", metalType: "armor" },
+   { key: "smith_cobalt_shield", label: "Smith Cobalt Shield",     skill: "smithing", level: 6, station: "forge", section: "Cobalt", requires: "hammer", inputs: { "cobalt bar": 2 }, output: "cobalt shield",     xp: 42, timer: 38, category: "metal", metal: "cobalt", metalType: "armor" },
    // Mythril
    { key: "smith_mythril_head",   label: "Smith Mythril Helm",       skill: "smithing", level: 7, station: "forge", section: "Mythril", requires: "hammer", inputs: { "mythril bar": 1 }, output: "mythril helm",       xp: 32, timer: 33, category: "metal", metal: "mythril", metalType: "armor" },
    { key: "smith_mythril_torso",  label: "Smith Mythril Chestplate", skill: "smithing", level: 7, station: "forge", section: "Mythril", requires: "hammer", inputs: { "mythril bar": 2 }, output: "mythril chestplate", xp: 48, timer: 40, category: "metal", metal: "mythril", metalType: "armor" },

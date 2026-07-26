@@ -52,7 +52,7 @@ import { styleText } from "node:util";
 import { game_config, file_config, zombie_config, ssl_config, app_version, account_config } from "./config.js";
 import https from "node:https";
 import http from "node:http";
-import { ITEMS, RECIPES, ITEM_TYPES, RANDOM_DROPS, BONUS_DROPS, SUPPLY_DROP_ROLL, SMELT_TYPES, ARMOR_PIECES, WEAPON_TYPES, WEAPON_RANGED_OPTIONS, WEAPON_ATTACK_EXPORT, WEAPON_FIREARM_EXPORT, WEAPON_FIREARM_TYPES } from "./item_backbone.js";
+import { ITEMS, RECIPES, ITEM_TYPES, RANDOM_DROPS, BONUS_DROPS, SUPPLY_DROP_ROLL, SMELT_TYPES, METALS, ARMOR_PIECES, WEAPON_TYPES, WEAPON_RANGED_OPTIONS, WEAPON_ATTACK_EXPORT, WEAPON_FIREARM_EXPORT, WEAPON_FIREARM_TYPES } from "./item_backbone.js";
 import {
   MAGIC_SPELLS, MAGIC_SPELL_CATEGORIES, validateMagicSpells,
   SPELL_ARMOR_BUFFS, SPELL_ARMOR_BUFF_SECONDS, spellApOf,
@@ -487,6 +487,26 @@ const BASE_AP_MAX_BLOCK = 0.9;
 const ARMORS = Object.fromEntries(
   Object.entries(ITEMS).filter(([, item]) => item.type === "armor")
 );
+// Metal tier (armor's `section`) -> registry color, for the paperdoll's
+// per-slot tinting. A section with no METALS entry resolves to null — the
+// doll just falls back to its neutral look for those.
+const METAL_COLOR_BY_KEY = Object.fromEntries(METALS.map((m) => [m.metal, m.color]));
+function armorColorFor(itemName) {
+  return METAL_COLOR_BY_KEY[ARMORS[itemName]?.section] ?? null;
+}
+// Metal tiers flagged `radioactive` (currently just zombie gear) render the
+// paperdoll's shape as an animated shimmer instead of `color`'s flat tint.
+const METAL_RADIOACTIVE_BY_KEY = Object.fromEntries(METALS.map((m) => [m.metal, Boolean(m.radioactive)]));
+function armorRadioactiveFor(itemName) {
+  return METAL_RADIOACTIVE_BY_KEY[ARMORS[itemName]?.section] ?? false;
+}
+// Groups toolbag consumables into the game page's Toolbelt tabs by their
+// registry `use` effect verb — Ammo/Repair/Potions.
+const TOOLBAG_BUCKET_BY_USE_KEY = {
+  rangedAmmo: "ammo", throwingAmmo: "ammo", railgunAmmo: "ammo", bfgAmmo: "ammo",
+  gunCondition: "repair", weaponCondition: "repair",
+  heal: "potions", shield: "potions", mana: "potions",
+};
 // True if itemName is equipped in ANY of the 6 paperdoll slots.
 function isArmorEquippedAnywhere(player, itemName) {
   return ARMOR_PIECES.some((slot) => player[`a_${slot}`] === itemName);
@@ -511,6 +531,41 @@ function armorApOf(player) {
 // Damage deflected by an AP rating (never more than the damage itself).
 function apBlocked(damage, ap) {
   return Math.min(damage, Math.round(damage * Math.min(ap, AP_GAUGE) / AP_GAUGE));
+}
+
+// Zombie-tier gear is the god-tier set: full set = flat accuracy bonus (see
+// computeHitChance/computeWeaponHitChance) and boosted Zombie Bits drop
+// chance (see zombieBitDropMultiplier). Shield is NOT required for the body
+// set, but if it's ALSO zombie-tier it adds its own independent drop-chance
+// multiplier on top — see plan discussion in the session that added this.
+function hasFullZombieBodySet(player) {
+  if (!player?.user_id) return false; // e.g. the sentry turret's fake player object
+  const owned = new Map(getInventory(player.user_id).map((i) => [i.item_name, i]));
+  return ARMOR_PIECES.filter((slot) => slot !== "shield").every((slot) => {
+    const name = player[`a_${slot}`];
+    if (!name || ARMORS[name]?.section !== "zombie") return false;
+    const row = owned.get(name);
+    return row && row.quantity > 0 && row.condition > 0;
+  });
+}
+function hasZombieShieldEquipped(player) {
+  if (!player?.user_id) return false; // e.g. the sentry turret's fake player object
+  const name = player.a_shield;
+  if (!name || ARMORS[name]?.section !== "zombie") return false;
+  const owned = new Map(getInventory(player.user_id).map((i) => [i.item_name, i]));
+  const row = owned.get(name);
+  return Boolean(row && row.quantity > 0 && row.condition > 0);
+}
+// Zombie Bits drop-chance multiplier: full body set (x2) * zombie shield
+// (x2, independent add-on) * zombie-tier weapon used for the kill (x2) —
+// all three stack multiplicatively.
+const ZOMBIE_GEAR_DROP_MULT = 2;
+function zombieBitDropMultiplier(player, weaponItemName = null) {
+  let mult = 1;
+  if (hasFullZombieBodySet(player)) mult *= ZOMBIE_GEAR_DROP_MULT;
+  if (hasZombieShieldEquipped(player)) mult *= ZOMBIE_GEAR_DROP_MULT;
+  if (isZombieWeapon(weaponItemName)) mult *= ZOMBIE_GEAR_DROP_MULT;
+  return mult;
 }
 // The sentry turret shoots with Rifle logic at this fixed "accuracy rating"
 // (feeds both computeHitChance's condition scaling and the pierce roll).
@@ -731,6 +786,7 @@ const JAM_FACTOR = 0.25;
 // final chance always stays in [0, 100]. Shared by both World/Location and
 // Nearby-scope shooting, plus the sentry turret (base WEAPON_FIREARM_EXPORT
 // object, no accMod, unaffected).
+const ZOMBIE_SET_ACC_BONUS = 15;
 function computeHitChance(player, behavior, gunCondition) {
   const floor = behavior.floor ?? 5;
   let chance;
@@ -741,7 +797,8 @@ function computeHitChance(player, behavior, gunCondition) {
     // Handgun / Shotgun: player accuracy stat scaled by gun condition, floored.
     chance = Math.max(floor, Math.round(player.accuracy * (gunCondition / 100)));
   }
-  return Math.min(100, Math.max(0, chance + (behavior.accMod ?? 0)));
+  const zombieBonus = hasFullZombieBodySet(player) ? ZOMBIE_SET_ACC_BONUS : 0;
+  return Math.min(100, Math.max(0, chance + (behavior.accMod ?? 0) + zombieBonus));
 }
 
 // Shotgun: how many zombies a hit drops, scaled by accuracy and gun condition (1–5).
@@ -777,9 +834,10 @@ function fightingAccuracyOf(player) {
 // substitutes a flat 100, since nothing tracks its wear).
 function computeWeaponHitChance(player, section, attack, condition) {
   const floor = WEAPON_ATTACK_EXPORT[section].floor;
+  const zombieBonus = hasFullZombieBodySet(player) ? ZOMBIE_SET_ACC_BONUS : 0;
   if (attack.acc_model === "condition")
-    return Math.max(5, Math.round(floor * (condition / 100)));
-  return Math.max(floor, Math.round(fightingAccuracyOf(player) * (condition / 100)));
+    return Math.min(100, Math.max(5, Math.round(floor * (condition / 100))) + zombieBonus);
+  return Math.min(100, Math.max(floor, Math.round(fightingAccuracyOf(player) * (condition / 100))) + zombieBonus);
 }
 
 // targets_max absent => a hit always drops exactly 1 zombie. When present,
@@ -917,12 +975,12 @@ const ZOMBIE_BIT_DROP_CHANCE = 15; // % — tunable
 // Nearby-scope combat); it never touches a zombie pool — callers own that.
 // `sourceLabel` is the human text for "dropped N zombies with <sourceLabel>".
 // Returns the bit-drop note ("" if nothing dropped).
-function grantKillRewards(userId, username, killed, sourceLabel) {
+function grantKillRewards(userId, username, killed, sourceLabel, dropMultiplier = 1) {
   updatePlayerStats(userId, XP_PER_KILL * killed, killed);
   updatePlayerGold(userId, GOLD_PER_KILL * killed);
 
   let bitNote = "";
-  if (Math.random() * 100 < ZOMBIE_BIT_DROP_CHANCE) {
+  if (Math.random() * 100 < Math.min(100, ZOMBIE_BIT_DROP_CHANCE * dropMultiplier)) {
     const bit = ZOMBIE_BITS[Math.floor(Math.random() * ZOMBIE_BITS.length)];
     giveInventoryItem(userId, bit, 1);
     bitNote = ` …a ${ITEMS[bit].name} drops from the pile.`;
@@ -939,8 +997,8 @@ function grantKillRewards(userId, username, killed, sourceLabel) {
 // normal rewards, never the bonus — see plan §1). `scope` defaults to
 // "World" for callers that don't target Location (e.g. attack spells, which
 // have no Nearby-mode path — see plan §4).
-function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "World", location = null) {
-  const bonus0 = grantKillRewards(userId, username, killed, sourceLabel);
+function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "World", location = null, dropMultiplier = 1) {
+  const bonus0 = grantKillRewards(userId, username, killed, sourceLabel, dropMultiplier);
   let bonus = bonus0;
 
   if (scope === "Location") {
@@ -973,8 +1031,8 @@ function resolveKill(userId, username, killed, gameState, sourceLabel, scope = "
 // Nearby-scope kill reward: same reward tail, no pool decrement (the caller
 // already resolved the HP cascade via damageNearbyZombie) and never the
 // horde-broken/raid-cleared token bonus.
-function grantNearbyKillRewards(userId, username, killed, sourceLabel) {
-  return grantKillRewards(userId, username, killed, sourceLabel);
+function grantNearbyKillRewards(userId, username, killed, sourceLabel, dropMultiplier = 1) {
+  return grantKillRewards(userId, username, killed, sourceLabel, dropMultiplier);
 }
 
 const WEAPON_SLOT_KEYS = ["melee", "fist", "ranged", "throwing", "zombie"];
@@ -1511,7 +1569,7 @@ app.use(express.static(path.join(__dirname, "public")));
       if (a.trainOnly && !(Number.isFinite(a.xp) && a.xp > 0)) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} is trainOnly with no xp`);
       if (!a.grants && !a.activates && !a.trainOnly) bad.push(`LOCATION_ACTIONS.${loc}.${a.key} neither grants nor activates anything`);
     }
-  const FORGE_SECTIONS = ["Ingredients", "Guns", "Tools", "Bronze", "Iron", "Silver", "Gold", "Mythril", "Adamantite", "Syllic"];
+  const FORGE_SECTIONS = ["Ingredients", "Guns", "Tools", "Bronze", "Iron", "Silver", "Gold", "Cobalt", "Mythril", "Adamantite", "Syllic"];
   // Admin-panel Recipes tabs (see RECIPE_CATEGORIES/RECIPE_METAL_TYPES below).
   const RECIPE_CATEGORIES = ["food", "potion", "base", "magic", "metal", "misc", "weapon", "armor"];
   const RECIPE_METAL_TYPES = ["armor", "crafting", "tools"];
@@ -2016,7 +2074,7 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
     }
 
     const result = damageNearbyZombie(req.userId, dmg, zombie_config.z_hp);
-    const bonus = result?.killed ? grantNearbyKillRewards(req.userId, req.user, 1, `the ${gunLabel}`) : "";
+    const bonus = result?.killed ? grantNearbyKillRewards(req.userId, req.user, 1, `the ${gunLabel}`, zombieBitDropMultiplier(player)) : "";
     let goldenNote = "";
     if (golden) {
       if (goldenRemaining <= 0) {
@@ -2084,7 +2142,7 @@ app.post("/api/action/shoot", requireAuth, (req, res) => {
 
   // ---- Kill resolution (shared with spell casting — see resolveKill) ----
   const pierceTag = pierced ? " — the round went clean through" : "";
-  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${gunLabel}${pierceTag}`, scope, locationOf(player));
+  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${gunLabel}${pierceTag}`, scope, locationOf(player), zombieBitDropMultiplier(player));
 
   // ---- Golden Gun depletion ----
   let goldenNote = "";
@@ -2195,7 +2253,7 @@ app.post("/api/action/attack", requireAuth, (req, res) => {
       if (!result.killed) break;
       killedCount++;
     }
-    const bonus = killedCount > 0 ? grantNearbyKillRewards(req.userId, req.user, killedCount, `the ${weaponLabel}`) : "";
+    const bonus = killedCount > 0 ? grantNearbyKillRewards(req.userId, req.user, killedCount, `the ${weaponLabel}`, zombieBitDropMultiplier(player, weaponName)) : "";
     log("INFO", `${req.user} attack ${weaponLabel} (nearby) -> hit x${killedCount}`, game_config);
     const base = killedCount > 0
       ? (killedCount > 1 ? `Hit — ${killedCount} zombies down!` : "Hit — zombie down!")
@@ -2205,7 +2263,7 @@ app.post("/api/action/attack", requireAuth, (req, res) => {
 
   const poolCount = targetedPoolCountOf(player, gameState);
   const killed = Math.min(weaponTargetsHit(player, item.attack, condition), poolCount);
-  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${weaponLabel}`, scope, locationOf(player));
+  const bonus = resolveKill(req.userId, req.user, killed, gameState, `the ${weaponLabel}`, scope, locationOf(player), zombieBitDropMultiplier(player, weaponName));
 
   log("INFO", `${req.user} attack ${weaponLabel} -> hit x${killed}`, game_config);
   const base = killed > 1 ? `Hit — ${killed} zombies down!` : "Hit — zombie down!";
@@ -2443,12 +2501,16 @@ app.get("/api/inventory", requireAuth, (req, res) => {
   const ownedQty = Object.fromEntries(rawItems.map((i) => [i.item_name, i.quantity]));
   // Usable = any registry item with a `use` block (owned or not — qty 0 rows
   // render greyed out so players can see what exists). `toolbag` marks the
-  // quick-access combat consumables (Toolbag tab); the rest are Backpack food.
+  // quick-access combat consumables (the game page's Toolbelt modal); the
+  // rest are Backpack food. `bucket` (toolbag items only) groups them into
+  // the Toolbelt's Ammo/Repair/Potions tabs by which effect verb they use —
+  // computed here so the client never has to re-encode per-item logic.
   const usable = Object.entries(ITEMS)
     .filter(([, item]) => item.use)
     .map(([name, item]) => ({
       name, label: item.name, desc: item.desc,
       toolbag: Boolean(item.toolbag),
+      bucket: item.toolbag ? (TOOLBAG_BUCKET_BY_USE_KEY[Object.keys(item.use)[0]] ?? null) : null,
       quantity: ownedQty[name] ?? 0,
     }));
   // Owned guns with their live per-gun stats (the stats live on the player
@@ -2457,7 +2519,10 @@ app.get("/api/inventory", requireAuth, (req, res) => {
     .filter(([name]) => (ownedQty[name] ?? 0) > 0)
     .map(([name, g]) => ({ name, equipped: equippedGunName(player) === name, ...gunAmmoOf(player, g.type) }));
   // Owned armors: AP from the registry, condition from the inventory row —
-  // feeds the Backpack's Armor tab (equip/sell live there), grouped by piece.
+  // feeds the Armor Select paperdoll (equip/sell live there) and the
+  // Playercard modal's read-only doll, grouped by piece. `color` is the
+  // owning metal tier's registry color (null if unmapped); `radioactive`
+  // (zombie gear) tells the doll to shimmer instead of using `color` flat.
   const armors = rawItems
     .filter((i) => ARMORS[i.item_name] && i.quantity > 0)
     .map((i) => ({
@@ -2471,6 +2536,8 @@ app.get("/api/inventory", requireAuth, (req, res) => {
       condition: i.condition,
       quantity: i.quantity,
       equipped: isArmorEquippedAnywhere(player, i.item_name),
+      color: armorColorFor(i.item_name),
+      radioactive: armorRadioactiveFor(i.item_name),
     }));
   // Owned weapon-wheel items (melee/ranged/throwing/zombie) — feeds the
   // combat-facing Weapons modal, same shape as /api/playercard's `weapons`.
@@ -2552,6 +2619,8 @@ app.get("/api/playercard", (req, res) => {
         name: i.item_name, label: ARMORS[i.item_name].name, piece: ARMORS[i.item_name].piece, ap: ARMORS[i.item_name].ap,
         defense: ARMORS[i.item_name].defense,
         condition: i.condition, quantity: i.quantity, equipped: isArmorEquippedAnywhere(player, i.item_name),
+        color: armorColorFor(i.item_name),
+        radioactive: armorRadioactiveFor(i.item_name),
       }));
     // Every owned non-gun weapon, annotated with whichever wheel slot (if
     // any) it's currently equipped in. Ranged/Throwing carry a Quiver/Pouch
@@ -3257,7 +3326,7 @@ app.post("/api/spell/cast", requireAuth, (req, res) => {
       return res.json({ ok: true, result: "miss", message: `${spell.name} fizzled!` });
     }
     const killed = Math.min(spell.effect.targets, spellPoolCount);
-    const bonus = resolveKill(req.userId, req.user, killed, gameState, spell.name, spellScope, locationOf(player));
+    const bonus = resolveKill(req.userId, req.user, killed, gameState, spell.name, spellScope, locationOf(player), zombieBitDropMultiplier(player));
     log("INFO", `${req.user} cast ${key} -> hit x${killed}`, game_config);
     const base = killed > 1 ? `${spell.name} — ${killed} zombies down!` : `${spell.name} — zombie down!`;
     return res.json({ ok: true, result: "hit", killed, message: base + bonus });
@@ -3556,7 +3625,7 @@ app.get("/api/admin/player", adminReq, (req, res) => {
     equipped: player[`a_${slot}`] || null,
     owned: inventory
       .filter((i) => ARMORS[i.item_name]?.piece === slot && i.quantity > 0)
-      .map((i) => ({ name: i.item_name, label: ARMORS[i.item_name].name, ap: ARMORS[i.item_name].ap, defense: ARMORS[i.item_name].defense, condition: i.condition })),
+      .map((i) => ({ name: i.item_name, label: ARMORS[i.item_name].name, ap: ARMORS[i.item_name].ap, defense: ARMORS[i.item_name].defense, condition: i.condition, color: armorColorFor(i.item_name), radioactive: armorRadioactiveFor(i.item_name) })),
   }));
   // Weapon wheel: the gun slot (reusing the `guns` array above) plus the 5
   // wheel slots, one entry per slot listing every registry item valid for
@@ -3926,9 +3995,13 @@ app.post("/api/admin/fun", adminFunReq, (req, res) => {
     setPlayerStat(uid, "c_tokens", 100);
     setPlayerStat(uid, "accuracy", 100);
     for (const g of GUN_NAMES) giveInventoryItem(uid, g, 1);
-    insertEvent("item", "Player Boost: level 99, 100000 gold, 100 tokens, every gun, max accuracy.", "private", uid);
+    for (const s of SKILLS) {
+      setPlayerStat(uid, `s_${s}_lvl`, 100);
+      setPlayerStat(uid, `s_${s}_xp`, 0);
+    }
+    insertEvent("item", "Player Boost: level 99, 100000 gold, 100 tokens, every gun, max accuracy, every skill maxed.", "private", uid);
     log("INFO", `${req.user} used admin fun: boost`, game_config);
-    return res.json({ ok: true, message: "Boosted — level 99, rich, armed, deadly." });
+    return res.json({ ok: true, message: "Boosted — level 99, rich, armed, deadly, maxed skills." });
   }
   if (what === "items") {
     for (const key of Object.keys(ITEMS)) giveInventoryItem(uid, key, 99);

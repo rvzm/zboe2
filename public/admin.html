@@ -154,6 +154,28 @@
     }
     .doll-shield.selected::after { background: rgba(255,255,255,.85); }
 
+    /* Zombie-tier gear (METALS' `radioactive` flag) — an animated neon-green
+       shimmer on the doll shape in place of the flat metal-color tint every
+       other tier gets (applyDollColors below). Reuses admin-shimmer's
+       background-position sweep, same technique as .admin-shiny above.
+       The 3-class selector is needed for the shield: .doll-dot.doll-shield's
+       `background:` shorthand (2 classes) otherwise beats a plain
+       .doll-radioactive (1 class) on specificity and wins back to grey —
+       same trap the shield's clip-path override hit during the original
+       paperdoll build. */
+    .doll-radioactive, .doll-dot.doll-shield.doll-radioactive {
+      background-image: linear-gradient(90deg, #0d3d05 0%, #39ff14 20%, #d4ffb8 50%, #39ff14 80%, #0d3d05 100%);
+      background-size: 200% auto;
+      animation: admin-shimmer 3.5s linear infinite, radioactive-pulse 2s ease-in-out infinite;
+    }
+    @keyframes radioactive-pulse {
+      0%, 100% { box-shadow: 0 0 6px rgba(57,255,20,.5); }
+      50% { box-shadow: 0 0 18px rgba(57,255,20,.95); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .doll-radioactive { animation: none; box-shadow: 0 0 10px rgba(57,255,20,.7); }
+    }
+
     .doll-dot {
       position: absolute; width: 14px; height: 14px; border-radius: 50%;
       background: rgba(13,202,240,.85); border: 2px solid rgba(255,255,255,.85);
@@ -1641,6 +1663,30 @@
     // mechanics the grid version used, just laid out around the figure.
     let armorSlot = "head";
 
+    // Phase One "paperdoll metal colors": each slot's shape element(s) get
+    // tinted with the equipped item's registry color (server-computed from
+    // METALS via armorColorFor in server.js), or cleared back to the CSS
+    // default when the slot's empty or the tier has no color mapping.
+    // Tiers flagged `radioactive` (zombie gear) get the animated shimmer
+    // class instead of a flat tint — color and radioactive are mutually
+    // exclusive per METALS row, so the class wins when both are truthy.
+    const DOLL_SHAPE_SELECTORS = {
+      head: ".doll-head", torso: ".doll-torso", hands: ".doll-arm-left, .doll-arm-right",
+      legs: ".doll-lower .doll-leg", boots: ".doll-feet .doll-foot", shield: ".doll-dot.doll-shield",
+    };
+    function applyDollColors(armors) {
+      Object.entries(DOLL_SHAPE_SELECTORS).forEach(([slot, selector]) => {
+        const entry = armors.find(a => a.slot === slot);
+        const eqItem = entry?.equipped ? (entry.owned || []).find(o => o.name === entry.equipped) : null;
+        const color = eqItem?.color || null;
+        const radioactive = Boolean(eqItem?.radioactive);
+        document.querySelectorAll(selector).forEach(el => {
+          el.classList.toggle("doll-radioactive", radioactive);
+          el.style.backgroundColor = (!radioactive && color) ? `${color}55` : "";
+        });
+      });
+    }
+
     // Same tier thresholds as condTierOf() in game.html.
     function armorConditionPill(cond) {
       const tier = cond >= 85 ? "success" : cond >= 61 ? "primary" : cond >= 41 ? "warning" : cond >= 21 ? "danger" : "light";
@@ -1702,6 +1748,7 @@
       const armors = data.armors || [];
       $("colLeft").innerHTML = ["head", "hands", "legs"].map(s => renderArmorCard(s, armors)).join("");
       $("colRight").innerHTML = ["torso", "boots", "shield"].map(s => renderArmorCard(s, armors)).join("");
+      applyDollColors(armors);
 
       document.querySelectorAll(".doll-dot[data-slot]").forEach((dot) => {
         const entry = armors.find(a => a.slot === dot.dataset.slot);

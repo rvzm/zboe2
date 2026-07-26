@@ -14,9 +14,6 @@
                   radial-gradient(900px 500px at 80% 0%, rgba(25,135,84,.12), transparent 60%),
                   #0b0f14;
         }
-        .muted-mono, .mx-auto, .fw-bold, .container, .card, .card-header, .card-body, .card-footer {
-        color: rgba(255,255,255,.65);
-        }
 
         #pageBg{
             position:fixed;
@@ -25,7 +22,7 @@
 
             background-image:
                 linear-gradient(rgba(11,15,20,.65),rgba(11,15,20,.90)),
-                url("/img/page_about.png");
+                url("/img/util_map.png");
 
             background-size:cover;
             background-position:center;
@@ -33,16 +30,26 @@
 
         .soft-card{
             background:rgba(255,255,255,.03);
-            border:1px solid rgba(255,255,255,.12);
+            border-color:rgba(255,255,255,.12);
         }
 
         .soft-card .card-header{
             background:rgba(255,255,255,.06);
             border-color:rgba(255,255,255,.12);
+            color:#ffffff;
+        }
+
+        .soft-card .card-header .fw-semibold{
+            text-shadow:0 0 8px rgba(255,255,255,.25);
+            letter-spacing:.02em;
+        }
+
+        .soft-card .card-body, .soft-card .card-footer{
+            color:rgba(255,255,255,.9);
         }
 
         .muted-mono{
-            font-family:ui-monospace, monospace;
+            font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
             color:rgba(255,255,255,.65);
             font-size:.9rem;
         }
@@ -72,16 +79,30 @@
         footer{
             opacity:.6;
         }
-        .soft-card {
-             background: rgba(255,255,255,.03);
-             border-color: rgba(255,255,255,.12);
+
+        /* Brand shimmer — same background-clip-text shimmer technique as
+           game.html/playercard.html's .shiny-name (gold tier), applied here
+           as a one-off since about.html has no player-level context, mirroring
+           admin.html's own .admin-shiny brand treatment. */
+        .about-shiny{
+            background-image: linear-gradient(90deg, #b8952e 0%, #f5dd8f 20%, #fff6d8 50%, #f5dd8f 80%, #b8952e 100%);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+            text-shadow: 0 0 6px rgba(212,175,55,.35);
+            animation: about-shimmer 3.5s linear infinite;
         }
-        /* Bootstrap cards reset to the (dark) body color — without this the header
-           titles are near-invisible on the dark background. */
-        .soft-card .card-header {
-        background: rgba(255,255,255,.06);
-        border-color: rgba(255,255,255,.12);
-        color: #ffffff;
+        @keyframes about-shimmer { to { background-position: -200% center; } }
+        @media (prefers-reduced-motion: reduce) { .about-shiny { animation: none; } }
+
+        .screenshot-card img{
+            width:100%;
+            height:160px;
+            object-fit:cover;
+            border-radius:.375rem .375rem 0 0;
+            border-bottom:1px solid rgba(255,255,255,.12);
         }
     </style>
 </head>
@@ -94,7 +115,7 @@
     <div class="container py-2 d-flex justify-content-between">
 
         <span class="navbar-brand fw-semibold">
-            🧟 ZBOE
+            🧟 <span class="about-shiny">ZBOE</span>
             <span class="opacity-75">About</span>
         </span>
 
@@ -126,14 +147,14 @@
             <p class="mx-auto" style="max-width:850px">
 
                 zboe2 started as an IRC-based bot, named simply zboe which had no acronymic meaning, that simply informed chatters when zombies appeared, allowing
-                them to issue a command (originally, the bot used ".shoot" as a chat command, and ".reload) to interact. 
+                them to issue a command (originally, the bot used ".shoot" and ".reload" as chat commands) to interact.
 
             </p>
 
             <p class="mx-auto" style="max-width:850px">
 
-                Eventually the IRC bot got a small shop where users could buy ammo, but thats about as far as it went. That was in 2012. Now, it's 2026, and
-                zboe2 has been born (circia 2024 ish) as something new: Zombie Biohazard Outbreak Experiment. When this project started zboe became zboe2, to 
+                Eventually the IRC bot got a small shop where users could buy ammo, but that's about as far as it went. That was in 2012. Now, it's 2026, and
+                zboe2 has been born (circa 2024-ish) as something new: Zombie Biohazard Outbreak Experiment. When this project started zboe became zboe2, to
                 signify it's "rebirth" and gained an acronymic meaning. However, we started as "Zombie Biohazard Occult Experiment 2", because i was struggling 
                 to come up with what the O in zbOe could mean, but always knew that "Occult" wasn't quite right. Then it hit me: Outbreak.
             </p>
@@ -154,11 +175,11 @@
 
             <div class="mt-4">
 
-                <a class="btn btn-danger me-2" href="https://zboe.net">
+                <a class="btn btn-danger me-2" href="/">
                     Play Now
                 </a>
 
-                <a class="btn btn-outline-light me-2" href="https://zboe.net/playercard.html">
+                <a class="btn btn-outline-light me-2" href="/playercard.html">
                     Leaderboard
                 </a>
 
@@ -177,6 +198,75 @@
 
     </div>
 
+    <div class="card soft-card mb-4">
+
+        <div class="card-header fw-semibold">
+            📸 See It In Action
+        </div>
+
+        <div class="card-body">
+
+            <div class="row row-cols-2 row-cols-md-3 g-3">
+
+                <div class="col">
+                    <div class="card soft-card h-100 screenshot-card">
+                        <img src="/img/screenshot_combat.jpg" alt="Combat and the weapon wheel in a zombie zone">
+                        <div class="card-body py-2 px-2 text-center">
+                            <div class="muted-mono">Combat &amp; the Weapon Wheel</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col">
+                    <div class="card soft-card h-100 screenshot-card">
+                        <img src="/img/screenshot_adventure.jpg" alt="Crafting and the Mountains forge in a safe zone">
+                        <div class="card-body py-2 px-2 text-center">
+                            <div class="muted-mono">Crafting &amp; the Mountains Forge</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col">
+                    <div class="card soft-card h-100 screenshot-card">
+                        <img src="/img/screenshot_playercard_modal.jpg" alt="The in-game Playercard modal showing the paperdoll and stats">
+                        <div class="card-body py-2 px-2 text-center">
+                            <div class="muted-mono">Your Playercard</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col">
+                    <div class="card soft-card h-100 screenshot-card">
+                        <img src="/img/screenshot_backpack.jpg" alt="The Backpack inventory modal">
+                        <div class="card-body py-2 px-2 text-center">
+                            <div class="muted-mono">Backpack &amp; Equipment</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col">
+                    <div class="card soft-card h-100 screenshot-card">
+                        <img src="/img/screenshot_map.jpg" alt="The in-game world map modal">
+                        <div class="card-body py-2 px-2 text-center">
+                            <div class="muted-mono">The World Map</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col">
+                    <div class="card soft-card h-100 screenshot-card">
+                        <img src="/img/screenshot_public_profile.jpg" alt="A public player profile card">
+                        <div class="card-body py-2 px-2 text-center">
+                            <div class="muted-mono">Public Player Profiles</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
 
     <div class="row g-4">
 
@@ -243,7 +333,7 @@
 
     <div class="row mt-4 g-3">
 
-        <div class="col-md-4">
+        <div class="col-6 col-md-3">
 
             <div class="card soft-card feature h-100">
 
@@ -262,7 +352,7 @@
 
         </div>
 
-        <div class="col-md-4">
+        <div class="col-6 col-md-3">
 
             <div class="card soft-card feature h-100">
 
@@ -281,7 +371,7 @@
 
         </div>
 
-        <div class="col-md-4">
+        <div class="col-6 col-md-3">
 
             <div class="card soft-card feature h-100">
 
@@ -300,7 +390,7 @@
 
         </div>
 
-        <div class="col-md-4">
+        <div class="col-6 col-md-3">
 
             <div class="card soft-card feature h-100">
 
@@ -321,55 +411,6 @@
 
     </div>
 
-
-    <div class="card soft-card mt-4">
-
-        <div class="card-header fw-semibold">
-            📈 Development
-        </div>
-
-        <div class="card-body">
-
-            <div class="timeline-item">
-                <strong>Project Started</strong><br>
-                <span class="muted-mono">
-                    Initial browser RPG concept.
-                </span>
-            </div>
-
-            <div class="timeline-item">
-                <strong>Combat & Inventory</strong><br>
-                <span class="muted-mono">
-                    Core gameplay systems implemented.
-                </span>
-            </div>
-
-            <div class="timeline-item">
-                <strong>Player Cards</strong><br>
-                <span class="muted-mono">
-                    Public player profiles and leaderboards.
-                </span>
-            </div>
-
-            <div class="timeline-item">
-                <strong>Magic & Quests</strong><br>
-                <span class="muted-mono">
-                    Expanding progression and gameplay.
-                </span>
-            </div>
-
-            <div class="timeline-item">
-                <strong>Public Alpha</strong><br>
-                <span class="muted-mono">
-                    The beginning of a much larger world.
-                </span>
-            </div>
-
-        </div>
-
-    </div>
-
-
     <div class="row mt-4 g-4">
 
         <div class="col-lg-6">
@@ -386,7 +427,6 @@
                     <span class="badge bg-primary tech-pill">Express</span>
                     <span class="badge bg-secondary tech-pill">SQLite</span>
                     <span class="badge bg-info tech-pill text-dark">Bootstrap 5</span>
-                    <span class="badge bg-warning text-dark tech-pill">WebSockets</span>
 
                 </div>
 
@@ -421,6 +461,61 @@
 
     </div>
 
+    <div class="card soft-card mt-4">
+
+        <div class="card-header fw-semibold">
+            📈 Development
+        </div>
+
+        <div class="card-body">
+
+            <div class="timeline-item">
+                <strong>2012 — The IRC Bot</strong><br>
+                <span class="muted-mono">
+                    zboe starts life as an IRC bot: announcing zombie spawns
+                    and taking ".shoot"/".reload" chat commands, eventually
+                    with a tiny ammo shop bolted on.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>2024 — zboe2 Begins</strong><br>
+                <span class="muted-mono">
+                    The rebirth: a full Node.js/Express/SQLite rewrite as a
+                    real browser RPG, and the project finally earns its
+                    acronym — Zombie Biohazard Outbreak Experiment 2.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>Drive Failure &amp; Rebuild</strong><br>
+                <span class="muted-mono">
+                    A prior build was lost to a drive failure. Everything
+                    since is rebuilt from scratch — playable again, and
+                    growing faster than before.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>The Zombie Location Pool &amp; Outbreak Mode</strong><br>
+                <span class="muted-mono">
+                    The single global horde becomes three tiers (World,
+                    Location, Nearby) with real per-player combat, capped off
+                    by a full world-event Outbreak mode.
+                </span>
+            </div>
+
+            <div class="timeline-item">
+                <strong>Public Alpha — v2.0.28-dev-rc</strong><br>
+                <span class="muted-mono">
+                    Where we are now: the beginning of a much larger world.
+                </span>
+            </div>
+
+        </div>
+
+    </div>
+
 </main>
 
 <footer class="container text-center py-5">
@@ -431,7 +526,7 @@
 
         <br>
 
-        Version 2.0.x
+        Version 2.0.28-dev-rc
 
         <br><br>
 

@@ -1,6 +1,6 @@
 // zboe2 configuration file
 // This file contains configuration settings for the zboe2 server, including logging and database options.
-
+  
 // Single source of truth for the app version. Code reads it from here — only
 // changelog.md and README.md state versions of their own.
 export const app_version = "2.0.28-dev-rc";
@@ -62,10 +62,10 @@ export const zombie_config = {
   z_wander_chance: 15, // per-player, per-tick chance (percentage) a Location zombie wanders into a present player's "nearby" pool during a horde
   // Outbreak mode settings.
   z_break: 100, // Number of zombies needed to create a Outbreak Mode event.
-  z_break_players: 1, // Minimum number of players required to trigger a Outbreak Mode event.
+  z_break_players: 3, // Minimum number of players required to trigger a Outbreak Mode event.
   z_break_interval: 300, // Time interval (in seconds) between Outbreak Mode events.
   z_break_tic_run: 1, // Number of z_tic intervals that must pass between z_break chance rolls.
-  z_break_chance: 99, // Chance of a Outbreak Mode event occurring (percentage)
+  z_break_chance: 10, // Chance of a Outbreak Mode event occurring (percentage)
   z_break_duration: 600, // Max duration of a Outbreak Mode event in seconds
   z_break_reward: { gold: 500, xp: 250, level: 3 }, // Reward for surviving a Outbreak Mode event
   z_break_fall: 50, // Number of Zombies that must be killed to end a Outbreak Mode event early (percentage)

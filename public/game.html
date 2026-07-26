@@ -199,6 +199,78 @@
       #gunStats .p-2 { padding: .35rem !important; }
       #gunStats .fs-5 { font-size: .95rem !important; }
     }
+
+    /* ---- CSS paperdoll (ported from public/css_paperdoll_test.html / the
+         admin.html port) — used read-only in the Playercard modal and
+         interactively in the Armor Select modal. ---- */
+    .paperdoll-row { position: relative; display: flex; align-items: center; justify-content: center; gap: 2.5rem; flex-wrap: wrap; padding: 1rem 0 1.5rem; }
+    .doll-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    .doll-line { stroke: rgba(255,255,255,.22); stroke-width: 1.5; transition: stroke .15s ease; }
+    .doll-line-selected { stroke: #0dcaf0; stroke-width: 2; }
+    .doll-col { display: flex; flex-direction: column; gap: 1.1rem; width: 190px; z-index: 2; }
+    .doll-col-left { align-items: flex-end; }
+    .doll-col-right { align-items: flex-start; }
+    .doll-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14); border-radius: .5rem; padding: .5rem .7rem; width: 100%; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+    .doll-card:hover { background: rgba(255,255,255,.07); }
+    .doll-card-selected { border-color: #0dcaf0; box-shadow: 0 0 0 1px rgba(13,202,240,.4), 0 0 14px rgba(13,202,240,.25); }
+    .doll-card-label { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.55); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+    .doll-card-item { font-weight: 600; font-size: .92rem; color: #fff; }
+    .doll-empty { font-weight: 400; color: rgba(255,255,255,.4); font-style: italic; }
+    .doll-card-badges { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .35rem; }
+    .doll-stage { position: relative; z-index: 2; width: 280px; flex: 0 0 auto; }
+    .doll-figure { display: flex; flex-direction: column; align-items: center; width: 100%; }
+    .doll-head { position: relative; width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); margin-bottom: 4px; }
+    .doll-upper { position: relative; width: 264px; height: 132px; }
+    .doll-torso { position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 92px; height: 128px; border-radius: 34px 34px 16px 16px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-arm { position: absolute; top: 10px; width: 86px; height: 20px; border-radius: 10px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-arm-left { left: 0; }
+    .doll-arm-right { right: 0; }
+    .doll-lower { position: relative; display: flex; gap: 10px; margin-top: 2px; }
+    .doll-leg { width: 34px; height: 118px; border-radius: 14px 14px 8px 8px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-feet { position: relative; display: flex; gap: 20px; margin-top: 2px; }
+    .doll-foot { width: 40px; height: 18px; border-radius: 40% 40% 50% 10% / 60% 60% 100% 40%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-dot.doll-shield { position: relative; width: 46px; height: 56px; margin-top: 14px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.08); box-shadow: none; border-radius: 0; clip-path: polygon(50% 0%, 100% 14%, 100% 58%, 50% 100%, 0% 58%, 0% 14%); }
+    .doll-shield::after { content: ""; position: absolute; left: 50%; top: 10%; bottom: 16%; width: 2px; background: rgba(255,255,255,.3); transform: translateX(-50%); }
+    .doll-shield.selected::after { background: rgba(255,255,255,.85); }
+    /* Zombie-tier gear (METALS' `radioactive` flag) — an animated neon-green
+       shimmer on the doll shape in place of the flat metal-color tint every
+       other tier gets (applyDollColors below). Reuses gold-shimmer's
+       background-position sweep, same technique as .shiny-name above.
+       The 3-class selector is needed for the shield: .doll-dot.doll-shield's
+       `background:` shorthand (2 classes) otherwise beats a plain
+       .doll-radioactive (1 class) on specificity and wins back to grey —
+       same trap the shield's clip-path override hit during the original
+       paperdoll build. */
+    .doll-radioactive, .doll-dot.doll-shield.doll-radioactive { background-image: linear-gradient(90deg, #0d3d05 0%, #39ff14 20%, #d4ffb8 50%, #39ff14 80%, #0d3d05 100%); background-size: 200% auto; animation: gold-shimmer 3.5s linear infinite, radioactive-pulse 2s ease-in-out infinite; }
+    @keyframes radioactive-pulse { 0%, 100% { box-shadow: 0 0 6px rgba(57,255,20,.5); } 50% { box-shadow: 0 0 18px rgba(57,255,20,.95); } }
+    @media (prefers-reduced-motion: reduce) { .doll-radioactive { animation: none; box-shadow: 0 0 10px rgba(57,255,20,.7); } }
+    .doll-dot { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: rgba(13,202,240,.85); border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 6px rgba(13,202,240,.7); cursor: pointer; z-index: 3; transition: box-shadow .15s ease, background .15s ease, transform .15s ease; }
+    .doll-dot:hover { transform: scale(1.15); }
+    .doll-dot.empty { background: rgba(255,255,255,.3); box-shadow: none; }
+    .doll-dot.selected { background: #0dcaf0; box-shadow: 0 0 0 4px rgba(13,202,240,.3), 0 0 16px rgba(13,202,240,.9); }
+    .doll-head .doll-dot { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-head .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-torso .doll-dot { top: 38%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-torso .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-arm-left .doll-dot { left: -5px; top: 50%; transform: translateY(-50%); }
+    .doll-arm-left .doll-dot:hover { transform: translateY(-50%) scale(1.15); }
+    .doll-lower .doll-dot { top: 42%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-lower .doll-dot:hover { transform: translate(-50%, -50%) scale(1.15); }
+    .doll-feet .doll-dot { bottom: -2px; left: 50%; transform: translate(-50%, 50%); }
+    .doll-feet .doll-dot:hover { transform: translate(-50%, 50%) scale(1.15); }
+    /* Read-only Playercard doll: single stacked-card column to the right,
+       no lines/second column/pointer cursor — same doll-left/cards-right
+       layout as playercard.html's Paperdoll tab. Armor Select still owns
+       equipping. */
+    #pcPaperdollRow { justify-content: flex-start; gap: 2rem; }
+    #pcPaperdollRow .doll-col-right { flex: 1 1 190px; }
+    #pcPaperdollRow .doll-card { cursor: default; }
+    #pcPaperdollRow .doll-card:hover { background: rgba(255,255,255,.04); }
+    #pcPaperdollRow .doll-dot { cursor: default; }
+    #pcPaperdollRow .doll-dot:hover { transform: none; }
+    #pcPaperdollRow .doll-head .doll-dot:hover { transform: translate(-50%, -50%); }
+    #pcPaperdollRow .doll-arm-left .doll-dot:hover { transform: translateY(-50%); }
+    #pcPaperdollRow .doll-lower .doll-dot:hover, #pcPaperdollRow .doll-feet .doll-dot:hover { transform: translate(-50%, -50%); }
   </style>
 </head>
 
@@ -239,7 +311,14 @@
             <div class="d-flex align-items-center gap-2">
               <span class="badge rounded-pill text-bg-dark border" id="gunBadge">Handgun</span>
               <span class="badge rounded-pill text-bg-success" id="condPill">100%</span>
-              <button class="btn btn-sm btn-outline-light py-0 px-2" id="btnPlayerInfo" style="font-size: .72rem;">Player Info</button>
+              <div class="dropdown d-inline-block">
+                <button class="btn btn-sm btn-outline-light py-0 px-2 dropdown-toggle" id="btnPlayerInfo" style="font-size: .72rem;" type="button" data-bs-toggle="dropdown" aria-expanded="false">Player Info</button>
+                <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end" aria-labelledby="btnPlayerInfo">
+                  <li><button class="dropdown-item" id="btnOpenPlayercard" type="button">Playercard</button></li>
+                  <li><button class="dropdown-item" id="btnOpenArmorSelect" type="button">Armor Select</button></li>
+                  <li><button class="dropdown-item" id="btnOpenBackpack" type="button">Backpack</button></li>
+                </ul>
+              </div>
               <span class="badge rounded-pill text-bg-secondary" id="jamBadge">JAM: NO</span>
             </div>
           </div>
@@ -302,13 +381,24 @@
 
             <div class="d-grid gap-2">
               <div class="d-grid gap-2" id="combatButtons">
-                <button class="btn btn-success" id="btnShoot">Shoot</button>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-success w-50" id="btnShoot">Shoot</button>
+                  <!-- Reveals #slotGrid below via Bootstrap's Collapse
+                       component (animated height, not a static d-none/
+                       invisible toggle) so the Reload/Unjam row underneath
+                       slides up to fill the space when it's hidden — auto-
+                       collapses again once a quick-swap or weapon-picker
+                       selection is made. -->
+                  <button class="btn btn-outline-light w-50" id="btnWeaponToggle" type="button">Weapon</button>
+                </div>
                 <!-- Weapon-wheel slot buttons: Gun/Melee/Fist/Ranged/Throwing/
                      Zombie. Each main button opens a category-filtered
                      picker (openWeaponPicker); each quick-swap button below
                      it just switches the active slot to whatever's already
-                     equipped there (POST /api/weapon/select), no picker. -->
-                <div class="row row-cols-3 g-2" id="slotGrid">
+                     equipped there (POST /api/weapon/select), no picker.
+                     Collapsed by default until Weapon is clicked (see
+                     slotGridCollapse()). -->
+                <div class="row row-cols-3 g-2 collapse" id="slotGrid">
                   <div class="col"><div class="d-grid gap-1">
                     <button class="btn btn-sm w-100" data-slot="gun" type="button">Gun</button>
                     <button class="btn btn-sm btn-outline-secondary w-100" data-slotswap="gun" type="button" style="font-size:.68rem;">—</button>
@@ -341,7 +431,7 @@
               </div>
               <div class="d-flex gap-2">
                 <button class="btn btn-outline-primary w-50" id="btnShop">Shop</button>
-                <button class="btn btn-outline-info w-50" id="btnInventory">Inventory</button>
+                <button class="btn btn-outline-info w-50" id="btnInventory">Toolbelt</button>
               </div>
               <button class="btn btn-outline-secondary" id="btnSpells" style="border-color: #8b5cf6 !important; color: #c4b5fd;">Spells</button>
               <!-- Adventure Panel (safe zones): campfire, cooking, meditation -->
@@ -556,90 +646,151 @@
   <div id="eventToast" class="position-fixed top-0 start-50 translate-middle-x mt-2 px-3 py-2 rounded text-light d-none"
        style="background: rgba(0,0,0,.88); border: 1px solid rgba(255,255,255,.2); z-index: 1085; max-width: 90vw;"></div>
 
-  <!-- Player Info modal -->
-  <div class="modal fade" id="statsModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+  <!-- Playercard modal (Player Info dropdown -> Playercard): a read-only
+       colored paperdoll (the armor section) on the left, with HUD/leveling/
+       Currency-Kills/Skills stacked beside it to the right so nothing has
+       to scroll past the doll to reach them. Info only — Armor Select owns
+       equipping, and the Loadout card's Spells button owns casting, so
+       neither lives here. -->
+  <div class="modal fade" id="playercardModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
         <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
-          <h5 class="modal-title mb-0">Player Info</h5>
+          <h5 class="modal-title mb-0">Playercard</h5>
           <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-12">
-              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono mb-1">Survival</div>
-                <div class="d-flex justify-content-between text-center">
-                  <div class="flex-fill">
-                    <div class="muted-mono">Kills</div>
-                    <div class="fs-4 fw-semibold" id="meKills">0</div>
+          <div class="d-flex flex-wrap gap-3 align-items-start">
+            <!-- Armor section: doll on the left, all 6 equipped-piece info
+                 cards stacked in one column beside it — same doll-left/
+                 cards-right layout as playercard.html's Paperdoll tab. No
+                 clicks — Armor Select (Player Info dropdown) equips. -->
+            <div class="paperdoll-row flex-shrink-0 p-0" id="pcPaperdollRow">
+              <div class="doll-stage">
+                <div class="doll-figure">
+                  <div class="doll-head"><span class="doll-dot" data-slot="head"></span></div>
+                  <div class="doll-upper">
+                    <div class="doll-torso"><span class="doll-dot" data-slot="torso"></span></div>
+                    <div class="doll-arm doll-arm-left"><span class="doll-dot" data-slot="hands"></span></div>
+                    <div class="doll-arm doll-arm-right"></div>
                   </div>
-                  <div class="flex-fill">
-                    <div class="muted-mono">XP</div>
-                    <div class="fs-4 fw-semibold" id="meXp">0</div>
+                  <div class="doll-lower">
+                    <div class="doll-leg"></div>
+                    <div class="doll-leg"></div>
+                    <span class="doll-dot" data-slot="legs"></span>
                   </div>
-                  <div class="flex-fill">
-                    <div class="muted-mono">Accuracy</div>
-                    <div class="fs-4 fw-semibold" id="meAcc">35</div>
+                  <div class="doll-feet">
+                    <div class="doll-foot"></div>
+                    <div class="doll-foot"></div>
+                    <span class="doll-dot" data-slot="boots"></span>
                   </div>
+                  <div class="doll-dot doll-shield" data-slot="shield"></div>
                 </div>
               </div>
+              <div class="doll-col doll-col-right" id="pcColRight"></div>
             </div>
-            <div class="col-12">
-              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-                <div class="muted-mono mb-1">Currency</div>
-                <div class="d-flex justify-content-center align-items-center gap-4">
-                  <div class="d-flex align-items-center gap-2">
-                    <span class="muted-mono">Gold</span>
+
+            <!-- HUD + leveling + Currency/Kills + Skills, beside the armor
+                 section above instead of stacked full-width beneath it. -->
+            <div class="flex-grow-1" style="min-width: 240px;">
+              <div class="d-flex align-items-center gap-3 mb-2">
+                <div class="d-flex align-items-center justify-content-center flex-shrink-0 level-circle" id="pcLevelCircle"
+                     style="width:56px; height:56px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.05);">
+                  <span class="fs-4 fw-semibold" id="pcLevel">1</span>
+                </div>
+                <div class="flex-grow-1" style="min-width:0;">
+                  <div class="fw-semibold text-truncate shiny-name mb-1" id="pcHudName">player</div>
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;"><span>Health</span><span id="pcHealthText">100 / 100</span></div>
+                  <div class="progress mb-1" style="height:10px; background: rgba(255,255,255,.08);"><div class="progress-bar bg-danger" id="pcHealthBar" style="width:100%;"></div></div>
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;"><span>Shield</span><span id="pcShieldText">0 / 100</span></div>
+                  <div class="progress mb-1" style="height:10px; background: rgba(255,255,255,.08);"><div class="progress-bar bg-primary" id="pcShieldBar" style="width:0%;"></div></div>
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;"><span>Mana</span><span id="pcManaText">0 / 100</span></div>
+                  <div class="progress mb-1" style="height:10px; background: rgba(255,255,255,.08);"><div class="progress-bar bg-mana" id="pcManaBar" style="width:0%;"></div></div>
+                  <div class="d-flex justify-content-between muted-mono" style="font-size:.7rem;"><span>XP</span><span id="pcXpText">0 / 100</span></div>
+                  <div class="progress" style="height:10px; background: rgba(255,255,255,.08);"><div class="progress-bar bg-warning" id="pcXpBar" style="width:0%;"></div></div>
+                </div>
+              </div>
+              <div class="d-flex gap-2 mb-1">
+                <button class="btn btn-sm btn-outline-warning flex-grow-1" id="btnLevelUp">Level Up</button>
+                <button class="btn btn-sm btn-outline-warning" id="btnLevelMax">Max</button>
+              </div>
+              <div class="muted-mono text-center mb-3" id="meLevelInfo"></div>
+
+              <div class="p-2 border rounded mb-3" style="border-color: rgba(255,255,255,.12) !important;">
+                <div class="muted-mono mb-1">Currency &amp; Kills</div>
+                <div class="d-flex justify-content-around text-center">
+                  <div>
+                    <div class="muted-mono">Gold</div>
                     <span class="badge rounded-pill badge-gold" id="meGold">0</span>
                   </div>
-                  <div class="d-flex align-items-center gap-2">
-                    <span class="muted-mono">Tokens</span>
+                  <div>
+                    <div class="muted-mono">Tokens</div>
                     <span class="badge rounded-pill badge-purple" id="meTokens">0</span>
+                  </div>
+                  <div>
+                    <div class="muted-mono">Kills</div>
+                    <div class="fs-5 fw-semibold" id="meKills">0</div>
+                  </div>
+                  <div>
+                    <div class="muted-mono">Accuracy</div>
+                    <div class="fs-5 fw-semibold" id="meAcc">35</div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- Leveling: spend XP -->
-          <div class="mt-3">
-            <div class="muted-mono mb-1">Leveling <span id="meLevelInfo"></span></div>
-            <div class="d-flex gap-2">
-              <button class="btn btn-sm btn-outline-warning flex-grow-1" id="btnLevelUp">Level Up</button>
-              <button class="btn btn-sm btn-outline-warning" id="btnLevelMax">Max</button>
+              <div class="p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important; max-height: 260px; overflow-y: auto;">
+                <div class="muted-mono mb-1">Skills</div>
+                <div id="skillList"></div>
+              </div>
             </div>
-          </div>
-
-          <!-- Skills / Spells tabs: skill levels + XP progress (spend to
-               level), or the spells this player has learned (player_magic). -->
-          <div class="mt-3">
-            <div class="btn-group btn-group-sm w-100 mb-2" role="group" id="infoTabs">
-              <button class="btn btn-outline-light active" data-infotab="skills" type="button">Skills</button>
-              <button class="btn btn-outline-light" data-infotab="spells" type="button">Spells</button>
-              <button class="btn btn-outline-light" data-infotab="paperdoll" type="button">Paperdoll</button>
-            </div>
-            <div id="skillList"></div>
-            <div id="knownSpellList" class="d-none"></div>
-            <div id="paperdollList" class="d-none"></div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Armor picker modal: stacks on top of the Player Info modal (same
-       non-hiding pattern the Sell modal uses over the Backpack modal) —
-       lists owned items for one paperdoll slot, equip drops back to Paperdoll. -->
-  <div class="modal fade" id="armorPickerModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-scrollable">
+  <!-- Armor Select modal (Player Info dropdown -> Armor Select): the
+       interactive CSS paperdoll, ported from public/css_paperdoll_test.html
+       (revision 2 — T-pose arms, under-doll shield) — the sole armor-equip
+       surface now (see the Backpack modal's dropped Armor tab). Click a dot
+       or its label card to pick a slot; the owned-items list below equips/
+       unequips and re-renders this same modal in place. -->
+  <div class="modal fade" id="armorSelectModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
         <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
-          <h5 class="modal-title mb-0">Choose <span id="armorPickerSlot">—</span></h5>
+          <h5 class="modal-title mb-0">Armor Select</h5>
           <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body p-0">
-          <div class="list-group list-group-flush" id="armorPickerList"></div>
+        <div class="modal-body">
+          <div class="paperdoll-row" id="asPaperdollRow">
+            <svg class="doll-lines" id="asDollLines"></svg>
+            <div class="doll-col doll-col-left" id="asColLeft"></div>
+            <div class="doll-stage">
+              <div class="doll-figure">
+                <div class="doll-head"><span class="doll-dot" data-slot="head"></span></div>
+                <div class="doll-upper">
+                  <div class="doll-torso"><span class="doll-dot" data-slot="torso"></span></div>
+                  <div class="doll-arm doll-arm-left"><span class="doll-dot" data-slot="hands"></span></div>
+                  <div class="doll-arm doll-arm-right"></div>
+                </div>
+                <div class="doll-lower">
+                  <div class="doll-leg"></div>
+                  <div class="doll-leg"></div>
+                  <span class="doll-dot" data-slot="legs"></span>
+                </div>
+                <div class="doll-feet">
+                  <div class="doll-foot"></div>
+                  <div class="doll-foot"></div>
+                  <span class="doll-dot" data-slot="boots"></span>
+                </div>
+                <div class="doll-dot doll-shield" data-slot="shield"></div>
+              </div>
+            </div>
+            <div class="doll-col doll-col-right" id="asColRight"></div>
+          </div>
+          <div class="muted-mono mb-1">Owned — <span id="asSelectedSlot">Head</span></div>
+          <div id="asOwnedList"></div>
         </div>
       </div>
     </div>
@@ -664,7 +815,7 @@
   <!-- Weapons modal: opened per-category from a slot button (openWeaponPicker) —
        lists only owned items matching that category, with Equip/Unequip per
        row — combat-facing, kept separate from the inventory-browsing
-       Backpack modal. Mirrors the armorPickerModal pattern. -->
+       Backpack modal. -->
   <div class="modal fade" id="weaponsModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
       <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
@@ -679,10 +830,10 @@
     </div>
   </div>
 
-  <!-- Heal target picker: switches away from Spells (same hide/reopen
-       pattern as armorPickerModal — stacking a second Bootstrap modal on top
-       corrupts the modal/backdrop state) for aid-type spells like Healing
-       Touch, lists online players with health/shield bars to pick a target. -->
+  <!-- Heal target picker: switches away from Spells (stacking a second
+       Bootstrap modal on top corrupts the modal/backdrop state) for aid-type
+       spells like Healing Touch, lists online players with health/shield
+       bars to pick a target. -->
   <div class="modal fade" id="healPickerModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
       <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
@@ -765,35 +916,50 @@
     </div>
   </div>
 
-  <!-- Inventory modal: Toolbag (quick-use combat consumables) + Backpack
-       (everything else, sub-tabbed by item type with type-specific columns) -->
-  <div class="modal fade" id="invModal" tabindex="-1" aria-hidden="true">
+  <!-- Backpack modal (Player Info dropdown -> Backpack): everything owned
+       except armor, sub-tabbed by item type with type-specific columns.
+       Armor used to have its own tab here (equip/unequip/sell) — that was
+       the legacy armor-equip method, now fully superseded by the Armor
+       Select modal, so it was dropped from this list. -->
+  <div class="modal fade" id="backpackModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
       <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
         <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
-          <h5 class="modal-title mb-0">Inventory</h5>
+          <h5 class="modal-title mb-0">Backpack</h5>
           <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="btn-group btn-group-sm w-100 p-2" role="group" id="invTabs">
-          <button class="btn btn-outline-light active" data-invtab="toolbag" type="button">Toolbag</button>
-          <button class="btn btn-outline-light" data-invtab="backpack" type="button">Backpack</button>
+        <div class="btn-group btn-group-sm w-100 p-2" role="group" id="packTabs">
+          <button class="btn btn-outline-info active" data-packtab="guns" type="button">Guns</button>
+          <button class="btn btn-outline-info" data-packtab="tools" type="button">Tools</button>
+          <button class="btn btn-outline-info" data-packtab="consumables" type="button">Consumables</button>
+          <button class="btn btn-outline-info" data-packtab="materials" type="button">Materials</button>
+          <button class="btn btn-outline-info" data-packtab="treasure" type="button">Treasure</button>
+          <button class="btn btn-outline-info" data-packtab="base" type="button">Base</button>
         </div>
         <div class="modal-body p-0">
-          <div id="invToolbag">
-            <div class="list-group list-group-flush" id="toolbagList"></div>
-          </div>
-          <div id="invBackpack" class="d-none">
-            <div class="btn-group btn-group-sm w-100 px-2 pb-2" role="group" id="packTabs">
-              <button class="btn btn-outline-info active" data-packtab="guns" type="button">Guns</button>
-              <button class="btn btn-outline-info" data-packtab="armor" type="button">Armor</button>
-              <button class="btn btn-outline-info" data-packtab="tools" type="button">Tools</button>
-              <button class="btn btn-outline-info" data-packtab="consumables" type="button">Consumables</button>
-              <button class="btn btn-outline-info" data-packtab="materials" type="button">Materials</button>
-              <button class="btn btn-outline-info" data-packtab="treasure" type="button">Treasure</button>
-              <button class="btn btn-outline-info" data-packtab="base" type="button">Base</button>
-            </div>
-            <div id="packBody" class="px-2 pb-2"></div>
-          </div>
+          <div id="packBody" class="px-2 pb-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toolbelt modal (renamed from Inventory): the quick-access combat
+       consumables, grouped into Ammo/Repair/Potions by the server-computed
+       `bucket` field (from each item's registry `use` effect verb). -->
+  <div class="modal fade" id="toolbeltModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content text-light" style="background:#0b0f14; border:1px solid rgba(255,255,255,.15);">
+        <div class="modal-header" style="border-color: rgba(255,255,255,.12);">
+          <h5 class="modal-title mb-0">Toolbelt</h5>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="btn-group btn-group-sm w-100 p-2" role="group" id="toolbeltTabs">
+          <button class="btn btn-outline-light active" data-toolbelttab="ammo" type="button">Ammo</button>
+          <button class="btn btn-outline-light" data-toolbelttab="repair" type="button">Repair</button>
+          <button class="btn btn-outline-light" data-toolbelttab="potions" type="button">Potions</button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="list-group list-group-flush" id="toolbeltList"></div>
         </div>
       </div>
     </div>
@@ -1096,7 +1262,6 @@
       // AP pill: gear + spell buffs + Base AP (server's armorApOf total).
       $("meApPill").textContent = `AP ${state.me.armorAp}`;
       $("meApPill").className = "badge rounded-pill " + (state.me.armorAp > 0 ? "text-bg-info" : "text-bg-secondary");
-      $("meXp").textContent = state.me.xp;
       $("meLevel").textContent = state.me.level;
       $("meKills").textContent = state.me.kills;
 
@@ -1115,6 +1280,24 @@
       const xpPct = state.me.nextLevelCost > 0 ? Math.min(100, (state.me.xp / state.me.nextLevelCost) * 100) : 0;
       $("meXpText").textContent = `${state.me.xp} / ${state.me.nextLevelCost}`;
       $("meXpBar").style.width = xpPct + "%";
+
+      // Playercard modal's HUD — a second copy of the header HUD above (own
+      // ids since a Bootstrap modal can be hidden but still lives in the
+      // DOM), kept live the same way regardless of whether the modal's open.
+      $("pcHudName").textContent = state.me.user;
+      $("pcHudName").classList.remove("name-green", "name-blue", "name-red", "name-gold");
+      if (tier) $("pcHudName").classList.add(tier);
+      $("pcLevelCircle").classList.remove("name-green", "name-blue", "name-red", "name-gold");
+      if (tier) $("pcLevelCircle").classList.add(tier);
+      $("pcLevel").textContent = state.me.level;
+      $("pcHealthText").textContent = `${state.me.health} / ${state.me.maxHealth}`;
+      $("pcHealthBar").style.width = Math.max(0, Math.min(100, hpPct)) + "%";
+      $("pcShieldText").textContent = `${state.me.shield} / ${state.me.maxShield}`;
+      $("pcShieldBar").style.width = Math.max(0, Math.min(100, shieldPct)) + "%";
+      $("pcManaText").textContent = `${state.me.mana} / ${state.me.maxMana}`;
+      $("pcManaBar").style.width = Math.max(0, Math.min(100, manaPct)) + "%";
+      $("pcXpText").textContent = `${state.me.xp} / ${state.me.nextLevelCost}`;
+      $("pcXpBar").style.width = xpPct + "%";
 
       $("meAcc").textContent = state.me.acc;
       $("meGold").textContent = state.me.gold;
@@ -1172,7 +1355,7 @@
         }
       }
 
-      // Leveling controls (in the Player Info modal).
+      // Leveling controls (in the Playercard modal).
       $("meLevelInfo").textContent = `— level ${state.me.level}, next: ${state.me.nextLevelCost} XP`;
       $("btnLevelUp").textContent = `Level Up (${state.me.nextLevelCost} XP)`;
       $("btnLevelUp").disabled = !state.me.canLevel;
@@ -1877,7 +2060,7 @@
 
     $("btnCallZombie").addEventListener("click", (e) => postAction("/api/hunt/call-zombie", e.currentTarget));
     $("btnShop").addEventListener("click", () => openShop("items"));
-    $("btnInventory").addEventListener("click", () => openInventory());
+    $("btnInventory").addEventListener("click", () => openToolbelt());
 
     // ----- World Map modal -----
     // Only locations reachable from here are listed, each with a color-coded
@@ -2100,11 +2283,11 @@
       mapModal.show();
     });
 
-    let statsModal = null;
-    $("btnPlayerInfo").addEventListener("click", () => {
-      if (!statsModal) statsModal = new bootstrap.Modal($("statsModal"));
-      statsModal.show();
-    });
+    // Player Info dropdown: Playercard (HUD + read-only doll + skills),
+    // Armor Select (interactive doll), Backpack — see openPlayercard/
+    // openArmorSelect/openBackpack further down (near loadInventory).
+    let playercardModal = null;
+    $("btnOpenPlayercard").addEventListener("click", () => openPlayercard());
 
     // -------------------------
     // Spells modal (magic.js MAGIC_SPELLS, via GET /api/spells + POST /api/spell/cast)
@@ -2116,8 +2299,8 @@
       spellsModal.show();
     });
 
-    // Human line for a spell's effect, shared by the cast modal, the Magic
-    // Table, and the Player Info Spells tab.
+    // Human line for a spell's effect, shared by the cast modal and the
+    // Magic Table.
     function spellDetailOf(s){
       return s.type === "attack" ? `${s.effect.accuracy}% acc · up to ${s.effect.targets} target${s.effect.targets === 1 ? "" : "s"}` :
         s.type === "armor"  ? `+${s.effect.ap} AP (temporary)` :
@@ -2150,9 +2333,9 @@
       });
     }
 
-    // Heal target picker for aid-type spells (Healing Touch) — same
-    // hide/reopen convention as openArmorPicker, since stacking a second
-    // Bootstrap modal directly on top corrupts the modal/backdrop state.
+    // Heal target picker for aid-type spells (Healing Touch) — hides the
+    // Spells modal while open, since stacking a second Bootstrap modal
+    // directly on top corrupts the modal/backdrop state.
     let healPickerModal = null, returnToSpells = false;
     $("healPickerModal").addEventListener("hidden.bs.modal", () => {
       if (!returnToSpells) return;
@@ -2200,8 +2383,7 @@
     // -------------------------
     // Weapons modal: opened per-category from a slot button in the Loadout
     // card (openWeaponPicker) — lists only owned items matching that
-    // category, each with an Equip/Unequip toggle. Mirrors openArmorPicker's
-    // shared-modal-filtered-by-param pattern.
+    // category, each with an Equip/Unequip toggle.
     // -------------------------
     let weaponsModal = null;
     const CATEGORY_LABEL = { gun: "Gun", melee: "Melee Weapon", fist: "Fist Weapon", ranged: "Ranged Weapon", throwing: "Throwing Weapon", zombie: "Zombie Weapon" };
@@ -2213,6 +2395,22 @@
       renderWeaponsModal(category);
       if (!weaponsModal) weaponsModal = new bootstrap.Modal($("weaponsModal"));
       weaponsModal.show();
+    }
+
+    // #slotGrid is a Bootstrap Collapse (animated height), not a plain
+    // d-none/invisible toggle, so the Reload/Unjam row below slides up to
+    // fill the space while the grid is hidden instead of leaving it blank.
+    let slotGridCollapseObj = null;
+    function slotGridCollapse(){
+      if (!slotGridCollapseObj) slotGridCollapseObj = new bootstrap.Collapse($("slotGrid"), { toggle: false });
+      return slotGridCollapseObj;
+    }
+
+    // Equip/unequip picked (state already refreshed by postAndRefresh) —
+    // close the modal and re-collapse the slot grid instead of leaving both open.
+    function closeWeaponPicker(){
+      if (weaponsModal) weaponsModal.hide();
+      slotGridCollapse().hide();
     }
 
     function renderWeaponsModal(category){
@@ -2229,7 +2427,7 @@
             btnLabel: equipped ? "Equipped" : "Equip",
             btnClass: "btn-primary",
             disabled: equipped,
-            onClick: async () => { await postAndRefresh("/api/inventory/equip", { item: g.name }); await loadInventory(); renderWeaponsModal(category); },
+            onClick: async () => { await postAndRefresh("/api/inventory/equip", { item: g.name }); closeWeaponPicker(); },
           }));
         });
         if (!(invData.guns || []).length) list.innerHTML = emptyRow("No guns owned yet.");
@@ -2254,7 +2452,7 @@
           btnClass: equippedHere ? "btn-outline-secondary" : "btn-primary",
           onClick: async () => {
             await postAndRefresh("/api/weapon/equip", { slot: category, item: equippedHere ? "none" : w.name });
-            await loadInventory(); renderWeaponsModal(category);
+            closeWeaponPicker();
           },
         }));
       });
@@ -2315,108 +2513,200 @@
       });
     }
 
-    // ----- Player Info modal: Skills / Spells / Paperdoll tabs -----
-    let infoTab = "skills";
-    $("infoTabs").querySelectorAll("[data-infotab]").forEach(b =>
-      b.addEventListener("click", () => {
-        infoTab = b.dataset.infotab;
-        $("infoTabs").querySelectorAll("[data-infotab]").forEach(x => x.classList.toggle("active", x.dataset.infotab === infoTab));
-        $("skillList").classList.toggle("d-none", infoTab !== "skills");
-        $("knownSpellList").classList.toggle("d-none", infoTab !== "spells");
-        $("paperdollList").classList.toggle("d-none", infoTab !== "paperdoll");
-        if (infoTab === "spells") renderKnownSpells();
-        if (infoTab === "paperdoll") renderPaperdoll();
-      }));
+    // ----- Armor Select modal: interactive CSS paperdoll (ported from
+    // public/css_paperdoll_test.html revision 2 / the admin.html port) — the
+    // sole armor-equip surface now (the Backpack's old Armor tab is gone).
+    // Also backs the read-only doll in the Playercard modal, via the shared
+    // armorsBySlot() adapter below. -----
+    let armorSelectModal = null, backpackModal = null;
+    let asSlot = "head";
 
-    // ----- Paperdoll tab: one line per slot, click the equipped item to swap
-    // over to a picker modal (Player Info hides while it's open — stacking a
-    // second Bootstrap modal on top left the page's modal/backdrop state
-    // corrupted, silently breaking every modal after it). Closing the picker
-    // (any way — selection, X, backdrop, Escape) reopens Player Info on the
-    // Paperdoll tab. -----
-    let armorPickerModal = null;
-    async function renderPaperdoll(){
-      const wrap = $("paperdollList");
-      wrap.innerHTML = `<div class="muted-mono">Loading…</div>`;
-      await loadInventory();
-      wrap.innerHTML = ARMOR_PIECES.map((slot) => {
-        const equippedName = invData.equippedArmor?.[slot];
-        const item = equippedName ? (invData.armors || []).find(a => a.name === equippedName) : null;
-        return `
-          <div class="d-flex justify-content-between align-items-center mb-2 p-2 border rounded" style="border-color: rgba(255,255,255,.12) !important;">
-            <span class="muted-mono">${escapeHtml(ARMOR_SLOT_LABELS[slot])}</span>
-            <button class="btn btn-sm btn-outline-light py-0" data-paperdollslot="${slot}" type="button">
-              ${item
-                ? `${escapeHtml(item.label)} <span class="badge rounded-pill ${condTierOf(item.condition)} ms-1">${item.condition <= 0 ? "BROKEN" : `${item.condition}%`}</span>`
-                : `<span class="text-muted">None equipped</span>`}
-            </button>
-          </div>`;
-      }).join("");
-      wrap.querySelectorAll("[data-paperdollslot]").forEach(btn =>
-        btn.addEventListener("click", () => openArmorPicker(btn.dataset.paperdollslot)));
+    // Adapts /api/inventory's flat armors array + equippedArmor map into the
+    // {slot, equipped, owned:[...]} shape both dolls render from.
+    function armorsBySlot(){
+      return ARMOR_PIECES.map(slot => ({
+        slot,
+        equipped: invData?.equippedArmor?.[slot] || null,
+        owned: (invData?.armors || []).filter(a => a.piece === slot),
+      }));
     }
 
-    // Switches away from the Player Info modal to the picker (rather than
-    // stacking a second Bootstrap modal on top of it, which left the page's
-    // modal/backdrop state corrupted — subsequent modals silently failed to
-    // open at all). Reopens Player Info on the Paperdoll tab once the picker
-    // closes, however it closes (selection, X, backdrop click, Escape).
-    let returnToPaperdoll = false;
-    $("armorPickerModal").addEventListener("hidden.bs.modal", async () => {
-      if (!returnToPaperdoll) return;
-      returnToPaperdoll = false;
-      await renderPaperdoll();
-      if (!statsModal) statsModal = new bootstrap.Modal($("statsModal"));
-      statsModal.show();
+    const DOLL_SHAPE_SELECTORS = {
+      head: ".doll-head", torso: ".doll-torso", hands: ".doll-arm-left, .doll-arm-right",
+      legs: ".doll-lower .doll-leg", boots: ".doll-feet .doll-foot", shield: ".doll-dot.doll-shield",
+    };
+    // Tints each slot's shape element(s), scoped under `scopeSelector` (the
+    // page has two dolls — Playercard's and Armor Select's), with the
+    // equipped item's registry color, or clears back to the CSS default when
+    // empty/unmapped. Tiers flagged `radioactive` (zombie armor) get the
+    // animated shimmer class instead of a flat tint.
+    function applyDollColors(scopeSelector, bySlot){
+      Object.entries(DOLL_SHAPE_SELECTORS).forEach(([slot, selector]) => {
+        const entry = bySlot.find(a => a.slot === slot);
+        const eqItem = entry?.equipped ? (entry.owned || []).find(o => o.name === entry.equipped) : null;
+        const color = eqItem?.color || null;
+        const radioactive = Boolean(eqItem?.radioactive);
+        document.querySelectorAll(`${scopeSelector} ${selector}`).forEach(el => {
+          el.classList.toggle("doll-radioactive", radioactive);
+          el.style.backgroundColor = (!radioactive && color) ? `${color}55` : "";
+        });
+      });
+    }
+
+    function asRenderCard(slot, bySlot){
+      const entry = bySlot.find(a => a.slot === slot);
+      const eq = entry?.equipped;
+      const eqItem = eq ? (entry.owned || []).find(o => o.name === eq) : null;
+      const selected = slot === asSlot;
+      return `
+        <div class="doll-card${selected ? " doll-card-selected" : ""}" data-slot="${slot}" id="asCard-${slot}">
+          <div class="doll-card-label">${escapeHtml(ARMOR_SLOT_LABELS[slot])}</div>
+          <div class="doll-card-item">${eq ? escapeHtml(eqItem?.label || eq) : '<span class="doll-empty">(empty)</span>'}</div>
+          ${eqItem ? `
+          <div class="doll-card-badges">
+            <span class="badge rounded-pill text-bg-info">AP ${eqItem.ap}</span>
+            <span class="badge rounded-pill text-bg-secondary">Def ${eqItem.defense}</span>
+            <span class="badge rounded-pill ${condTierOf(eqItem.condition)}">${eqItem.condition <= 0 ? "BROKEN" : `${eqItem.condition}%`}</span>
+          </div>` : ``}
+        </div>`;
+    }
+
+    let asResizeTimer;
+    function drawAsDollLines(){
+      const svg = $("asDollLines");
+      const row = $("asPaperdollRow");
+      if (!svg || !row) return;
+      const rowRect = row.getBoundingClientRect();
+      svg.setAttribute("viewBox", `0 0 ${rowRect.width} ${rowRect.height}`);
+      svg.innerHTML = "";
+      ARMOR_PIECES.forEach((slot) => {
+        const dot = row.querySelector(`.doll-dot[data-slot="${slot}"]`);
+        const card = $(`asCard-${slot}`);
+        if (!dot || !card) return;
+        const dr = dot.getBoundingClientRect();
+        const cr = card.getBoundingClientRect();
+        const dx = dr.left + dr.width / 2 - rowRect.left;
+        const dy = dr.top + dr.height / 2 - rowRect.top;
+        const cardCenterX = cr.left + cr.width / 2 - rowRect.left;
+        const cx = cardCenterX > dx ? (cr.left - rowRect.left) : (cr.right - rowRect.left);
+        const cy = cr.top + cr.height / 2 - rowRect.top;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", dx); line.setAttribute("y1", dy);
+        line.setAttribute("x2", cx); line.setAttribute("y2", cy);
+        line.setAttribute("class", "doll-line" + (slot === asSlot ? " doll-line-selected" : ""));
+        svg.appendChild(line);
+      });
+    }
+    window.addEventListener("resize", () => {
+      clearTimeout(asResizeTimer);
+      asResizeTimer = setTimeout(drawAsDollLines, 80);
     });
 
-    function openArmorPicker(slot){
-      $("armorPickerSlot").textContent = ARMOR_SLOT_LABELS[slot];
-      const options = (invData.armors || []).filter(a => a.piece === slot);
-      const list = $("armorPickerList");
-      list.innerHTML = options.length ? options.map(a => `
-        <div class="list-group-item d-flex justify-content-between align-items-center" style="background:#0b0f14; border-color: rgba(255,255,255,.12);">
+    function renderArmorSelect(){
+      const bySlot = armorsBySlot();
+      $("asColLeft").innerHTML = ["head", "hands", "legs"].map(s => asRenderCard(s, bySlot)).join("");
+      $("asColRight").innerHTML = ["torso", "boots", "shield"].map(s => asRenderCard(s, bySlot)).join("");
+      applyDollColors("#asPaperdollRow", bySlot);
+
+      document.querySelectorAll("#asPaperdollRow .doll-dot[data-slot]").forEach((dot) => {
+        const entry = bySlot.find(a => a.slot === dot.dataset.slot);
+        dot.classList.toggle("empty", !entry?.equipped);
+        dot.classList.toggle("selected", dot.dataset.slot === asSlot);
+        dot.onclick = () => { asSlot = dot.dataset.slot; renderArmorSelect(); };
+      });
+      document.querySelectorAll("#asColLeft [data-slot], #asColRight [data-slot]").forEach((card) => {
+        card.onclick = () => { asSlot = card.dataset.slot; renderArmorSelect(); };
+      });
+
+      $("asSelectedSlot").textContent = ARMOR_SLOT_LABELS[asSlot];
+      const entry = bySlot.find(a => a.slot === asSlot);
+      const wrap = $("asOwnedList");
+      wrap.innerHTML = "";
+      const options = entry?.owned || [];
+      if (!options.length) { wrap.innerHTML = `<div class="muted-mono">Nothing owned for this slot yet.</div>`; }
+      options.forEach(a => {
+        const row = document.createElement("div");
+        row.className = "d-flex justify-content-between align-items-center mb-2 p-2 border rounded";
+        row.style.cssText = "border-color: rgba(255,255,255,.12) !important;";
+        row.innerHTML = `
           <div>
             <div class="fw-semibold">${escapeHtml(a.label)} <span class="badge text-bg-dark border">AP ${a.ap}</span>
               <span class="badge rounded-pill ${condTierOf(a.condition)}">${a.condition <= 0 ? "BROKEN" : `${a.condition}%`}</span></div>
             <div class="muted-mono" style="font-size:.75rem;">Def ${a.defense}${a.defenseOk ? "" : " (locked)"} · x${a.quantity}</div>
-          </div>
-          ${a.equipped
-            ? `<button class="btn btn-sm btn-outline-secondary" data-pick="">Unequip</button>`
-            : a.defenseOk
-              ? `<button class="btn btn-sm btn-outline-primary" data-pick="${escapeHtml(a.name)}">Equip</button>`
-              : `<span class="muted-mono text-nowrap" style="font-size:.75rem;">Requires Defense ${a.defense}</span>`}
-        </div>`).join("")
-        : `<div class="list-group-item muted-mono" style="background:#0b0f14;">Nothing owned for this slot yet.</div>`;
-      list.querySelectorAll("[data-pick]").forEach(btn =>
-        btn.addEventListener("click", async (e) => {
-          await postAndRefresh("/api/armor/equip", { item: e.currentTarget.dataset.pick, slot });
-          armorPickerModal.hide();
-        }));
-      returnToPaperdoll = true;
-      if (!armorPickerModal) armorPickerModal = new bootstrap.Modal($("armorPickerModal"));
-      if (statsModal) statsModal.hide();
-      armorPickerModal.show();
-    }
-
-    async function renderKnownSpells(){
-      const wrap = $("knownSpellList");
-      wrap.innerHTML = `<div class="muted-mono">Loading…</div>`;
-      const data = await fetchJson("/api/spells", { spells: [] });
-      const known = (data.spells || []).filter(s => s.learned);
-      wrap.innerHTML = "";
-      if (!known.length) { wrap.innerHTML = `<div class="muted-mono">No spells learned — visit the Magic Table in Town.</div>`; return; }
-      known.forEach(s => {
-        const detail = spellDetailOf(s);
-        const row = document.createElement("div");
-        row.className = "p-2 border rounded mb-2";
-        row.style.cssText = "border-color: rgba(255,255,255,.12) !important;";
-        row.innerHTML = `
-          <div class="fw-semibold">${escapeHtml(s.name)} <span class="badge text-bg-secondary">${escapeHtml(s.type)}</span> <span class="badge badge-purple">${s.cost} mana</span></div>
-          <div class="muted-mono">${escapeHtml(s.desc)}${detail ? ` · ${detail}` : ""} · Magic Lv ${s.level}</div>`;
+          </div>`;
+        const btnWrap = document.createElement("div");
+        if (a.equipped) {
+          btnWrap.innerHTML = `<button class="btn btn-sm btn-outline-secondary" type="button">Unequip</button>`;
+          btnWrap.querySelector("button").addEventListener("click", async () => {
+            await postAndRefresh("/api/armor/equip", { item: "", slot: asSlot });
+            await loadInventory(); renderArmorSelect();
+          });
+        } else if (a.defenseOk) {
+          btnWrap.innerHTML = `<button class="btn btn-sm btn-outline-primary" type="button">Equip</button>`;
+          btnWrap.querySelector("button").addEventListener("click", async () => {
+            await postAndRefresh("/api/armor/equip", { item: a.name, slot: asSlot });
+            await loadInventory(); renderArmorSelect();
+          });
+        } else {
+          btnWrap.innerHTML = `<span class="muted-mono text-nowrap" style="font-size:.75rem;">Requires Defense ${a.defense}</span>`;
+        }
+        row.appendChild(btnWrap);
         wrap.appendChild(row);
       });
+
+      requestAnimationFrame(drawAsDollLines);
     }
+
+    async function openArmorSelect(){
+      if (!armorSelectModal) armorSelectModal = new bootstrap.Modal($("armorSelectModal"));
+      await loadInventory();
+      renderArmorSelect();
+      armorSelectModal.show();
+    }
+    $("btnOpenArmorSelect").addEventListener("click", () => openArmorSelect());
+
+    // ----- Playercard modal: HUD/leveling/currency/skills stay live via
+    // renderMe()/renderSkills() (already run on every state poll); the
+    // read-only doll needs invData, fetched fresh on open. -----
+    // Read-only info card — same shape as asRenderCard, minus the
+    // click/selected-state styling (nothing here is clickable).
+    function pcRenderCard(slot, bySlot){
+      const entry = bySlot.find(a => a.slot === slot);
+      const eq = entry?.equipped;
+      const eqItem = eq ? (entry.owned || []).find(o => o.name === eq) : null;
+      return `
+        <div class="doll-card">
+          <div class="doll-card-label">${escapeHtml(ARMOR_SLOT_LABELS[slot])}</div>
+          <div class="doll-card-item">${eq ? escapeHtml(eqItem?.label || eq) : '<span class="doll-empty">(empty)</span>'}</div>
+          ${eqItem ? `
+          <div class="doll-card-badges">
+            <span class="badge rounded-pill text-bg-info">AP ${eqItem.ap}</span>
+            <span class="badge rounded-pill text-bg-secondary">Def ${eqItem.defense}</span>
+            <span class="badge rounded-pill ${condTierOf(eqItem.condition)}">${eqItem.condition <= 0 ? "BROKEN" : `${eqItem.condition}%`}</span>
+          </div>` : ``}
+        </div>`;
+    }
+    function renderPcDoll(){
+      const bySlot = armorsBySlot();
+      $("pcColRight").innerHTML = ["head", "torso", "hands", "legs", "boots", "shield"]
+        .map(s => pcRenderCard(s, bySlot)).join("");
+      applyDollColors("#pcPaperdollRow", bySlot);
+    }
+    async function openPlayercard(){
+      if (!playercardModal) playercardModal = new bootstrap.Modal($("playercardModal"));
+      await loadInventory();
+      renderPcDoll();
+      playercardModal.show();
+    }
+
+    // ----- Backpack modal (Player Info dropdown -> Backpack) -----
+    async function openBackpack(){
+      if (!backpackModal) backpackModal = new bootstrap.Modal($("backpackModal"));
+      await loadInventory();
+      renderBackpack();
+      backpackModal.show();
+    }
+    $("btnOpenBackpack").addEventListener("click", () => openBackpack());
     $("btnLevelUp").addEventListener("click", (e) => postAction("/api/level/up", e.currentTarget));
     $("btnLevelMax").addEventListener("click", (e) => postAction("/api/level/max", e.currentTarget));
     $("btnInsideOutside").addEventListener("click", (e) => postAction("/api/base/toggle", e.currentTarget));
@@ -2432,14 +2722,22 @@
       else postAction("/api/action/unjam", e.currentTarget);
     });
 
+    // "Weapon" button beside Shoot: reveals #slotGrid (collapsed by default);
+    // clicking it again re-collapses it manually.
+    $("btnWeaponToggle").addEventListener("click", () => slotGridCollapse().toggle());
+
     // Slot grid: a main [data-slot] button opens the category-filtered
     // weapon picker; a [data-slotswap] button just switches the active
-    // combat slot to whatever's already equipped there (no picker).
+    // combat slot to whatever's already equipped there (no picker). Either
+    // one is a completed selection, so the grid collapses itself again after.
     $("slotGrid").addEventListener("click", (e) => {
       const slotBtn = e.target.closest("[data-slot]");
       if (slotBtn) { openWeaponPicker(slotBtn.dataset.slot); return; }
       const swapBtn = e.target.closest("[data-slotswap]");
-      if (swapBtn && !swapBtn.disabled) postAndRefresh("/api/weapon/select", { slot: swapBtn.dataset.slotswap });
+      if (swapBtn && !swapBtn.disabled) {
+        postAndRefresh("/api/weapon/select", { slot: swapBtn.dataset.slotswap });
+        slotGridCollapse().hide();
+      }
     });
 
     // Targeted Zombies box: Target/Selected buttons switch which pool
@@ -2637,49 +2935,52 @@
     }
 
     // -------------------------
-    // Inventory modal: Toolbag (quick-use) + Backpack (typed sub-tabs)
+    // Shared inventory fetch — feeds the Playercard doll, Armor Select,
+    // Backpack, and Toolbelt modals. Each open*() function awaits this then
+    // calls its own render function; it doesn't render anything itself since
+    // more than one modal depends on it now.
     // -------------------------
-    let invModal = null, invData = null, invTab = "toolbag", packTab = "guns";
-
-    function openInventory(){
-      if (!invModal) invModal = new bootstrap.Modal($("invModal"));
-      loadInventory();
-      invModal.show();
-    }
+    let invData = null, packTab = "guns";
 
     async function loadInventory(){
       invData = await fetchJson("/api/inventory", { items: [], usable: [], guns: [] });
-      renderInventoryModal();
     }
 
-    $("invTabs").querySelectorAll("[data-invtab]").forEach(b =>
-      b.addEventListener("click", () => { invTab = b.dataset.invtab; renderInventoryModal(); }));
     $("packTabs").querySelectorAll("[data-packtab]").forEach(b =>
-      b.addEventListener("click", () => { packTab = b.dataset.packtab; renderInventoryModal(); }));
+      b.addEventListener("click", () => { packTab = b.dataset.packtab; renderBackpack(); }));
 
-    function renderInventoryModal(){
-      $("invTabs").querySelectorAll("[data-invtab]").forEach(b =>
-        b.classList.toggle("active", b.dataset.invtab === invTab));
-      $("invToolbag").classList.toggle("d-none", invTab !== "toolbag");
-      $("invBackpack").classList.toggle("d-none", invTab !== "backpack");
-      if (!invData) return;
-      if (invTab === "toolbag") renderToolbag();
-      else renderBackpack();
+    // -------------------------
+    // Toolbelt modal (renamed from Inventory): the quick-access combat
+    // consumables, grouped into Ammo/Repair/Potions by the server-computed
+    // `bucket` field (item_backbone.js `use` effect verb -> bucket, see
+    // TOOLBAG_BUCKET_BY_USE_KEY in server.js).
+    // -------------------------
+    let toolbeltModal = null, toolbeltTab = "ammo";
+
+    function openToolbelt(){
+      if (!toolbeltModal) toolbeltModal = new bootstrap.Modal($("toolbeltModal"));
+      loadInventory().then(renderToolbelt);
+      toolbeltModal.show();
     }
 
-    // Toolbag: the quick-access combat consumables (registry `toolbag` flag).
-    function renderToolbag(){
-      const list = $("toolbagList");
+    $("toolbeltTabs").querySelectorAll("[data-toolbelttab]").forEach(b =>
+      b.addEventListener("click", () => { toolbeltTab = b.dataset.toolbelttab; renderToolbelt(); }));
+
+    function renderToolbelt(){
+      $("toolbeltTabs").querySelectorAll("[data-toolbelttab]").forEach(b =>
+        b.classList.toggle("active", b.dataset.toolbelttab === toolbeltTab));
+      const list = $("toolbeltList");
       list.innerHTML = "";
-      const rows = invData.usable.filter(u => u.toolbag);
-      if (!rows.length) { list.innerHTML = emptyRow("Toolbag is empty."); return; }
+      if (!invData) return;
+      const rows = invData.usable.filter(u => u.toolbag && u.bucket === toolbeltTab);
+      if (!rows.length) { list.innerHTML = emptyRow("Nothing here."); return; }
       rows.forEach(u => list.appendChild(actionRow({
         title: `${escapeHtml(u.label)} <span class="badge text-bg-secondary">x${u.quantity}</span>`,
         sub: u.desc ? escapeHtml(u.desc) : "",
         btnLabel: "Use",
         btnClass: "btn-warning text-dark",
         disabled: u.quantity <= 0,
-        onClick: async () => { await postAndRefresh("/api/inventory/use", { item: u.name }); loadInventory(); }
+        onClick: async () => { await postAndRefresh("/api/inventory/use", { item: u.name }); await loadInventory(); renderToolbelt(); }
       })));
     }
 
@@ -2714,45 +3015,7 @@
         body.querySelectorAll("[data-equip]").forEach(btn =>
           btn.addEventListener("click", async (e) => {
             await postAndRefresh("/api/inventory/equip", { item: e.currentTarget.dataset.equip });
-            loadInventory();
-          }));
-
-      } else if (packTab === "armor") {
-        // Grouped by paperdoll slot (ARMOR_PIECES order): Equip swaps that
-        // slot, the equipped row offers Unequip. Selling keeps the worn piece
-        // (server-enforced; the modal max matches).
-        const rows = invData.armors || [];
-        if (!rows.length) { body.innerHTML = packEmpty("No armor — smith some at the forge."); return; }
-        const bySlot = {};
-        rows.forEach((a, idx) => (bySlot[a.piece] ||= []).push({ ...a, idx }));
-        body.innerHTML = ARMOR_PIECES.filter(s => bySlot[s]).map(slot => `
-          <div class="muted-mono mt-2 mb-1" style="font-size:.7rem;">${escapeHtml(ARMOR_SLOT_LABELS[slot])}</div>
-          ${packTable(["Armor", "AP", "Def", "Cond", "Qty", "", ""], bySlot[slot].map((a) => `
-          <tr>
-            <td class="fw-semibold">${escapeHtml(a.label)}</td>
-            <td><span class="badge text-bg-dark border">AP ${a.ap}</span></td>
-            <td><span class="badge ${a.defenseOk ? "text-bg-dark border" : "text-bg-danger"}" title="Defense level required to wear">Def ${a.defense}</span></td>
-            <td><span class="badge rounded-pill ${condTierOf(a.condition)}">${a.condition <= 0 ? "BROKEN" : `${a.condition}%`}</span></td>
-            <td>x${a.quantity}</td>
-            <td class="text-end">${a.equipped
-              ? `<span class="badge text-bg-primary">equipped</span>
-                 <button class="btn btn-sm btn-outline-secondary py-0" data-armor="" data-armorslot="${slot}">Unequip</button>`
-              : a.defenseOk
-                ? `<button class="btn btn-sm btn-outline-primary py-0" data-armor="${escapeHtml(a.name)}" data-armorslot="${slot}">Equip</button>`
-                : `<span class="muted-mono text-nowrap" style="font-size:.72rem;">Requires Defense ${a.defense}</span>`}</td>
-            <td class="text-end">${a.quantity > (a.equipped ? 1 : 0)
-              ? `<button class="btn btn-sm btn-outline-success py-0" data-sellarmor="${a.idx}">Sell</button>` : ""}</td>
-          </tr>`).join(""))}`).join("");
-        body.querySelectorAll("[data-armor]").forEach(btn =>
-          btn.addEventListener("click", async (e) => {
-            await postAndRefresh("/api/armor/equip", { item: e.currentTarget.dataset.armor, slot: e.currentTarget.dataset.armorslot });
-            loadInventory();
-          }));
-        body.querySelectorAll("[data-sellarmor]").forEach(btn =>
-          btn.addEventListener("click", (e) => {
-            const a = rows[Number(e.currentTarget.dataset.sellarmor)];
-            // The worn piece can't be sold — cap the modal at qty-1 while equipped.
-            openSell({ item_name: a.name, quantity: a.equipped ? a.quantity - 1 : a.quantity, value: a.value });
+            await loadInventory(); renderBackpack();
           }));
 
       } else if (packTab === "tools") {
@@ -2774,7 +3037,7 @@
         body.querySelectorAll("[data-use]").forEach(btn =>
           btn.addEventListener("click", async (e) => {
             await postAndRefresh("/api/inventory/use", { item: e.currentTarget.dataset.use });
-            loadInventory();
+            await loadInventory(); renderBackpack();
           }));
 
       } else if (packTab === "treasure") { // rare finds — every row sells for gold
@@ -2800,7 +3063,7 @@
         body.querySelectorAll("[data-use]").forEach(btn =>
           btn.addEventListener("click", async (e) => {
             await postAndRefresh("/api/inventory/use", { item: e.currentTarget.dataset.use });
-            loadInventory();
+            await loadInventory(); renderBackpack();
           }));
 
       } else { // materials: crafting inputs & trade goods (treasure has its own tab)
@@ -2839,7 +3102,7 @@
       const qty = sellQtyClamped();
       sellModal.hide();
       await postAndRefresh("/api/inventory/sell", { item: sellCtx.item_name, qty: qty >= sellCtx.quantity ? "all" : qty });
-      loadInventory();
+      await loadInventory(); renderBackpack();
     });
 
     // Initial render + live polling

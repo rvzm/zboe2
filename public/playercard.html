@@ -84,6 +84,55 @@
        badge-inside-muted-mono combo rendered near-unreadably small. */
     .skill-label { font-size: .95rem; color: rgba(255,255,255,.9); }
     .skill-lv { font-size: .8rem; }
+
+    /* ---- CSS paperdoll (ported from public/css_paperdoll_test.html / the
+         admin.html port and game.html's Playercard/Armor Select modals) —
+         read-only here, same as game.html's Playercard doll. Doll fixed on
+         the left, all 6 equipped-piece label cards stacked in one column to
+         the right (no SVG callout lines/dots — replaced the two-column
+         line-and-dot layout from css_paperdoll_test_r1.html with this
+         simpler doll-left/boxes-right arrangement). ---- */
+    .paperdoll-row { position: relative; display: flex; align-items: flex-start; justify-content: flex-start; gap: 2rem; flex-wrap: wrap; padding: 1rem 0 1.5rem; }
+    .doll-col { display: flex; flex-direction: column; gap: 1.1rem; width: 190px; z-index: 2; }
+    .doll-col-right { align-items: flex-start; flex: 1 1 190px; }
+    .doll-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14); border-radius: .5rem; padding: .5rem .7rem; width: 100%; }
+    .doll-card-label { font-family: ui-monospace, Menlo, Consolas, monospace; color: rgba(255,255,255,.55); font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+    .doll-card-item { font-weight: 600; font-size: .92rem; color: #fff; }
+    .doll-empty { font-weight: 400; color: rgba(255,255,255,.4); font-style: italic; }
+    .doll-card-badges { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .35rem; }
+    .doll-stage { position: relative; z-index: 2; width: 280px; flex: 0 0 auto; }
+    .doll-figure { display: flex; flex-direction: column; align-items: center; width: 100%; }
+    .doll-head { position: relative; width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); margin-bottom: 4px; }
+    .doll-upper { position: relative; width: 264px; height: 132px; }
+    .doll-torso { position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 92px; height: 128px; border-radius: 34px 34px 16px 16px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-arm { position: absolute; top: 10px; width: 86px; height: 20px; border-radius: 10px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-arm-left { left: 0; }
+    .doll-arm-right { right: 0; }
+    .doll-lower { position: relative; display: flex; gap: 10px; margin-top: 2px; }
+    .doll-leg { width: 34px; height: 118px; border-radius: 14px 14px 8px 8px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-feet { position: relative; display: flex; gap: 20px; margin-top: 2px; }
+    .doll-foot { width: 40px; height: 18px; border-radius: 40% 40% 50% 10% / 60% 60% 100% 40%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28); }
+    .doll-dot.doll-shield { position: relative; width: 46px; height: 56px; margin-top: 14px; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.08); box-shadow: none; border-radius: 0; clip-path: polygon(50% 0%, 100% 14%, 100% 58%, 50% 100%, 0% 58%, 0% 14%); }
+    .doll-shield::after { content: ""; position: absolute; left: 50%; top: 10%; bottom: 16%; width: 2px; background: rgba(255,255,255,.3); transform: translateX(-50%); }
+    /* Zombie-tier gear (METALS' `radioactive` flag) — an animated neon-green
+       shimmer on the doll shape in place of the flat metal-color tint every
+       other tier gets (applyDollColors below). Reuses gold-shimmer's
+       background-position sweep, same technique as .shiny-name above.
+       The 3-class selector is needed for the shield: .doll-dot.doll-shield's
+       `background:` shorthand (2 classes) otherwise beats a plain
+       .doll-radioactive (1 class) on specificity and wins back to grey —
+       same trap the shield's clip-path override hit during the original
+       paperdoll build. */
+    .doll-radioactive, .doll-dot.doll-shield.doll-radioactive { background-image: linear-gradient(90deg, #0d3d05 0%, #39ff14 20%, #d4ffb8 50%, #39ff14 80%, #0d3d05 100%); background-size: 200% auto; animation: gold-shimmer 3.5s linear infinite, radioactive-pulse 2s ease-in-out infinite; }
+    @keyframes radioactive-pulse { 0%, 100% { box-shadow: 0 0 6px rgba(57,255,20,.5); } 50% { box-shadow: 0 0 18px rgba(57,255,20,.95); } }
+    @media (prefers-reduced-motion: reduce) { .doll-radioactive { animation: none; box-shadow: 0 0 10px rgba(57,255,20,.7); } }
+    .doll-dot { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: rgba(13,202,240,.85); border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 6px rgba(13,202,240,.7); z-index: 3; }
+    .doll-dot.empty { background: rgba(255,255,255,.3); box-shadow: none; }
+    .doll-head .doll-dot { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-torso .doll-dot { top: 38%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-arm-left .doll-dot { left: -5px; top: 50%; transform: translateY(-50%); }
+    .doll-lower .doll-dot { top: 42%; left: 50%; transform: translate(-50%, -50%); }
+    .doll-feet .doll-dot { bottom: -2px; left: 50%; transform: translate(-50%, 50%); }
   </style>
 </head>
 <body class="text-light">
@@ -212,6 +261,7 @@
                 <button class="btn btn-outline-light" data-maintab="potions" type="button">Potions</button>
                 <button class="btn btn-outline-light" data-maintab="spells" type="button">Spells</button>
                 <button class="btn btn-outline-light" data-maintab="quests" type="button">Quests</button>
+                <button class="btn btn-outline-light" data-maintab="paperdoll" type="button">Paperdoll</button>
               </div>
               <div class="card-body p-0">
 
@@ -250,6 +300,37 @@
                   <div class="soft-card border rounded p-2" style="flex: 3 1 0; overflow-y: auto;">
                     <div class="fw-semibold muted-mono mb-1">Completed</div>
                     <div id="questCompletedBody"></div>
+                  </div>
+                </div>
+
+                <!-- Paperdoll: read-only — equip/unequip only ever works on
+                     your own inventory via game.html's Armor Select modal.
+                     Doll on the left, all 6 equipped-piece info boxes
+                     stacked in one column to the right, inside this card. -->
+                <div id="mtPaperdoll" class="d-none p-2">
+                  <div class="paperdoll-row" id="pdPaperdollRow">
+                    <div class="doll-stage">
+                      <div class="doll-figure">
+                        <div class="doll-head"><span class="doll-dot" data-slot="head"></span></div>
+                        <div class="doll-upper">
+                          <div class="doll-torso"><span class="doll-dot" data-slot="torso"></span></div>
+                          <div class="doll-arm doll-arm-left"><span class="doll-dot" data-slot="hands"></span></div>
+                          <div class="doll-arm doll-arm-right"></div>
+                        </div>
+                        <div class="doll-lower">
+                          <div class="doll-leg"></div>
+                          <div class="doll-leg"></div>
+                          <span class="doll-dot" data-slot="legs"></span>
+                        </div>
+                        <div class="doll-feet">
+                          <div class="doll-foot"></div>
+                          <div class="doll-foot"></div>
+                          <span class="doll-dot" data-slot="boots"></span>
+                        </div>
+                        <div class="doll-dot doll-shield" data-slot="shield"></div>
+                      </div>
+                    </div>
+                    <div class="doll-col doll-col-right" id="pdColRight"></div>
                   </div>
                 </div>
 
@@ -385,6 +466,7 @@
       renderFlat("mtPotions", ["Item", "Qty"], data.potions, () => []);
       renderSpellsTab(data.spells || []);
       renderQuestsTab(data.quests || { active: null, started: [], completed: [] });
+      renderPaperdollTab(data.armors || []);
       currentCard = data;
     }
 
@@ -477,7 +559,7 @@
     $("mainTabs").querySelectorAll("[data-maintab]").forEach(b => b.addEventListener("click", () => {
       mainTab = b.dataset.maintab;
       $("mainTabs").querySelectorAll("button").forEach(x => x.classList.toggle("active", x === b));
-      ["Backpack", "Toolbelt", "Potions", "Spells", "Quests"].forEach(t => $("mt" + t).classList.toggle("d-none", t.toLowerCase() !== mainTab));
+      ["Backpack", "Toolbelt", "Potions", "Spells", "Quests", "Paperdoll"].forEach(t => $("mt" + t).classList.toggle("d-none", t.toLowerCase() !== mainTab));
     }));
     $("bpTabs").querySelectorAll("[data-bptab]").forEach(b => b.addEventListener("click", () => {
       bpTab = b.dataset.bptab;
@@ -506,6 +588,50 @@
         .filter(g => g.items.length)
         .map(g => `<tr><td colspan="6" class="fw-semibold muted-mono" style="background:rgba(255,255,255,.04);">${esc(ARMOR_SLOT_LABELS[g.slot])}</td></tr>${g.items.map(itemRow).join("")}`)
         .join("");
+    }
+
+    // ---- Paperdoll tab: read-only CSS paperdoll (ported from
+    // public/css_paperdoll_test.html / the admin.html + game.html ports) —
+    // no clicks, no owned-items list, just what's currently equipped, tinted
+    // by its metal's registry color (server-computed, null for unmapped
+    // tiers like "zombie"). Equip/unequip only ever happens on your own
+    // inventory via game.html's Armor Select modal. ----
+    function pdRenderCard(slot, armors){
+      const item = armors.find(a => a.piece === slot && a.equipped);
+      return `
+        <div class="doll-card" id="pdCard-${slot}">
+          <div class="doll-card-label">${esc(ARMOR_SLOT_LABELS[slot])}</div>
+          <div class="doll-card-item">${item ? esc(item.label) : '<span class="doll-empty">(empty)</span>'}</div>
+          ${item ? `
+          <div class="doll-card-badges">
+            <span class="badge rounded-pill text-bg-info">AP ${item.ap}</span>
+            <span class="badge rounded-pill text-bg-secondary">Def ${item.defense}</span>
+            <span class="badge rounded-pill text-bg-dark border">${item.condition}%</span>
+          </div>` : ``}
+        </div>`;
+    }
+    const PD_DOLL_SHAPE_SELECTORS = {
+      head: ".doll-head", torso: ".doll-torso", hands: ".doll-arm-left, .doll-arm-right",
+      legs: ".doll-lower .doll-leg", boots: ".doll-feet .doll-foot", shield: ".doll-dot.doll-shield",
+    };
+    function pdApplyDollColors(armors){
+      Object.entries(PD_DOLL_SHAPE_SELECTORS).forEach(([slot, selector]) => {
+        const item = armors.find(a => a.piece === slot && a.equipped);
+        const color = item?.color || null;
+        const radioactive = Boolean(item?.radioactive);
+        document.querySelectorAll(`#pdPaperdollRow ${selector}`).forEach(el => {
+          el.classList.toggle("doll-radioactive", radioactive);
+          el.style.backgroundColor = (!radioactive && color) ? `${color}55` : "";
+        });
+      });
+    }
+    function renderPaperdollTab(armors){
+      $("pdColRight").innerHTML = ["head", "torso", "hands", "legs", "boots", "shield"]
+        .map(s => pdRenderCard(s, armors)).join("");
+      document.querySelectorAll("#pdPaperdollRow .doll-dot[data-slot]").forEach(dot => {
+        dot.classList.toggle("empty", !armors.some(a => a.piece === dot.dataset.slot && a.equipped));
+      });
+      pdApplyDollColors(armors);
     }
 
     // Materials, grouped under a header row per metal (item_backbone.js's

@@ -40,6 +40,115 @@ equip_gun() {
     read -p "Press enter..."
 }
 
+# Interactive "equip armor": pick a paperdoll slot, then an item that fits it
+# (unowned ones marked [Force Ownership]); picking equips it (force-granting
+# if unowned). Mirrors equip_gun's shape.
+equip_armor() {
+    local user="$1"
+    local slot
+    slot=$(dialog --title "Equip Armor: $user" --menu "Select a slot" 15 55 6 \
+        head " " torso " " legs " " boots " " hands " " shield " " \
+        2>&1 >/dev/tty)
+    [ -z "$slot" ] && return
+
+    local lines
+    lines=$(cli players armoritems "$user" "$slot")
+    case "$lines" in
+        "No such user:"*|"Unknown armor slot:"*|"(no "*)
+            dialog --msgbox "$lines" 6 55 2>&1 >/dev/tty; return ;;
+    esac
+
+    local args=("(clear slot)" "unequip") name owned eq ap def label
+    while IFS='|' read -r name owned eq ap def; do
+        [ -z "$name" ] && continue
+        label=""
+        [ "$eq" = "1" ] && label="(equipped) "
+        if [ "$owned" = "1" ]; then label="${label}owned, AP $ap, Def $def"; else label="${label}[Force] AP $ap, Def $def"; fi
+        args+=("$name" "$label")
+    done <<< "$lines"
+
+    local choice
+    choice=$(dialog --title "Equip Armor: $user ($slot)" --menu "Select an item" 20 65 10 "${args[@]}" 2>&1 >/dev/tty)
+    [ -z "$choice" ] && return
+
+    clear
+    if [ "$choice" = "(clear slot)" ]; then
+        cli players setarmor "$user" "$slot" ""
+    else
+        local sel_owned
+        sel_owned=$(printf '%s\n' "$lines" | awk -F'|' -v n="$choice" '$1==n{print $2}')
+        if [ "$sel_owned" = "1" ]; then
+            cli players setarmor "$user" "$slot" "$choice"
+        else
+            cli players setarmor "$user" "$slot" "$choice" force
+        fi
+    fi
+    read -p "Press enter..."
+}
+
+# Interactive "equip weapon wheel slot": same shape as equip_armor, over the
+# 5 melee/fist/ranged/throwing/zombie slots. Equipping also makes the slot
+# active (setweapon calls setSelectedSlot), matching in-game behavior.
+equip_weapon() {
+    local user="$1"
+    local slot
+    slot=$(dialog --title "Equip Weapon: $user" --menu "Select a slot" 15 55 6 \
+        melee " " fist " " ranged " " throwing " " zombie " " \
+        2>&1 >/dev/tty)
+    [ -z "$slot" ] && return
+
+    local lines
+    lines=$(cli players weaponitems "$user" "$slot")
+    case "$lines" in
+        "No such user:"*|"Unknown weapon slot:"*|"(no weapons"*)
+            dialog --msgbox "$lines" 6 55 2>&1 >/dev/tty; return ;;
+    esac
+
+    local args=("(clear slot)" "unequip") name owned eq label
+    while IFS='|' read -r name owned eq; do
+        [ -z "$name" ] && continue
+        label=""
+        [ "$eq" = "1" ] && label="(equipped) "
+        if [ "$owned" = "1" ]; then label="${label}owned"; else label="${label}[Force Ownership]"; fi
+        args+=("$name" "$label")
+    done <<< "$lines"
+
+    local choice
+    choice=$(dialog --title "Equip Weapon: $user ($slot)" --menu "Select an item" 20 65 10 "${args[@]}" 2>&1 >/dev/tty)
+    [ -z "$choice" ] && return
+
+    clear
+    if [ "$choice" = "(clear slot)" ]; then
+        cli players setweapon "$user" "$slot" ""
+    else
+        local sel_owned
+        sel_owned=$(printf '%s\n' "$lines" | awk -F'|' -v n="$choice" '$1==n{print $2}')
+        if [ "$sel_owned" = "1" ]; then
+            cli players setweapon "$user" "$slot" "$choice"
+        else
+            cli players setweapon "$user" "$slot" "$choice" force
+        fi
+    fi
+    read -p "Press enter..."
+}
+
+# Teleport a player to any location, bypassing the travel graph.
+teleport_player() {
+    local user="$1"
+    local args=() key name
+    while IFS='|' read -r key name; do
+        [ -n "$key" ] && args+=("$key" "$name")
+    done < <(cli players locations)
+
+    local choice
+    choice=$(dialog --title "Teleport: $user" --menu "Select a destination" 20 55 12 "${args[@]}" 2>&1 >/dev/tty)
+    [ -z "$choice" ] && return
+
+    clear
+    cli players teleport "$user" "$choice"
+    read -p "Press enter..."
+}
+
 # Level control: +/-1/5/10 as full-stack forced level changes (stat + XP gains),
 # mirroring the web admin's level control. Distinct from a raw 'level' set.
 level_control() {
@@ -118,7 +227,10 @@ while true; do
         3  "Add Inventory Item" \
         4  "Remove Inventory Item" \
         5  "Set Equipped Gun" \
-        6  "Back" \
+        6  "Equip Armor" \
+        7  "Equip Weapon Wheel Slot" \
+        8  "Teleport Player" \
+        9  "Back" \
         2>&1 >/dev/tty)
 
     clear
@@ -165,6 +277,21 @@ while true; do
         5)
             PLAYER=$(pick_user)
             [ -n "$PLAYER" ] && equip_gun "$PLAYER"
+            ;;
+
+        6)
+            PLAYER=$(pick_user)
+            [ -n "$PLAYER" ] && equip_armor "$PLAYER"
+            ;;
+
+        7)
+            PLAYER=$(pick_user)
+            [ -n "$PLAYER" ] && equip_weapon "$PLAYER"
+            ;;
+
+        8)
+            PLAYER=$(pick_user)
+            [ -n "$PLAYER" ] && teleport_player "$PLAYER"
             ;;
 
         *)
